@@ -1,0 +1,32 @@
+# ---- Python ----
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ---- Virtual environment ----
+.venv/
+venv/
+ENV/
+env/
+
+# ---- Environment variables ----
+.env
+
+# ---- Data and logs ----
+data/*.zip
+logs/
+*.log
+
+# ---- Generated images ----
+# Defect and reference images
+dashboard/static/images/defects/*.jpg
+dashboard/static/images/reference/*.jpg
+dashboard/static/images/defects/*.png
+dashboard/static/images/reference/*.png
+
+# ---- IDE / OS files ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

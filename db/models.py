@@ -1,0 +1,204 @@
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    DECIMAL,
+    DateTime,
+    ForeignKey,
+    Boolean,
+    Text,
+    JSON,
+)
+from sqlalchemy.orm import relationship
+from db.connection import Base
+
+
+# -----------------------
+# Machine
+# -----------------------
+class Machine(Base):
+    __tablename__ = "machines"
+
+    machine_id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    location = Column(String(100))
+    description = Column(String(255))
+
+    reels = relationship("Reel", back_populates="machine", cascade="all, delete-orphan")
+
+
+# -----------------------
+# Reel
+# -----------------------
+class Reel(Base):
+    __tablename__ = "reels"
+
+    reel_id = Column(Integer, primary_key=True, autoincrement=True)
+    machine_id = Column(Integer, ForeignKey("machines.machine_id", ondelete="CASCADE"), index=True)
+
+    # New identifiers
+    reel_code = Column(String(50), index=True)
+    order_number = Column(String(50), index=True)
+    job_name = Column(String(100), index=True)
+
+    reel_start = Column(DECIMAL(10, 2))
+    reel_end = Column(DECIMAL(10, 2))
+
+    time_start = Column(DateTime, index=True)
+    time_end = Column(DateTime, index=True)
+
+    # Removed: inspection_state (now modeled in InspectionPhase)
+    format_length = Column(DECIMAL(10, 2))
+    format_width = Column(DECIMAL(10, 2))
+
+    # Relationships
+    machine = relationship("Machine", back_populates="reels")
+
+    sensitivity_sets = relationship("SensitivitySet", back_populates="reel", cascade="all, delete-orphan")
+    defects = relationship("Defect", back_populates="reel", cascade="all, delete-orphan")
+
+    reference_images = relationship("ReferenceImage", back_populates="reel", cascade="all, delete-orphan")
+    inspection_phases = relationship("InspectionPhase", back_populates="reel", cascade="all, delete-orphan")
+    masks = relationship("Mask", back_populates="reel", cascade="all, delete-orphan")
+
+    rlm_config = relationship("RLMConfig", back_populates="reel", uselist=False, cascade="all, delete-orphan")
+    rlm_phases = relationship("RLMPhase", back_populates="reel", cascade="all, delete-orphan")
+    rlm_monitoring = relationship("RLMMonitoring", back_populates="reel", cascade="all, delete-orphan")
+
+
+# -----------------------
+# SensitivitySet
+# -----------------------
+class SensitivitySet(Base):
+    __tablename__ = "sensitivity_sets"
+
+    set_id = Column(Integer, primary_key=True, autoincrement=True)
+    reel_id = Column(Integer, ForeignKey("reels.reel_id", ondelete="CASCADE"), index=True)
+
+    set_name = Column(String(50))
+    is_standard = Column(Boolean, default=False)
+    defect_class = Column(String(50))
+    threshold_value = Column(DECIMAL(10, 2))
+    warn_threshold = Column(DECIMAL(10, 2))
+
+    reel = relationship("Reel", back_populates="sensitivity_sets")
+
+
+# -----------------------
+# Defect
+# -----------------------
+class Defect(Base):
+    __tablename__ = "defects"
+
+    defect_id = Column(Integer, primary_key=True, autoincrement=True)
+    reel_id = Column(Integer, ForeignKey("reels.reel_id", ondelete="CASCADE"), index=True)
+
+    class_name = Column(String(50), index=True)
+    magnitude_value = Column(DECIMAL(10, 2))
+    severity_value = Column(DECIMAL(10, 2))
+    defect_time = Column(DateTime, index=True)
+    format_position = Column(DECIMAL(10, 2))
+    image_src = Column(String(255))
+
+    reel = relationship("Reel", back_populates="defects")
+
+
+# -----------------------
+# ReferenceImage
+# -----------------------
+class ReferenceImage(Base):
+    __tablename__ = "reference_images"
+
+    ref_image_id = Column(Integer, primary_key=True, autoincrement=True)
+    reel_id = Column(Integer, ForeignKey("reels.reel_id", ondelete="CASCADE"), index=True)
+
+    filename = Column(String(255))
+    image_src = Column(String(255))
+
+    reel = relationship("Reel", back_populates="reference_images")
+
+
+# -----------------------
+# InspectionPhase
+# -----------------------
+class InspectionPhase(Base):
+    __tablename__ = "inspection_phases"
+
+    phase_id = Column(Integer, primary_key=True, autoincrement=True)
+    reel_id = Column(Integer, ForeignKey("reels.reel_id", ondelete="CASCADE"), index=True)
+
+    phase = Column(String(32), index=True)
+    start_time = Column(DateTime, index=True)
+    end_time = Column(DateTime, index=True)
+    start_format = Column(DECIMAL(10, 2))
+    end_format = Column(DECIMAL(10, 2))
+    refimgid = Column(String(64))
+
+    reel = relationship("Reel", back_populates="inspection_phases")
+
+
+# -----------------------
+# Mask
+# -----------------------
+class Mask(Base):
+    __tablename__ = "masks"
+
+    mask_id = Column(Integer, primary_key=True, autoincrement=True)
+    reel_id = Column(Integer, ForeignKey("reels.reel_id", ondelete="CASCADE"), index=True)
+
+    xml_id = Column(String(64))
+    sensitivitysetid = Column(String(64))
+    noinspection = Column(Boolean, default=False)
+    coords = Column(Text)
+    timestamp = Column(DateTime, index=True)
+    format_value = Column(DECIMAL(10, 2))
+
+    reel = relationship("Reel", back_populates="masks")
+
+
+# -----------------------
+# RLMConfig
+# -----------------------
+class RLMConfig(Base):
+    __tablename__ = "rlm_configs"
+
+    config_id = Column(Integer, primary_key=True, autoincrement=True)
+    reel_id = Column(Integer, ForeignKey("reels.reel_id", ondelete="CASCADE"), unique=True)
+
+    config_json = Column(JSON)
+
+    reel = relationship("Reel", back_populates="rlm_config")
+
+
+# -----------------------
+# RLMPhase
+# -----------------------
+class RLMPhase(Base):
+    __tablename__ = "rlm_phases"
+
+    rlm_phase_id = Column(Integer, primary_key=True, autoincrement=True)
+    reel_id = Column(Integer, ForeignKey("reels.reel_id", ondelete="CASCADE"), index=True)
+
+    phase = Column(String(32), index=True)
+    start_time = Column(DateTime, index=True)
+    end_time = Column(DateTime, index=True)
+    start_format = Column(DECIMAL(10, 2))
+    end_format = Column(DECIMAL(10, 2))
+
+    reel = relationship("Reel", back_populates="rlm_phases")
+
+
+# -----------------------
+# RLMMonitoring
+# -----------------------
+class RLMMonitoring(Base):
+    __tablename__ = "rlm_monitoring"
+
+    monitor_id = Column(Integer, primary_key=True, autoincrement=True)
+    reel_id = Column(Integer, ForeignKey("reels.reel_id", ondelete="CASCADE"), index=True)
+
+    timestamp = Column(DateTime, index=True)
+    curlength = Column(DECIMAL(10, 3))
+    webspeed = Column(DECIMAL(10, 3))
+
+    reel = relationship("Reel", back_populates="rlm_monitoring")
