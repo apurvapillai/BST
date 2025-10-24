@@ -20,10 +20,8 @@ logs/
 
 # ---- Generated images ----
 # Defect and reference images
-dashboard/static/images/defects/*.jpg
-dashboard/static/images/reference/*.jpg
-dashboard/static/images/defects/*.png
-dashboard/static/images/reference/*.png
+dashboard/static/images/**
+
 
 # ---- IDE / OS files ----
 .vscode/

@@ -26,26 +26,33 @@ from db.models import (
 # Configuration
 # ---------------------------
 
-MACHINE_NAME = "Press 5"
+MACHINE_NAME = "Press 5"  # must exist in your DB
 
-# Dashboard image roots
-DASHBOARD_IMG_DIR = os.path.join("dashboard", "static", "images")
-DEFECT_IMG_DIR = os.path.join(DASHBOARD_IMG_DIR, "defects")
-REFERENCE_IMG_DIR = os.path.join(DASHBOARD_IMG_DIR, "reference")
+# Flask static root
+STATIC_ROOT = os.path.join("dashboard", "static")
+# Images live under: dashboard/static/images/<MACHINE_NAME>/<YYYY-MM-DD>/{defects,reference}/...
+DASHBOARD_IMG_DIR = os.path.join(STATIC_ROOT, "images")
+
 
 # ---------------------------
 # Helpers
 # ---------------------------
 
-def ensure_dirs():
-    os.makedirs(DEFECT_IMG_DIR, exist_ok=True)
-    os.makedirs(REFERENCE_IMG_DIR, exist_ok=True)
+def _ensure_day_dirs(machine_name: str, date_str: str) -> Dict[str, str]:
+    """
+    Ensure and return per-machine, per-day folders for image saving.
+    Returns absolute paths: {"defects": <path>, "reference": <path>}
+    """
+    base_dir = os.path.join(DASHBOARD_IMG_DIR, machine_name, date_str)
+    defect_dir = os.path.join(base_dir, "defects")
+    reference_dir = os.path.join(base_dir, "reference")
+    os.makedirs(defect_dir, exist_ok=True)
+    os.makedirs(reference_dir, exist_ok=True)
+    return {"defects": defect_dir, "reference": reference_dir}
 
 
 def parse_datetime(date_str: str, time_str: str) -> datetime:
-    """
-    Parse "YYYY-MM-DD" + "HH:MM:SS" into a datetime.
-    """
+    """Parse 'YYYY-MM-DD' + 'HH:MM:SS' into a datetime."""
     return datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M:%S")
 
 
@@ -68,9 +75,10 @@ def attr_as_float(node: Optional[ET.Element], attr: str) -> Optional[float]:
         return None
 
 
-def safe_join_relpath(abs_path: str, static_root: str = "dashboard/static") -> str:
+def safe_join_relpath(abs_path: str, static_root: str = STATIC_ROOT) -> str:
     """
-    Return a path string suitable for Flask's url_for('static', filename=...).
+    Return a path suitable for Flask's url_for('static', filename=...).
+    Converts absolute file path under dashboard/static into a relative "static" path.
     """
     return os.path.relpath(abs_path, start=static_root).replace("\\", "/")
 
@@ -81,13 +89,12 @@ def build_intervals(
     final_end_format: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Given a list of events (each with time, format, and phase), return time-ranged intervals.
-    Each event must have: {"phase": str, "time": datetime, "format": Optional[float], "refimgid": Optional[str]}
+    Given events (each with time, format, phase), return time-ranged intervals.
+    Each event: {"phase": str, "time": datetime, "format": Optional[float], "refimgid": Optional[str]}
     Intervals are [this.time, next.time); last interval ends at final_end_time / final_end_format.
     """
     if not events:
         return []
-    # Ensure chronological
     events_sorted = sorted(events, key=lambda e: e["time"])
     intervals = []
     for i, ev in enumerate(events_sorted):
@@ -101,7 +108,6 @@ def build_intervals(
         else:
             end_time = final_end_time
             end_format = final_end_format
-        # Only keep valid intervals
         if end_time is None or end_time <= start_time:
             continue
         intervals.append(
@@ -119,8 +125,8 @@ def build_intervals(
 
 def dict_from_element(el: ET.Element) -> Dict[str, Any]:
     """
-    Convert an XML element (1-level children) to a python dict capturing attributes & text.
-    Useful to store RLM config/tolerances as JSON without overfitting to schema.
+    Convert an XML element (1-level children) to a python dict capturing attributes/text.
+    Useful for storing RLM config/tolerances as JSON without overfitting schema.
     """
     data: Dict[str, Any] = {"_tag": el.tag, "_attrs": dict(el.attrib)}
     children = []
@@ -147,13 +153,11 @@ def extract_one(zip_path: str):
       - Capture Masks (sId_mmx_noinsp + noinspection="true")
       - Parse RLM module (config, phases, monitoring)
     """
-    ensure_dirs()
     tmp_dir = tempfile.mkdtemp(prefix="bst_")
 
     try:
         # 1) Unzip
         with zipfile.ZipFile(zip_path, "r") as zf:
-            # report.xml path inside ZIP
             xml_name_candidates = [n for n in zf.namelist() if n.lower().endswith("report.xml")]
             if not xml_name_candidates:
                 print(f"⚠️ No report.xml found in {zip_path}. Skipping.")
@@ -180,12 +184,11 @@ def extract_one(zip_path: str):
         order_number = order_node.attrib.get("number") if order_node is not None else None
         job_name = job_node.attrib.get("name") if job_node is not None else None
 
-        # Optional reel code (e.g., <reel id="r6">)
+        # Reel code (root is <reel ...>)
         reel_code = None
-        if root.tag.endswith("reel"):  # handles optional namespaces too
+        if root.tag.endswith("reel"):
             reel_code = root.attrib.get("id")
         else:
-            # fallback: look for a descendant <reel> (in case other files differ)
             reel_node = root.find(".//reel")
             if reel_node is not None:
                 reel_code = reel_node.attrib.get("id")
@@ -208,15 +211,15 @@ def extract_one(zip_path: str):
         time_start = parse_datetime(start_node.attrib["date"], start_node.attrib["time"])
         time_end = parse_datetime(end_node.attrib["date"], end_node.attrib["time"])
 
-        # 3) DB: open session
+        # 3) DB work
         with Session(engine) as session:
             # Machine
             machine = session.query(Machine).filter_by(name=MACHINE_NAME).first()
             if not machine:
                 raise ValueError(f"Machine {MACHINE_NAME} not found in DB")
 
-            # Duplicate reel guard (include reel_code if present)
-            existing_q = session.query(Reel).filter_by(
+            # Duplicate reel guard
+            exists = session.query(Reel).filter_by(
                 machine_id=machine.machine_id,
                 order_number=order_number,
                 job_name=job_name,
@@ -224,9 +227,8 @@ def extract_one(zip_path: str):
                 reel_end=reel_end,
                 time_start=time_start,
                 time_end=time_end,
-            )
-            candidates = existing_q.all()
-            if candidates:
+            ).first()
+            if exists:
                 print(f"⚠️ Reel already exists (machine={MACHINE_NAME}, order={order_number}, job={job_name}). Skipping insert.")
                 return
 
@@ -244,15 +246,23 @@ def extract_one(zip_path: str):
                 format_width=format_width,
             )
             session.add(reel)
-            session.commit()
+            session.commit()  # get reel_id
 
             # ---------------------------
-            # Sensitivity Sets (only sId_mmx_stand)
+            # Prepare per-machine/day image folders
+            # ---------------------------
+            date_str = time_start.strftime("%Y-%m-%d")
+            img_dirs = _ensure_day_dirs(MACHINE_NAME, date_str)
+            DEFECT_IMG_DIR = img_dirs["defects"]
+            REFERENCE_IMG_DIR = img_dirs["reference"]
+
+            # ---------------------------
+            # Sensitivity Sets (standard only)
             # ---------------------------
             for sset in root.findall("inspection/sensitivitysets/set"):
                 set_name = sset.attrib.get("id")
                 if set_name != "sId_mmx_stand":
-                    continue  # ignore non-standard here
+                    continue
 
                 is_standard = (sset.attrib.get("standard") == "true")
                 for val in sset.findall("value"):
@@ -309,23 +319,11 @@ def extract_one(zip_path: str):
             # ---------------------------
             # Reference Images (+copy)
             # ---------------------------
-            # Strategy:
-            #   1) Prefer explicit XML nodes if present (common patterns tried below).
-            #   2) Fallback: scan all extracted images for names containing "reference".
-            # ---------------------------
-            # Reference Images (+copy)
-            # ---------------------------
-            # Strategy:
-            #   1) Prefer explicit XML nodes if present (common patterns tried below).
-            #   2) Fallback: scan all extracted images for names containing "reference".
-            # Map any (path) if XML exposes it.
+            ref_entries: List[Dict[str, str]] = []
 
-            ref_entries = []
-
-            # Try common XML structures for reference images
+            # XML-declared references
             for ref_node in root.findall(".//reference_images/*"):
                 attrs = dict(ref_node.attrib)
-                # Look for a path attribute (src, href, file, name)
                 path = (
                     attrs.get("src")
                     or attrs.get("href")
@@ -333,15 +331,10 @@ def extract_one(zip_path: str):
                     or attrs.get("name")
                 )
                 if path:
-                    ref_entries.append(
-                        {
-                            "path": path.replace("../", "").replace("\\", "/"),
-                        }
-                    )
+                    ref_entries.append({"path": path.replace("../", "").replace("\\", "/")})
 
-            # If none found, best-effort filename scan
+            # Fallback: scan tmp for filenames containing "reference"
             if not ref_entries:
-                # walk tmp_dir and pick files with "reference" keyword
                 for root_dir, _, files in os.walk(tmp_dir):
                     for fn in files:
                         lower = fn.lower()
@@ -349,14 +342,13 @@ def extract_one(zip_path: str):
                             rel = os.path.relpath(os.path.join(root_dir, fn), start=tmp_dir).replace("\\", "/")
                             ref_entries.append({"path": rel})
 
-            # Copy and insert DB rows
+            # Copy and insert
             seen_ref_basenames = set()
             for ref in ref_entries:
                 src_path = os.path.join(tmp_dir, ref["path"])
                 if not os.path.exists(src_path):
                     continue
                 basename = os.path.basename(src_path)
-                # Avoid duplicate copies if multiple references point to same file
                 if basename in seen_ref_basenames:
                     continue
                 seen_ref_basenames.add(basename)
@@ -373,7 +365,6 @@ def extract_one(zip_path: str):
                     )
                 )
 
-
             # ---------------------------
             # Inspection statusprotocol → phases
             # ---------------------------
@@ -385,14 +376,9 @@ def extract_one(zip_path: str):
                 except Exception:
                     continue
                 fmt = attr_as_float(st, "format")
-                refimgid = st.attrib.get("refimgid")  # may exist on <active ...>
+                refimgid = st.attrib.get("refimgid")  # sometimes on <active ...>
                 status_events.append(
-                    {
-                        "phase": phase,
-                        "time": start_time,
-                        "format": fmt,
-                        "refimgid": refimgid,
-                    }
+                    {"phase": phase, "time": start_time, "format": fmt, "refimgid": refimgid}
                 )
 
             insp_intervals = build_intervals(status_events, final_end_time=time_end, final_end_format=reel_end)
@@ -424,7 +410,6 @@ def extract_one(zip_path: str):
                 if not (sensitivitysetid == "sId_mmx_noinsp" and noinspection_str == "true"):
                     continue
 
-                # Date/time can be on mask or properties
                 date_str = props.get("date") or m.attrib.get("date")
                 time_str = props.get("time") or m.attrib.get("time")
                 ts = None
@@ -459,14 +444,12 @@ def extract_one(zip_path: str):
             rlm = root.find(".//rlmmodule")
             if rlm is not None:
                 # 1) Config/tolerances → JSON
-                #    Collect immediate children (like <tolerances>…</tolerances>) into a dict-of-structs.
                 cfg: Dict[str, Any] = {"_tag": rlm.tag, "_attrs": dict(rlm.attrib)}
                 for child in rlm:
-                    # Only 1-level-deep structure capture for robustness
                     cfg[child.tag] = dict_from_element(child)
                 session.add(RLMConfig(reel_id=reel.reel_id, config_json=cfg))
 
-                # 2) Phases inside RLM (pattern similar to statusprotocol)
+                # 2) RLM phases (active/inactive intervals)
                 rlm_status_events = []
                 for st in rlm.findall(".//statusprotocol/*"):
                     phase = st.tag
@@ -475,9 +458,7 @@ def extract_one(zip_path: str):
                     except Exception:
                         continue
                     fmt = attr_as_float(st, "format")
-                    rlm_status_events.append(
-                        {"phase": phase, "time": start_time, "format": fmt}
-                    )
+                    rlm_status_events.append({"phase": phase, "time": start_time, "format": fmt})
 
                 rlm_intervals = build_intervals(rlm_status_events, final_end_time=time_end, final_end_format=reel_end)
                 for iv in rlm_intervals:
@@ -492,11 +473,9 @@ def extract_one(zip_path: str):
                         )
                     )
 
-
-                # Your XML uses <monitorings><monpoint .../></monitorings>
-                for mon in rlm.findall(".//monitorings/*"):         # catches <monpoint .../> and any variants under <monitorings>
+                # 3) RLM monitoring points (<monitorings><monpoint .../></monitorings>)
+                for mon in rlm.findall(".//monitorings/*"):
                     _insert_rlm_monitor_if_possible(mon, session, reel.reel_id)
-
 
             # Commit everything
             session.commit()
@@ -506,7 +485,6 @@ def extract_one(zip_path: str):
         print(f"❌ Failed on {zip_path}: {e}")
         raise
     finally:
-        # Cleanup
         try:
             shutil.rmtree(tmp_dir, ignore_errors=True)
         except Exception:
@@ -515,8 +493,8 @@ def extract_one(zip_path: str):
 
 def _insert_rlm_monitor_if_possible(node: ET.Element, session: Session, reel_id: int):
     """
-    Best-effort parse and insert one RLMMonitoring row from a monitoring-like XML node.
-    Expects attributes: date, time, and (curlength | currentlength | cl), (webspeed | speed | ws)
+    Parse and insert one RLMMonitoring row from a node (<monpoint .../>).
+    Needs: date, time. Reads curlength/webspeed (aliases allowed).
     """
     attrs = node.attrib
     date_str = attrs.get("date")
@@ -540,6 +518,9 @@ def _insert_rlm_monitor_if_possible(node: ET.Element, session: Session, reel_id:
 
     curlength = _first_float("curlength", "currentlength", "cl")
     webspeed = _first_float("webspeed", "speed", "ws")
+
+    if curlength is None and webspeed is None:
+        return
 
     session.add(
         RLMMonitoring(
