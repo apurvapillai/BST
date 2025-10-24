@@ -3,201 +3,213 @@
 <head>
   <meta charset="UTF-8">
   <title>Press Dashboard</title>
-
-  <!-- CSS -->
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
-
-  <!-- Plotly -->
   <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
 </head>
 <body>
-    <!-- Image Modal -->
-    <div id="imageModal">
-        <span class="closeBtn" onclick="closeModal()">&times;</span>
-        <img id="modalImage">
+  <!-- Image Modal -->
+  <div id="imageModal">
+    <span class="closeBtn" onclick="closeModal()">&times;</span>
+    <img id="modalImage" alt="Defect preview">
+  </div>
+
+  <div class="app-shell">
+    <!-- Global Filters -->
+    <div class="filters" id="globalFilters">
+      <label for="filterMachine">Machine</label>
+      <select id="filterMachine">
+        {% for m in machines %}
+        <option value="{{ m.machine_id }}" {% if m.machine_id == default_machine_id %}selected{% endif %}>
+          {{ m.name }}
+        </option>
+        {% endfor %}
+      </select>
+
+      <label for="filterStart">Start</label>
+      <input type="datetime-local" id="filterStart"
+             value="{{ default_start.strftime('%Y-%m-%dT%H:%M:%S') if default_start else '' }}">
+
+      <label for="filterEnd">End</label>
+      <input type="datetime-local" id="filterEnd"
+             value="{{ default_end.strftime('%Y-%m-%dT%H:%M:%S') if default_end else '' }}">
+
+      <label for="filterJob">Job</label>
+      <select id="filterJob">
+        <option value="">All</option>
+      </select>
+
+      <label for="filterOrder">Order</label>
+      <select id="filterOrder">
+        <option value="">All</option>
+      </select>
+
+      <label for="filterReel">Reel Code</label>
+      <select id="filterReel">
+        <option value="">All</option>
+      </select>
+
+      <button id="applyFilters" class="apply-btn">Apply</button>
     </div>
 
+    <!-- Tabs -->
+    <div class="tabs" id="tabNav">
+      <button class="tab tab-active" data-tab="overview">Overview</button>
+      <button class="tab" data-tab="job">Job Explorer</button>
+      <button class="tab" data-tab="defects">Defect Explorer</button>
+    </div>
 
+    <!-- Overview Tab -->
+    <section id="tab-overview" class="tab-content">
+      <div class="kpis" id="overviewKpis">
+        <div class="kpi-card" data-kpi="total_jobs">
+          <h3>Total Jobs</h3>
+          <p>--</p>
+        </div>
+        <div class="kpi-card" data-kpi="total_length">
+          <h3>Total Length</h3>
+          <p>--</p>
+        </div>
+        <div class="kpi-card" data-kpi="active_pct">
+          <h3>Active %</h3>
+          <p>--</p>
+        </div>
+        <div class="kpi-card" data-kpi="inactive_pct">
+          <h3>Inactive %</h3>
+          <p>--</p>
+        </div>
+        <div class="kpi-card" data-kpi="learn_pct">
+          <h3>Learn %</h3>
+          <p>--</p>
+        </div>
+        <div class="kpi-card" data-kpi="active_length">
+          <h3>Active Length</h3>
+          <p>--</p>
+        </div>
+        <div class="kpi-card" data-kpi="inactive_length">
+          <h3>Inactive Length</h3>
+          <p>--</p>
+        </div>
+        <div class="kpi-card" data-kpi="learn_length">
+          <h3>Learn Length</h3>
+          <p>--</p>
+        </div>
+        <div class="kpi-card" data-kpi="total_defects">
+          <h3>Total Defects</h3>
+          <p>--</p>
+        </div>
+        <div class="kpi-card" data-kpi="defect_classes">
+          <h3>Defect Types</h3>
+          <p>--</p>
+        </div>
+      </div>
 
+      <div class="charts">
+        <div id="overviewDefectsByType" class="chart"></div>
+        <div id="overviewDefectsTrend" class="chart"></div>
+        <div id="overviewJobsMeters" class="chart"></div>
+        <div id="overviewJobsTime" class="chart"></div>
+        <div id="overviewJobsDefects" class="chart"></div>
+      </div>
+    </section>
 
-  <!-- Filter Bar -->
-    <div class="filters">
-        <label for="machine">Machine:</label>
-        <select id="machine">
-            {% for m in machines %}
-            <option value="{{ m.machine_id }}"
-                {% if m.machine_id == default_machine_id %}selected{% endif %}>
-                {{ m.name }}
-            </option>
-            {% endfor %}
-        </select>
+    <!-- Job Explorer Tab -->
+    <section id="tab-job" class="tab-content hidden">
+      <div class="job-layout">
+        <div class="job-list">
+          <div class="job-list-toolbar">
+            <div class="job-sort">
+              <label for="jobSort">Sort</label>
+              <select id="jobSort">
+                <option value="time">Newest first</option>
+                <option value="ref_changes">Most reference changes</option>
+                <option value="masks">Most masks</option>
+                <option value="defects">Most defects</option>
+                <option value="drift">Config drift</option>
+                <option value="rlm_off">RLM disabled</option>
+              </select>
+            </div>
+            <div class="pagination" id="jobPagination"></div>
+          </div>
+          <div id="jobReelList" class="reel-list"></div>
+        </div>
+        <div class="job-detail" id="jobDetail">
+          <div class="placeholder">
+            Select a reel to view configuration, phases, and RLM details.
+          </div>
+        </div>
+      </div>
+    </section>
 
-        <label for="startDate">Start Date:</label>
-        <input type="datetime-local" id="startDate"
-                value="{{ default_start.strftime('%Y-%m-%dT%H:%M:%S') if default_start else '' }}">
-
-        <label for="endDate">End Date:</label>
-        <input type="datetime-local" id="endDate"
-                value="{{ default_end.strftime('%Y-%m-%dT%H:%M:%S') if default_end else '' }}">
-
-        <label for="status">Status:</label>
-        <select id="status">
+    <!-- Defect Explorer Tab -->
+    <section id="tab-defects" class="tab-content hidden">
+      <div class="defect-toolbar">
+        <div class="defect-filter">
+          <label for="defectTypeFilter">Type</label>
+          <select id="defectTypeFilter">
+            <option value="">All</option>
+          </select>
+        </div>
+        <div class="defect-filter">
+          <label for="defectPhaseFilter">Phase</label>
+          <select id="defectPhaseFilter">
             <option value="">All</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
             <option value="learn">Learn</option>
-        </select>
+          </select>
+        </div>
+        <div class="defect-filter range">
+          <label>Magnitude</label>
+          <input type="number" id="magnitudeMin" placeholder="Min" step="0.1">
+          <span>–</span>
+          <input type="number" id="magnitudeMax" placeholder="Max" step="0.1">
+        </div>
+        <div class="defect-filter range">
+          <label>Severity</label>
+          <input type="number" id="severityMin" placeholder="Min" step="0.1">
+          <span>–</span>
+          <input type="number" id="severityMax" placeholder="Max" step="0.1">
+        </div>
+        <div class="defect-filter range">
+          <label>Position</label>
+          <input type="number" id="positionMin" placeholder="Min" step="1">
+          <span>–</span>
+          <input type="number" id="positionMax" placeholder="Max" step="1">
+        </div>
+      </div>
 
-        <button id="applyFilters">Apply</button>
-    </div>
+      <div class="charts">
+        <div id="defectTrendChart" class="chart"></div>
+        <div id="defectTypeChart" class="chart"></div>
+        <div id="defectMagnitudeChart" class="chart"></div>
+        <div id="defectSeverityChart" class="chart"></div>
+        <div id="defectPositionChart" class="chart"></div>
+      </div>
 
-
-  <!-- KPI Summary Cards -->
-  <div class="kpis">
-    <div class="kpi-card">
-      <h3>Total Jobs</h3>
-      <p id="totalJobs">--</p>
-    </div>
-    <div class="kpi-card">
-      <h3>Total Length</h3>
-      <p id="totalLength">--</p>
-    </div>
-    <div class="kpi-card">
-      <h3>Active %</h3>
-      <p id="activePct">--</p>
-    </div>
-    <div class="kpi-card">
-      <h3>Inactive %</h3>
-      <p id="inactivePct">--</p>
-    </div>
-    <div class="kpi-card">
-        <h3>Learn %</h3>
-        <p id="learnPct">--</p>
-    </div>
-    <div class="kpi-card">
-      <h3>Active Length</h3>
-      <p id="activeLength">--</p>
-    </div>
-    <div class="kpi-card">
-      <h3>InActive Length</h3>
-      <p id="inactiveLength">--</p>
-    </div>
-    <div class="kpi-card">
-        <h3>Learn Length</h3>
-        <p id="learnLength">--</p>
-    </div>
-    <div class="kpi-card">
-      <h3>Total Defects</h3>
-      <p id="totalDefects">--</p>
-    </div>
-    <div class="kpi-card">
-      <h3>Defect Types</h3>
-      <p id="defectClasses">--</p>
-    </div>
-    
+      <div class="table-wrapper">
+        <table id="defectTable">
+          <thead>
+            <tr>
+              <th>Reel ID</th>
+              <th>Reel Code</th>
+              <th>Time</th>
+              <th>Order</th>
+              <th>Job</th>
+              <th>Type</th>
+              <th>Magnitude</th>
+              <th>Severity</th>
+              <th>Position</th>
+              <th>Phase</th>
+              <th>Image</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pagination" id="defectPagination"></div>
+    </section>
   </div>
 
-  <!-- Charts Section -->
-  <div class="charts">
-    <div id="defectTypes" class="chart"></div>
-    <div id="activeTrend" class="chart"></div>
-    <div id="defectTrend" class="chart"></div>
-    </div>
-    <div class="charts">
-    <div id="jobsMeters" class="chart"></div>
-    <div id="jobsTime" class="chart"></div>
-    <div id="jobsDefects" class="chart"></div>
-  </div>
-
-
-  <!-- Defects Table -->
-  <div class="details">
-    <h2 style="text-align: center;">Defect Details</h2>
-
-    <!-- Sub-filters (order, state, job, type) -->
-    <div class="sub-filters">
-      <label for="reelFilter">Filter by Reel:</label>
-        <select id="reelFilter">
-            <option value="">ReelId</option>
-        </select>
-
-
-        <label for="orderFilter">Filter by Order:</label>
-        <select id="orderFilter">
-            <option value="">All Orders</option>
-        </select>
-
-        <label for="stateFilter">Filter by State:</label>
-        <select id="stateFilter">
-            <option value="">All States</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-            <option value="learn">Learn</option>
-        </select>
-
-        <label for="jobFilter">Filter by Job:</label>
-        <select id="jobFilter">
-            <option value="">All Jobs</option>
-        </select>
-
-        <label for="typeFilter">Filter by Type:</label>
-        <select id="typeFilter">
-            <option value="">All Types</option>
-        </select>
-    </div>
-
-    <!-- Range sliders -->
-    <div class="range-filters">
-        <div>
-            <label>Magnitude:</label>
-            <input type="number" id="magMin" value="0" min="0" step="0.1"> -
-            <input type="number" id="magMax" value="1000" min="0" step="0.1">
-        </div>
-        <div>
-            <label>Severity:</label>
-            <input type="number" id="sevMin" value="500" min="0" step="0.1"> -
-            <input type="number" id="sevMax" value="1000000" min="0" step="0.1">
-        </div>
-        <div>
-            <label>Position:</label>
-            <input type="number" id="posMin" value="0" min="0" step="1"> -
-            <input type="number" id="posMax" value="1000" min="0" step="1">
-        </div>
-    </div>
-
-
-    <!-- Drill-down charts -->
-    <div class="charts">
-        <div id="jobDefectTrend" class="chart"></div>
-        <div id="jobDefectCounts" class="chart"></div>
-        <div id="jobDefectMagnitude" class="chart"></div>
-        <div id="jobDefectSeverity" class="chart"></div>
-        <div id="jobDefectPosition" class="chart"></div>
-    </div>
-
-    <!-- Table -->
-  <table id="defectTable" class="table table-striped">
-    <thead>
-        <tr>
-            <th>ReelId</th>
-            <th>Time</th>
-            <th>Order</th>
-            <th>Job</th>
-            <th>Type</th>
-            <th>Magnitude</th>
-            <th>Severity</th>
-            <th>Position</th>
-            <th>State</th>
-            <th>Image</th>
-        </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
-
-    </div>
-
-
-  <!-- Custom JS -->
   <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 </body>
 </html>
