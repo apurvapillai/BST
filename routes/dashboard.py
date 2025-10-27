@@ -182,6 +182,39 @@ def _phase_mix_for_reel(
     return totals
 
 
+def _accumulate_phase_buckets(
+    accumulator: Dict[datetime, Dict[str, float]],
+    phases: Iterable[InspectionPhase],
+    window_start: datetime,
+    window_end: datetime,
+    bucket_minutes: int = 60,
+) -> Dict[datetime, Dict[str, float]]:
+    bucket_delta = timedelta(minutes=bucket_minutes)
+    for phase in phases or []:
+        clipped = _clip_interval(phase.start_time, phase.end_time, window_start, window_end)
+        if not clipped:
+            continue
+        segment_start, segment_end = clipped
+        current = segment_start
+        while current < segment_end:
+            bucket_minute = (current.minute // bucket_minutes) * bucket_minutes
+            bucket_start = current.replace(
+                minute=bucket_minute,
+                second=0,
+                microsecond=0,
+            )
+            bucket_end = bucket_start + bucket_delta
+            slice_end = min(segment_end, bucket_end)
+            seconds = max((slice_end - current).total_seconds(), 0.0)
+            if seconds <= 0:
+                current = slice_end
+                continue
+            bucket = accumulator.setdefault(bucket_start, defaultdict(float))
+            bucket[phase.phase or "unknown"] += seconds
+            current = slice_end
+    return accumulator
+
+
 def _phase_seconds(
     phases: Iterable[InspectionPhase],
     window_start: datetime,
@@ -302,7 +335,10 @@ def dashboard_home():
         if default_end is None:
             default_end = datetime.utcnow()
         default_start = default_end - timedelta(days=DAYS_DEFAULT_RANGE)
-        default_machine_id = machines[0].machine_id if machines else None
+        default_machine = next((m for m in machines if (m.name or "").lower() == "press 5"), None)
+        if not default_machine and machines:
+            default_machine = machines[0]
+        default_machine_id = default_machine.machine_id if default_machine else None
 
     return render_template(
         "dashboard.html",
@@ -394,6 +430,7 @@ def api_overview():
         jobs_meters = defaultdict(float)
         jobs_time = defaultdict(lambda: {"active": 0.0, "inactive": 0.0, "learn": 0.0})
         jobs_defects = defaultdict(int)
+        state_buckets: Dict[datetime, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
 
         totals = {
             "length": 0.0,
@@ -431,6 +468,25 @@ def api_overview():
                 defects.append(defect)
                 if reel.job_name and defect.defect_time and filters["start"] <= defect.defect_time <= filters["end"]:
                     jobs_defects[reel.job_name] += 1
+
+            _accumulate_phase_buckets(
+                state_buckets,
+                reel.inspection_phases or [],
+                filters["start"],
+                filters["end"],
+            )
+
+        state_trend = []
+        for bucket_time in sorted(state_buckets.keys()):
+            bucket_totals = state_buckets[bucket_time]
+            bucket_seconds = sum(bucket_totals.values())
+            entry = {
+                "time": _iso(bucket_time),
+                "active_pct": round((bucket_totals.get("active", 0.0) / bucket_seconds * 100) if bucket_seconds else 0.0, 1),
+                "inactive_pct": round((bucket_totals.get("inactive", 0.0) / bucket_seconds * 100) if bucket_seconds else 0.0, 1),
+                "learn_pct": round((bucket_totals.get("learn", 0.0) / bucket_seconds * 100) if bucket_seconds else 0.0, 1),
+            }
+            state_trend.append(entry)
 
         defects_by_type, defects_trend, defect_classes, total_defects = _defect_buckets(
             defects, filters["start"], filters["end"]
@@ -475,6 +531,7 @@ def api_overview():
                 {"job": job, "count": count}
                 for job, count in sorted(jobs_defects.items(), key=lambda item: item[1], reverse=True)
             ],
+            "state_trend": state_trend,
         }
     return jsonify(response)
 

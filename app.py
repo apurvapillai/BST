@@ -44,5 +44,5 @@ def create_app():
 
 if __name__ == "__main__":
     app = create_app()
-    # Bind to LAN IP so other devices can reach it
-    app.run(host="10.8.10.220", port=8000, debug=True)
+    # Bind locally for testing; adjust host via FLASK_RUN_HOST if needed
+    app.run(host="127.0.0.1", port=8000, debug=True)

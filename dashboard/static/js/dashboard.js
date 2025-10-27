@@ -79,6 +79,7 @@
   };
 
   const Filters = (() => {
+    const root = document.getElementById("globalFilters");
     const elements = {
       machine: Utils.qs("#filterMachine"),
       start: Utils.qs("#filterStart"),
@@ -87,17 +88,26 @@
       order: Utils.qs("#filterOrder"),
       reel: Utils.qs("#filterReel"),
       apply: Utils.qs("#applyFilters"),
+      clear: Utils.qs("#clearFilters"),
+      chips: Utils.qs("#activeFilterChips"),
     };
 
     const listeners = new Set();
-    let state = {
-      machine_id: elements.machine ? elements.machine.value : "",
-      start: elements.start ? elements.start.value : "",
-      end: elements.end ? elements.end.value : "",
+    const defaults = {
+      machine_id:
+        (root && root.dataset.defaultMachine) ||
+        (elements.machine ? elements.machine.value : ""),
+      start:
+        (root && root.dataset.defaultStart) ||
+        (elements.start ? elements.start.value : ""),
+      end:
+        (root && root.dataset.defaultEnd) ||
+        (elements.end ? elements.end.value : ""),
       job: "",
       order: "",
       reel_code: "",
     };
+    let state = { ...defaults };
     let updating = false;
     let initialized = false;
     let refreshOptionsQueued = false;
@@ -108,6 +118,7 @@
     function init() {
       if (!elements.machine) return;
       applySearchParams();
+      renderChips();
       attachListeners();
       refreshOptions(true).then(() => {
         emit(true);
@@ -139,7 +150,7 @@
 
     function attachListeners() {
       Object.entries(elements).forEach(([name, el]) => {
-        if (!el || name === "apply") return;
+        if (!el || name === "apply" || name === "clear" || name === "chips") return;
         el.addEventListener("change", (evt) => handleInputChange(name, evt.target.value));
         if (name === "start" || name === "end") {
           el.addEventListener("blur", () => handleInputChange(name, el.value));
@@ -147,6 +158,22 @@
       });
       if (elements.apply) {
         elements.apply.addEventListener("click", () => emit(true));
+      }
+      if (elements.clear) {
+        elements.clear.addEventListener("click", () => {
+          handleClear();
+        });
+      }
+      if (elements.chips) {
+        elements.chips.addEventListener("click", (evt) => {
+          const button = evt.target.closest(".chip-remove");
+          if (!button) return;
+          const chipEl = button.closest(".filter-chip");
+          if (!chipEl) return;
+          const key = chipEl.dataset.key;
+          if (!key) return;
+          clearKey(key).catch((error) => console.error("Failed to clear filter chip", error));
+        });
       }
     }
 
@@ -235,6 +262,7 @@
 
     function emit(force) {
       if (!initialized && !force) return;
+      renderChips();
       const payload = getState();
       Utils.updateUrlQuery(payload);
       listeners.forEach((listener) => listener(payload));
@@ -256,12 +284,143 @@
       return () => listeners.delete(callback);
     }
 
+    async function handleClear() {
+      if (!elements.machine) return;
+      updating = true;
+      state = { ...defaults };
+      elements.machine.value = state.machine_id || elements.machine.value;
+      if (elements.start) elements.start.value = state.start || "";
+      if (elements.end) elements.end.value = state.end || "";
+      if (elements.job) elements.job.value = "";
+      if (elements.order) elements.order.value = "";
+      if (elements.reel) elements.reel.value = "";
+      updating = false;
+      await refreshOptions(true);
+      emit(true);
+    }
+
+    async function clearKey(key) {
+      switch (key) {
+        case "machine_id":
+          if (elements.machine) {
+            state.machine_id = defaults.machine_id || (elements.machine.options[0]?.value || "");
+            elements.machine.value = state.machine_id;
+          }
+          state.job = "";
+          if (elements.job) elements.job.value = "";
+          state.order = "";
+          if (elements.order) elements.order.value = "";
+          state.reel_code = "";
+          if (elements.reel) elements.reel.value = "";
+          await refreshOptions(true);
+          emit(true);
+          break;
+        case "start":
+          state.start = defaults.start || "";
+          if (elements.start) elements.start.value = state.start || "";
+          await refreshOptions(true);
+          emit(true);
+          break;
+        case "end":
+          state.end = defaults.end || "";
+          if (elements.end) elements.end.value = state.end || "";
+          await refreshOptions(true);
+          emit(true);
+          break;
+        case "job":
+          state.job = "";
+          if (elements.job) elements.job.value = "";
+          state.order = "";
+          if (elements.order) elements.order.value = "";
+          state.reel_code = "";
+          if (elements.reel) elements.reel.value = "";
+          await refreshOptions(true);
+          emit(true);
+          break;
+        case "order":
+          state.order = "";
+          if (elements.order) elements.order.value = "";
+          state.reel_code = "";
+          if (elements.reel) elements.reel.value = "";
+          await refreshOptions(true);
+          emit(true);
+          break;
+        case "reel_code":
+          state.reel_code = "";
+          if (elements.reel) elements.reel.value = "";
+          emit(true);
+          break;
+        default:
+          break;
+      }
+    }
+
+    function selectedOptionText(selectEl) {
+      if (!selectEl) return "";
+      const option = selectEl.options[selectEl.selectedIndex];
+      return option ? option.textContent.trim() : "";
+    }
+
+    function formatChipDate(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString();
+    }
+
+    function renderChips() {
+      if (!elements.chips) return;
+      const chips = [];
+      const machineText = selectedOptionText(elements.machine) || state.machine_id;
+      if (machineText) {
+        chips.push({ key: "machine_id", label: `Machine: ${machineText}`, removable: false, className: "machine" });
+      }
+      if (state.start && state.start !== defaults.start) {
+        chips.push({ key: "start", label: `Start: ${formatChipDate(state.start)}`, removable: true });
+      }
+      if (state.end && state.end !== defaults.end) {
+        chips.push({ key: "end", label: `End: ${formatChipDate(state.end)}`, removable: true });
+      }
+      if (state.job) {
+        chips.push({ key: "job", label: `Job: ${state.job}`, removable: true });
+      }
+      if (state.order) {
+        chips.push({ key: "order", label: `Order: ${state.order}`, removable: true });
+      }
+      if (state.reel_code) {
+        chips.push({ key: "reel_code", label: `Reel: ${state.reel_code}`, removable: true });
+      }
+
+      if (!chips.length) {
+        elements.chips.innerHTML = "";
+        elements.chips.classList.add("hidden");
+        return;
+      }
+
+      const html = chips
+        .map((chip) => {
+          const classes = ["filter-chip"];
+          if (chip.className) classes.push(chip.className);
+          const removeButton = chip.removable
+            ? `<button type="button" class="chip-remove" aria-label="Clear ${chip.label}">&times;</button>`
+            : "";
+          return `<span class="${classes.join(" ")}" data-key="${chip.key}"><span>${chip.label}</span>${removeButton}</span>`;
+        })
+        .join("");
+
+      elements.chips.innerHTML = html;
+      elements.chips.classList.remove("hidden");
+    }
+
     function set(field, value, { emit: shouldEmit = true, updateUrl = true } = {}) {
       state[field] = value || "";
       updating = true;
       if (field === "job" && elements.job) elements.job.value = state.job;
       if (field === "order" && elements.order) elements.order.value = state.order;
       if (field === "reel_code" && elements.reel) elements.reel.value = state.reel_code;
+      if (field === "start" && elements.start) elements.start.value = state.start || "";
+      if (field === "end" && elements.end) elements.end.value = state.end || "";
+      if (field === "machine_id" && elements.machine) elements.machine.value = state.machine_id || "";
       updating = false;
       if (shouldEmit) emit(false);
       if (updateUrl && !shouldEmit) {
@@ -418,20 +577,36 @@
       const jobsMeters = data.jobs_meters || [];
       const jobsTime = data.jobs_time || [];
       const jobsDefects = data.jobs_defects || [];
+      const stateTrend = data.state_trend || [];
+
+      const jobsTimePct = jobsTime.map((job) => {
+        const total =
+          (job.minutes_active || 0) +
+          (job.minutes_inactive || 0) +
+          (job.minutes_learn || 0);
+        return {
+          job: job.job,
+          active_pct: total ? (job.minutes_active / total) * 100 : 0,
+          inactive_pct: total ? (job.minutes_inactive / total) * 100 : 0,
+          learn_pct: total ? (job.minutes_learn / total) * 100 : 0,
+        };
+      });
 
       Plotly.react(
         "overviewDefectsByType",
         [
           {
-            type: "bar",
-            x: defectsByType.map((d) => d.class),
-            y: defectsByType.map((d) => d.count),
-            marker: { color: "#2563eb" },
+            type: "pie",
+            labels: defectsByType.map((d) => d.class),
+            values: defectsByType.map((d) => d.count),
+            hole: 0.35,
+            textinfo: "label+percent",
+            hoverinfo: "label+percent+value",
           },
         ],
         {
           title: "Defects by Type",
-          margin: { t: 40, l: 40, r: 20, b: 60 },
+          margin: { t: 50, l: 20, r: 20, b: 20 },
         },
         { responsive: true }
       );
@@ -478,29 +653,68 @@
           {
             type: "bar",
             name: "Active",
-            x: jobsTime.map((d) => d.job),
-            y: jobsTime.map((d) => d.minutes_active),
+            x: jobsTimePct.map((d) => d.job),
+            y: jobsTimePct.map((d) => d.active_pct),
             marker: { color: "#22c55e" },
           },
           {
             type: "bar",
             name: "Inactive",
-            x: jobsTime.map((d) => d.job),
-            y: jobsTime.map((d) => d.minutes_inactive),
+            x: jobsTimePct.map((d) => d.job),
+            y: jobsTimePct.map((d) => d.inactive_pct),
             marker: { color: "#ef4444" },
           },
           {
             type: "bar",
             name: "Learn",
-            x: jobsTime.map((d) => d.job),
-            y: jobsTime.map((d) => d.minutes_learn),
+            x: jobsTimePct.map((d) => d.job),
+            y: jobsTimePct.map((d) => d.learn_pct),
             marker: { color: "#f59e0b" },
           },
         ],
         {
           barmode: "stack",
-          title: "Minutes by Job and Phase",
-          margin: { t: 40, l: 40, r: 20, b: 80 },
+          title: "Inspection Mix by Job (%)",
+          yaxis: { title: "Percent", ticksuffix: "%" },
+          margin: { t: 50, l: 60, r: 20, b: 80 },
+        },
+        { responsive: true }
+      );
+
+      Plotly.react(
+        "overviewStateTrend",
+        [
+          {
+            type: "scatter",
+            mode: "lines",
+            name: "Active",
+            x: stateTrend.map((d) => d.time),
+            y: stateTrend.map((d) => d.active_pct),
+            line: { color: "#22c55e", width: 2 },
+          },
+          {
+            type: "scatter",
+            mode: "lines",
+            name: "Inactive",
+            x: stateTrend.map((d) => d.time),
+            y: stateTrend.map((d) => d.inactive_pct),
+            line: { color: "#ef4444", width: 2 },
+          },
+          {
+            type: "scatter",
+            mode: "lines",
+            name: "Learn",
+            x: stateTrend.map((d) => d.time),
+            y: stateTrend.map((d) => d.learn_pct),
+            line: { color: "#f59e0b", width: 2 },
+          },
+        ],
+        {
+          title: "Phase Mix Trend (%)",
+          xaxis: { type: "date" },
+          yaxis: { title: "Percent", ticksuffix: "%", range: [0, 100] },
+          legend: { orientation: "h", x: 0, y: 1.15 },
+          margin: { t: 60, l: 60, r: 30, b: 60 },
         },
         { responsive: true }
       );
@@ -629,6 +843,9 @@
         if (state.selectedReelId === item.reel_id) {
           card.classList.add("active");
         }
+        if ((item.ref_change_count || 0) > 1) {
+          card.classList.add("alert");
+        }
 
         card.innerHTML = `
           <div class="reel-header">
@@ -645,13 +862,13 @@
           <div class="metrics-row">
             <span class="badge">Defects: ${item.defect_count || 0}</span>
             <span class="badge">Masks: ${item.mask_count || 0}</span>
-            <span class="badge">Ref changes: ${item.ref_change_count || 0}</span>
+            <span class="badge${(item.ref_change_count || 0) > 1 ? " danger" : ""}">Ref changes: ${item.ref_change_count || 0}</span>
             <span class="badge">RLM pts: ${item.rlm_monitor_count || 0}</span>
           </div>
           <div class="metrics-row">
             ${renderPhaseChips(item.phase_mix_pct || {})}
-            ${item.sens_standard_changed ? '<span class="badge critical">Sensitivity drift</span>' : ""}
-            ${!item.rlm_enabled ? '<span class="badge critical">RLM disabled</span>' : ""}
+            ${item.sens_standard_changed ? '<span class="badge warn">Sensitivity drift</span>' : ""}
+            ${item.rlm_enabled ? '<span class="badge success">RLM enabled</span>' : '<span class="badge danger">RLM disabled</span>'}
           </div>
         `;
 
@@ -710,7 +927,7 @@
     async function selectReel(item, { updateFilter = true, immediate = false } = {}) {
       state.selectedReelId = item.reel_id;
       if (updateFilter) {
-        Filters.set("reel_code", item.reel_code || "", { emit: false, updateUrl: true });
+        Filters.set("reel_code", item.reel_code || "", { emit: true, updateUrl: true });
       }
       renderList();
       await renderDetail(item.reel_id, immediate);
@@ -741,6 +958,61 @@
         typeof reel.reel_start === "number" && typeof reel.reel_end === "number"
           ? reel.reel_end - reel.reel_start
           : null;
+
+      const phaseTimeline = renderTimeline(phases, "Inspection timeline");
+      const rlmPhaseTimeline =
+        rlm.phases && rlm.phases.length
+          ? renderTimeline(rlm.phases, "RLM timeline")
+          : "<span class='badge'>No RLM phases</span>";
+
+      const rlmMetrics = rlm.config ? extractRlmMetrics(rlm.config) : [];
+      const rlmConfigTable = rlmMetrics.length
+        ? `<table class="data-table">
+             <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+             <tbody>
+               ${rlmMetrics
+                 .map((metric) => `<tr><td>${metric.label}</td><td>${metric.value}</td></tr>`)
+                 .join("")}
+             </tbody>
+           </table>`
+        : "<span class='badge'>No RLM config metrics</span>";
+
+      const sensitivityTable = sensitivities.length
+        ? `<table class="data-table">
+             <thead><tr><th>Class</th><th>Threshold</th><th>Warn</th></tr></thead>
+             <tbody>
+               ${sensitivities
+                 .map(
+                   (row) =>
+                     `<tr><td>${row.defect_class || ""}</td><td>${Utils.formatNumber(
+                       row.threshold_value,
+                       3
+                     )}</td><td>${Utils.formatNumber(row.warn_threshold, 3)}</td></tr>`
+                 )
+                 .join("")}
+             </tbody>
+           </table>`
+        : "<span class='badge'>No standard sensitivities</span>";
+
+      const masksTable = masks.length
+        ? `<table class="data-table">
+             <thead><tr><th>Timestamp</th><th>XML ID</th><th>Sensitivity</th><th>Coords</th><th>Format</th></tr></thead>
+             <tbody>
+               ${masks
+                 .map(
+                   (mask) =>
+                     `<tr>
+                        <td>${formatTime(mask.timestamp)}</td>
+                        <td>${mask.xml_id || ""}</td>
+                        <td>${mask.sensitivitysetid || ""}</td>
+                        <td>${truncateCoords(mask.coords)}</td>
+                        <td>${Utils.formatNumber(mask.format_value, 2)}</td>
+                      </tr>`
+                 )
+                 .join("")}
+             </tbody>
+           </table>`
+        : "<span class='badge'>No masks</span>";
 
       return `
         <div class="summary-header">
@@ -778,55 +1050,18 @@
         </div>
 
         <div class="summary-section">
+          <h4>Inspection Phases</h4>
+          ${phaseTimeline}
+        </div>
+
+        <div class="summary-section">
           <h4>Sensitivity (Standard)</h4>
-          ${
-            sensitivities.length
-              ? `<table class="data-table">
-                  <thead><tr><th>Class</th><th>Threshold</th><th>Warn</th></tr></thead>
-                  <tbody>
-                    ${sensitivities
-                      .map(
-                        (row) =>
-                          `<tr><td>${row.defect_class || ""}</td><td>${Utils.formatNumber(
-                            row.threshold_value,
-                            3
-                          )}</td><td>${Utils.formatNumber(row.warn_threshold, 3)}</td></tr>`
-                      )
-                      .join("")}
-                  </tbody>
-                </table>`
-              : "<span class='badge'>No standard sensitivities</span>"
-          }
+          ${sensitivityTable}
         </div>
 
         <div class="summary-section">
           <h4>Masks</h4>
-          ${
-            masks.length
-              ? `<table class="data-table">
-                  <thead><tr><th>Timestamp</th><th>Coords</th><th>Format</th></tr></thead>
-                  <tbody>
-                    ${masks
-                      .map(
-                        (mask) =>
-                          `<tr><td>${formatTime(mask.timestamp)}</td><td>${(mask.coords || "").slice(
-                            0,
-                            40
-                          )}${mask.coords && mask.coords.length > 40 ? "…" : ""}</td><td>${Utils.formatNumber(
-                            mask.format_value,
-                            2
-                          )}</td></tr>`
-                      )
-                      .join("")}
-                  </tbody>
-                </table>`
-              : "<span class='badge'>No masks</span>"
-          }
-        </div>
-
-        <div class="summary-section">
-          <h4>Inspection Phases</h4>
-          ${renderTimeline(phases)}
+          ${masksTable}
         </div>
 
         <div class="summary-section">
@@ -835,11 +1070,8 @@
             <span>Monitor points: ${rlm.monitor_count || 0}</span>
             <span>Config: ${rlm.config ? "Loaded" : "Not available"}</span>
           </div>
-          ${
-            rlm.phases && rlm.phases.length
-              ? renderTimeline(rlm.phases, "RLM timeline")
-              : "<span class='badge'>No RLM phases</span>"
-          }
+          ${rlmConfigTable}
+          ${rlmPhaseTimeline}
         </div>
 
         <div class="summary-section">
@@ -850,6 +1082,64 @@
           </div>
         </div>
       `;
+
+      function truncateCoords(coords = "") {
+        if (!coords) return "";
+        return coords.length > 48 ? `${coords.slice(0, 48)}…` : coords;
+      }
+
+      function extractRlmMetrics(config) {
+        const defs = [
+          { key: "format", label: "Format" },
+          { key: "errexpand", label: "Err Expand" },
+          { key: "errshrink", label: "Err Shrink" },
+          { key: "wrnexpand", label: "Warn Expand" },
+          { key: "wrnshrink", label: "Warn Shrink" },
+          { key: "nomlength", label: "Nominal Length" },
+          { key: "nomlenght", label: "Nominal Length" },
+        ];
+        const seen = new Set();
+        const rows = [];
+        defs.forEach(({ key, label }) => {
+          if (seen.has(label)) return;
+          const value = findMetricValue(config, key);
+          if (value === null || value === undefined || value === "") return;
+          const numeric = Number(value);
+          const display = Number.isFinite(numeric) ? Utils.formatNumber(numeric, 3) : value;
+          rows.push({ label, value: display });
+          seen.add(label);
+        });
+        return rows;
+      }
+
+      function findMetricValue(node, target) {
+        if (node === null || node === undefined) return null;
+        if (typeof node !== "object") return null;
+        if (Object.prototype.hasOwnProperty.call(node, target)) {
+          return node[target];
+        }
+        if (node._attrs && Object.prototype.hasOwnProperty.call(node._attrs, target)) {
+          return node._attrs[target];
+        }
+        if (Array.isArray(node)) {
+          for (const child of node) {
+            const result = findMetricValue(child, target);
+            if (result !== null && result !== undefined && result !== "") return result;
+          }
+          return null;
+        }
+        if (node._children && Array.isArray(node._children)) {
+          const result = findMetricValue(node._children, target);
+          if (result !== null && result !== undefined && result !== "") return result;
+        }
+        for (const value of Object.values(node)) {
+          if (value && typeof value === "object") {
+            const result = findMetricValue(value, target);
+            if (result !== null && result !== undefined && result !== "") return result;
+          }
+        }
+        return null;
+      }
     }
 
     function renderTimeline(phases, ariaLabel) {
@@ -1147,7 +1437,12 @@
 
   function urlForStatic(path) {
     if (!path) return "";
-    return `${window.location.origin}/dashboard/static/${path.replace(/^\/?static\//, "")}`;
+    const clean = path.replace(/^\/?static\//, "").replace(/^\/+/, "");
+    const encoded = clean
+      .split("/")
+      .map((segment) => encodeURIComponent(segment))
+      .join("/");
+    return `${window.location.origin}/dashboard/static/${encoded}`;
   }
 
   function bindTabNav() {

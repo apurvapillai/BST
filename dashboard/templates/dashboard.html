@@ -15,41 +15,63 @@
 
   <div class="app-shell">
     <!-- Global Filters -->
-    <div class="filters" id="globalFilters">
-      <label for="filterMachine">Machine</label>
-      <select id="filterMachine">
-        {% for m in machines %}
-        <option value="{{ m.machine_id }}" {% if m.machine_id == default_machine_id %}selected{% endif %}>
-          {{ m.name }}
-        </option>
-        {% endfor %}
-      </select>
+    <div class="filters" id="globalFilters"
+         data-default-machine="{{ default_machine_id }}"
+         data-default-start="{{ default_start.strftime('%Y-%m-%dT%H:%M:%S') if default_start else '' }}"
+         data-default-end="{{ default_end.strftime('%Y-%m-%dT%H:%M:%S') if default_end else '' }}">
+      <div class="filter-grid">
+        <div class="filter-card">
+          <label for="filterMachine">Machine</label>
+          <select id="filterMachine">
+            {% for m in machines %}
+            <option value="{{ m.machine_id }}" {% if m.machine_id == default_machine_id %}selected{% endif %}>
+              {{ m.name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
 
-      <label for="filterStart">Start</label>
-      <input type="datetime-local" id="filterStart"
-             value="{{ default_start.strftime('%Y-%m-%dT%H:%M:%S') if default_start else '' }}">
+        <div class="filter-card">
+          <label for="filterStart">Start</label>
+          <input type="datetime-local" id="filterStart"
+                 value="{{ default_start.strftime('%Y-%m-%dT%H:%M:%S') if default_start else '' }}">
+        </div>
 
-      <label for="filterEnd">End</label>
-      <input type="datetime-local" id="filterEnd"
-             value="{{ default_end.strftime('%Y-%m-%dT%H:%M:%S') if default_end else '' }}">
+        <div class="filter-card">
+          <label for="filterEnd">End</label>
+          <input type="datetime-local" id="filterEnd"
+                 value="{{ default_end.strftime('%Y-%m-%dT%H:%M:%S') if default_end else '' }}">
+        </div>
 
-      <label for="filterJob">Job</label>
-      <select id="filterJob">
-        <option value="">All</option>
-      </select>
+        <div class="filter-card">
+          <label for="filterJob">Job</label>
+          <select id="filterJob">
+            <option value="">All</option>
+          </select>
+        </div>
 
-      <label for="filterOrder">Order</label>
-      <select id="filterOrder">
-        <option value="">All</option>
-      </select>
+        <div class="filter-card">
+          <label for="filterOrder">Order</label>
+          <select id="filterOrder">
+            <option value="">All</option>
+          </select>
+        </div>
 
-      <label for="filterReel">Reel Code</label>
-      <select id="filterReel">
-        <option value="">All</option>
-      </select>
+        <div class="filter-card">
+          <label for="filterReel">Reel Code</label>
+          <select id="filterReel">
+            <option value="">All</option>
+          </select>
+        </div>
+      </div>
 
-      <button id="applyFilters" class="apply-btn">Apply</button>
+      <div class="filter-actions">
+        <button id="applyFilters" class="apply-btn">Apply</button>
+        <button id="clearFilters" class="clear-btn" type="button">Clear</button>
+      </div>
     </div>
+
+    <div class="filter-chips" id="activeFilterChips"></div>
 
     <!-- Tabs -->
     <div class="tabs" id="tabNav">
@@ -108,6 +130,7 @@
         <div id="overviewDefectsTrend" class="chart"></div>
         <div id="overviewJobsMeters" class="chart"></div>
         <div id="overviewJobsTime" class="chart"></div>
+        <div id="overviewStateTrend" class="chart"></div>
         <div id="overviewJobsDefects" class="chart"></div>
       </div>
     </section>
