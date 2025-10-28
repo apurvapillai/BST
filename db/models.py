@@ -99,6 +99,7 @@ class Defect(Base):
     defect_time = Column(DateTime, index=True)
     format_position = Column(DECIMAL(10, 2))
     image_src = Column(String(255))
+    coords_json = Column(JSON)
 
     reel = relationship("Reel", back_populates="defects")
 

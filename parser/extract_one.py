@@ -75,6 +75,22 @@ def attr_as_float(node: Optional[ET.Element], attr: str) -> Optional[float]:
         return None
 
 
+def parse_float_list(text: Optional[str]) -> Optional[List[float]]:
+    """Turn a comma/space separated string into a list of floats."""
+    if not text:
+        return None
+    floats: List[float] = []
+    for token in text.replace(";", ",").replace("\n", ",").split(","):
+        val = token.strip()
+        if not val:
+            continue
+        try:
+            floats.append(float(val))
+        except Exception:
+            continue
+    return floats or None
+
+
 def safe_join_relpath(abs_path: str, static_root: str = STATIC_ROOT) -> str:
     """
     Return a path suitable for Flask's url_for('static', filename=...).
@@ -304,6 +320,15 @@ def extract_one(zip_path: str):
                         shutil.copy(extracted_img_path, target_path)
                         image_src_rel = safe_join_relpath(target_path)
 
+                coords_payload: List[Dict[str, Optional[List[float]]]] = []
+                for pd_node in defect.findall(".//pds/pd"):
+                    x_vals = parse_float_list(pd_node.findtext("x"))
+                    y_vals = parse_float_list(pd_node.findtext("y"))
+                    if not x_vals and not y_vals:
+                        continue
+                    coords_payload.append({"x": x_vals, "y": y_vals})
+                coords_value = coords_payload or None
+
                 session.add(
                     Defect(
                         reel_id=reel.reel_id,
@@ -313,6 +338,7 @@ def extract_one(zip_path: str):
                         defect_time=defect_time,
                         format_position=format_position,
                         image_src=image_src_rel,
+                        coords_json=coords_value,
                     )
                 )
 

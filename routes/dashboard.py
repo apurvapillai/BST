@@ -1647,6 +1647,7 @@ def api_defects():
                         "format_position": _to_float(defect.format_position),
                         "phase": phase_name,
                         "image_src": (defect.image_src or "").replace("\\", "/"),
+                        "coords": defect.coords_json or [],
                     }
                 )
 
