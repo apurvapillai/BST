@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections import defaultdict
+import copy
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -101,6 +102,17 @@ def _validate_filters(session: Session) -> Dict[str, Optional[str]]:
         "order": args.get("order") or None,
         "reel_code": args.get("reel_code") or None,
     }
+    reel_codes = args.getlist("reel_code")
+    if len(reel_codes) == 1 and "," in reel_codes[0]:
+        reel_codes = [code.strip() for code in reel_codes[0].split(",") if code.strip()]
+    reel_codes = [code for code in reel_codes if code]
+    if filters["reel_code"] and filters["reel_code"] not in reel_codes:
+        reel_codes.append(filters["reel_code"])
+    filters["reel_codes"] = reel_codes
+    if reel_codes:
+        filters["reel_code"] = reel_codes[0]
+    else:
+        filters["reel_code"] = None
     return filters
 
 
@@ -111,8 +123,13 @@ def _apply_reel_filters(query, filters: Dict[str, Optional[str]], include_reel_c
     query = query.filter(Reel.machine_id == filters["machine_id"])
     query = query.filter(Reel.time_start <= end).filter(Reel.time_end >= start)
 
-    if include_reel_code and filters.get("reel_code"):
-        query = query.filter(Reel.reel_code == filters["reel_code"])
+    if include_reel_code:
+        reel_codes: Iterable[str] = filters.get("reel_codes") or []
+        if not reel_codes and filters.get("reel_code"):
+            reel_codes = [filters["reel_code"]]
+        reel_codes = [code for code in reel_codes if code]
+        if reel_codes:
+            query = query.filter(Reel.reel_code.in_(reel_codes))
     if filters.get("job"):
         query = query.filter(Reel.job_name == filters["job"])
     if filters.get("order"):
@@ -322,6 +339,188 @@ def _standard_map(
     return result
 
 
+def _ordered_reference_images(
+    images: Optional[Iterable[ReferenceImage]],
+) -> List[ReferenceImage]:
+    """Return reference images in capture order, filtering out empty records."""
+    ordered = [
+        image
+        for image in (images or [])
+        if (image.filename and image.filename.strip()) or (image.image_src and image.image_src.strip())
+    ]
+    return sorted(
+        ordered,
+        key=lambda img: (
+            img.ref_image_id or 0,
+            (img.filename or "").strip().lower(),
+            (img.image_src or "").strip().lower(),
+        ),
+    )
+
+
+def _reference_change_pairs(
+    ordered_images: Iterable[ReferenceImage],
+) -> List[Tuple[ReferenceImage, ReferenceImage]]:
+    images = list(ordered_images)
+    return list(zip(images, images[1:]))
+
+
+def _counter_to_list(counter: Counter, limit: int | None = None) -> List[Dict[str, object]]:
+    if not counter:
+        return []
+    items = counter.most_common()
+    if limit is not None:
+        items = items[:limit]
+    return [{"name": name, "count": int(count)} for name, count in items]
+
+def _reference_change_detail(
+    previous: ReferenceImage,
+    current: ReferenceImage,
+) -> Dict[str, Optional[str]]:
+    def _label(image: ReferenceImage) -> Optional[str]:
+        if image.ref_image_id is not None:
+            return str(image.ref_image_id)
+        return image.filename or image.image_src
+
+    return {
+        "from": _label(previous),
+        "to": _label(current),
+        "from_filename": previous.filename,
+        "to_filename": current.filename,
+    }
+
+
+def _sensitivity_tuple_has_values(values: Optional[Tuple[Optional[float], Optional[float]]]) -> bool:
+    if not values:
+        return False
+    threshold, warn = values
+    has_threshold = _to_float(threshold) is not None
+    has_warn = _to_float(warn) is not None
+    return has_threshold or has_warn
+
+
+def _sensitivity_tuple_delta(
+    previous: Optional[Tuple[Optional[float], Optional[float]]],
+    current: Optional[Tuple[Optional[float], Optional[float]]],
+) -> Optional[Dict[str, Optional[float]]]:
+    if not (_sensitivity_tuple_has_values(previous) and _sensitivity_tuple_has_values(current)):
+        return None
+    prev_threshold = _to_float(previous[0]) if previous else None
+    curr_threshold = _to_float(current[0]) if current else None
+    prev_warn = _to_float(previous[1]) if previous else None
+    curr_warn = _to_float(current[1]) if current else None
+    changed = False
+    if prev_threshold is not None and curr_threshold is not None and prev_threshold != curr_threshold:
+        changed = True
+    if prev_warn is not None and curr_warn is not None and prev_warn != curr_warn:
+        changed = True
+    if not changed:
+        return None
+    return {
+        "previous": {
+            "threshold": prev_threshold,
+            "warn": prev_warn,
+        },
+        "current": {
+            "threshold": curr_threshold,
+            "warn": curr_warn,
+        },
+    }
+
+
+def _combine_timestamp(date_str: Optional[str], time_str: Optional[str]) -> Optional[str]:
+    if not date_str and not time_str:
+        return None
+    if date_str and time_str:
+        try:
+            return datetime.fromisoformat(f"{date_str}T{time_str}").isoformat()
+        except ValueError:
+            pass
+    if date_str and time_str:
+        return f"{date_str} {time_str}".strip()
+    return (date_str or time_str or "").strip() or None
+
+
+def _extract_monpoints(config_json: Optional[dict]) -> List[Dict[str, Optional[object]]]:
+    if not isinstance(config_json, dict):
+        return []
+
+    results: List[Dict[str, Optional[object]]] = []
+
+    def _walk(node):
+        if isinstance(node, list):
+            for child in node:
+                _walk(child)
+            return
+
+        if not isinstance(node, dict):
+            return
+
+        tag = node.get("_tag")
+        attrs = node.get("_attrs")
+        if tag == "monpoint" and isinstance(attrs, dict):
+            entry = {
+                "id": attrs.get("id"),
+                "timestamp": _combine_timestamp(attrs.get("date"), attrs.get("time")),
+                "format": _to_float(attrs.get("format")),
+                "webspeed": _to_float(attrs.get("webspeed")),
+                "curlength": _to_float(attrs.get("curlength")),
+            }
+            if any(value is not None for value in entry.values()):
+                results.append(entry)
+
+        for key, value in node.items():
+            if key in {"_attrs", "_text"}:
+                continue
+            _walk(value)
+
+        if isinstance(attrs, dict):
+            _walk(attrs)
+
+        children = node.get("_children")
+        if isinstance(children, list):
+            for child in children:
+                _walk(child)
+
+    _walk(config_json)
+    return results
+
+
+def _serialize_sensitivity_snapshot(
+    snapshot: Optional[Dict[str, Optional[Tuple[Optional[float], Optional[float]]]]]
+) -> Dict[str, Dict[str, Optional[float]]]:
+    result: Dict[str, Dict[str, Optional[float]]] = {}
+    if not snapshot:
+        return result
+    for cls in sorted(snapshot.keys()):
+        values = snapshot[cls]
+        if values is None:
+            result[cls] = {"threshold": None, "warn": None}
+        else:
+            threshold, warn = values
+            result[cls] = {
+                "threshold": _to_float(threshold),
+                "warn": _to_float(warn),
+            }
+    return result
+
+
+def _serialize_rlm_snapshot(
+    snapshot: Optional[Dict[str, Optional[float]]], keys: Iterable[str]
+) -> Dict[str, Optional[float]]:
+    if not snapshot:
+        return {}
+    result: Dict[str, Optional[float]] = {}
+    for key in sorted(set(keys)):
+        value = snapshot.get(key)
+        if value is None:
+            result[key] = None
+        else:
+            num = _to_float(value)
+            result[key] = round(num, 3) if num is not None else None
+    return result
+
+
 # --------------------------------------------------------------------------- #
 # Routes
 # --------------------------------------------------------------------------- #
@@ -417,14 +616,125 @@ def api_overview():
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
 
+        window_start = filters["start"]
+        window_end = filters["end"]
+        if window_start is None or window_end is None:
+            window_start, window_end = _default_window()
+
         reels = (
             _apply_reel_filters(session.query(Reel), filters)
             .options(
                 selectinload(Reel.inspection_phases),
                 selectinload(Reel.defects),
+                selectinload(Reel.sensitivity_sets),
+                selectinload(Reel.masks),
+                selectinload(Reel.reference_images),
+                selectinload(Reel.rlm_config),
+                selectinload(Reel.rlm_monitoring),
+                selectinload(Reel.rlm_phases),
             )
             .all()
         )
+
+        SENSITIVITY_WATCH = {
+            "colour",
+            "flaw",
+            "register",
+            "sporadicflaw",
+            "sporadicstreak",
+            "streak",
+        }
+        EVENT_DEFECT = "defect"
+        EVENT_REFERENCE = "reference_change"
+        EVENT_MASK = "mask_applied"
+        EVENT_SENSITIVITY = "sensitivity_change"
+        EVENT_RLM = "rlm_config_change"
+        TIMELINE_EVENT_TYPES = {EVENT_MASK, EVENT_SENSITIVITY, EVENT_RLM, EVENT_REFERENCE}
+
+        event_aggregates: Dict[Tuple[str, datetime, str], Dict[str, object]] = {}
+        summary_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        job_trackers: Dict[Tuple[str, str], Dict[str, object]] = {}
+        job_defect_timeline: Dict[Tuple[str, datetime], int] = defaultdict(int)
+        job_operations_timeline_map: Dict[Tuple[str, datetime], Dict[str, object]] = {}
+        job_order_metrics: Dict[
+            Tuple[str, str],
+            Dict[str, object],
+        ] = {}
+        job_metrics_summary: Dict[
+            str,
+            Dict[str, object],
+        ] = {}
+
+        def job_label(name: Optional[str]) -> str:
+            return name or "Unassigned"
+
+        def normalize_event_time(ts: Optional[datetime]) -> Optional[datetime]:
+            if ts is None:
+                return None
+            if ts < window_start:
+                return window_start
+            if ts > window_end:
+                return window_end
+            return ts
+
+        def record_event(
+            job_name: Optional[str],
+            timestamp: Optional[datetime],
+            event_type: str,
+            *,
+        detail: Optional[Dict[str, object]] = None,
+        class_name: Optional[str] = None,
+        count: int = 1,
+        reel_code: Optional[str] = None,
+    ) -> None:
+            ts = normalize_event_time(timestamp)
+            if ts is None:
+                return
+            job_display = job_label(job_name)
+            bucket = ts.replace(minute=0, second=0, microsecond=0)
+            key = (job_display, bucket, event_type)
+            if key not in event_aggregates:
+                event_aggregates[key] = {
+                    "job": job_display,
+                    "time": bucket,
+                    "event_type": event_type,
+                    "count": 0,
+                    "details": [],
+                    "class_counts": Counter(),
+                    "reel_codes": set(),
+                }
+            entry = event_aggregates[key]
+            entry["count"] += count
+            if detail is not None:
+                safe_detail = copy.deepcopy(detail)
+                entry["details"].append(safe_detail)
+            if class_name:
+                entry["class_counts"][class_name] += count
+            if reel_code:
+                entry["reel_codes"].add(reel_code)
+            summary_counts[job_display][event_type] += count
+
+            if event_type == EVENT_DEFECT:
+                job_defect_timeline[(job_display, bucket)] += count
+            else:
+                operations_entry = job_operations_timeline_map.setdefault(
+                    (job_display, bucket),
+                    {
+                        "job": job_display,
+                        "time": bucket,
+                        "event_counts": Counter(),
+                        "reels_by_type": defaultdict(set),
+                        "details_by_type": defaultdict(list),
+                    },
+                )
+                if event_type in TIMELINE_EVENT_TYPES:
+                    operations_entry["event_counts"][event_type] += count
+                    if reel_code:
+                        operations_entry["reels_by_type"][event_type].add(reel_code)
+                    if detail is not None:
+                        operations_entry["details_by_type"][event_type].append(copy.deepcopy(detail))
+
+        reels_sorted = sorted(reels, key=lambda r: r.time_start or datetime.min)
 
         job_set = set()
         jobs_meters = defaultdict(float)
@@ -443,7 +753,46 @@ def api_overview():
         }
 
         defects = []
-        for reel in reels:
+        for reel in reels_sorted:
+            job_name = reel.job_name
+            job_display = job_label(job_name)
+            job_key = (job_name or SENTINEL_NONE, reel.order_number or SENTINEL_NONE)
+            tracker = job_trackers.setdefault(job_key, {"sens": None, "rlm_config": None})
+
+            job_order_key = (job_name or SENTINEL_NONE, reel.order_number or SENTINEL_NONE)
+            order_display = reel.order_number if reel.order_number else None
+            job_order_entry = job_order_metrics.setdefault(
+                job_order_key,
+                {
+                    "job_key": job_name or SENTINEL_NONE,
+                    "order_key": reel.order_number or SENTINEL_NONE,
+                    "job_display": job_display,
+                    "order_display": order_display,
+                    "reference_changes": 0,
+                    "rlm_monitor_count": 0,
+                    "defect_count": 0,
+                    "defect_classes": Counter(),
+                    "phase_seconds": defaultdict(float),
+                    "mask_count": 0,
+                    "mask_counter": Counter(),
+                    "rlm_points": [],
+                },
+            )
+            job_summary_entry = job_metrics_summary.setdefault(
+                job_name or SENTINEL_NONE,
+                {
+                    "job_display": job_display,
+                    "reference_changes": 0,
+                    "rlm_monitor_count": 0,
+                    "defect_count": 0,
+                    "defect_classes": Counter(),
+                    "phase_seconds": defaultdict(float),
+                    "mask_count": 0,
+                    "mask_counter": Counter(),
+                    "rlm_points": [],
+                },
+            )
+
             meters = 0.0
             if reel.reel_start is not None and reel.reel_end is not None:
                 meters = max(
@@ -451,30 +800,191 @@ def api_overview():
                     0.0,
                 )
             totals["length"] += meters
-            if reel.job_name:
-                job_set.add(reel.job_name)
-                jobs_meters[reel.job_name] += meters
+            if job_name:
+                job_set.add(job_name)
+                jobs_meters[job_name] += meters
 
-            phase_mix = _phase_mix_for_reel(reel, filters["start"], filters["end"])
+            inspection_phases_sorted = sorted(
+                reel.inspection_phases or [], key=lambda p: p.start_time or datetime.min
+            )
+            phase_mix = _phase_mix_for_reel(reel, window_start, window_end)
             for key in ("active", "inactive", "learn"):
                 seconds = phase_mix.get(key, {}).get("seconds", 0.0)
                 length = phase_mix.get(key, {}).get("length", 0.0)
                 totals[f"{key}_seconds"] += seconds
                 totals[f"{key}_length"] += length
-                if reel.job_name:
-                    jobs_time[reel.job_name][key] += seconds / 60.0  # minutes
+                if job_name:
+                    jobs_time[job_name][key] += seconds / 60.0  # minutes
+                if seconds > 0:
+                    job_order_entry["phase_seconds"][key] += seconds
+                    job_summary_entry["phase_seconds"][key] += seconds
 
             for defect in reel.defects or []:
                 defects.append(defect)
-                if reel.job_name and defect.defect_time and filters["start"] <= defect.defect_time <= filters["end"]:
-                    jobs_defects[reel.job_name] += 1
+                if defect.defect_time and window_start <= defect.defect_time <= window_end:
+                    if job_name:
+                        jobs_defects[job_name] += 1
+                    record_event(
+                        job_name,
+                        defect.defect_time,
+                        EVENT_DEFECT,
+                        class_name=(defect.class_name or "").strip() or None,
+                        reel_code=reel.reel_code,
+                    )
+                    job_order_entry["defect_count"] += 1
+                    job_summary_entry["defect_count"] += 1
+                    if defect.class_name:
+                        cls_name = defect.class_name.strip()
+                        if cls_name:
+                            job_order_entry["defect_classes"][cls_name] += 1
+                            job_summary_entry["defect_classes"][cls_name] += 1
 
             _accumulate_phase_buckets(
                 state_buckets,
-                reel.inspection_phases or [],
-                filters["start"],
-                filters["end"],
+                inspection_phases_sorted,
+                window_start,
+                window_end,
             )
+
+            # Reference image changes
+            ordered_refs = _ordered_reference_images(reel.reference_images)
+            ref_change_pairs = _reference_change_pairs(ordered_refs)
+            if ref_change_pairs:
+                change_time = reel.time_end or reel.time_start or window_end
+                change_count = len(ref_change_pairs)
+                job_order_entry["reference_changes"] += change_count
+                job_summary_entry["reference_changes"] += change_count
+                for previous_ref, new_ref in ref_change_pairs:
+                    detail = _reference_change_detail(previous_ref, new_ref)
+                    record_event(
+                        job_name,
+                        change_time,
+                        EVENT_REFERENCE,
+                        detail=detail,
+                        reel_code=reel.reel_code,
+                    )
+
+            # Mask applications
+            for mask in reel.masks or []:
+                mask_ts = mask.timestamp
+                if not mask_ts or mask_ts < window_start or mask_ts > window_end:
+                    continue
+                detail = {
+                    "xml_id": mask.xml_id,
+                    "sensitivity_id": mask.sensitivitysetid,
+                    "format_value": _to_float(mask.format_value),
+                }
+                mask_label = (
+                    (mask.xml_id or "").strip()
+                    or (mask.sensitivitysetid or "").strip()
+                    or "Mask"
+                )
+                job_order_entry["mask_count"] += 1
+                job_summary_entry["mask_count"] += 1
+                if mask_label:
+                    job_order_entry["mask_counter"][mask_label] += 1
+                    job_summary_entry["mask_counter"][mask_label] += 1
+                record_event(
+                    job_name,
+                    mask_ts,
+                    EVENT_MASK,
+                    detail=detail,
+                    reel_code=reel.reel_code,
+                )
+
+            # RLM monitoring points
+            # RLM configuration drift
+            current_std = _standard_map(reel.sensitivity_sets)
+            normalized_std = {
+                (cls or "").lower(): values for cls, values in current_std.items()
+            }
+            current_watch_std = {
+                cls: normalized_std.get(cls) for cls in SENSITIVITY_WATCH
+            }
+            previous_std = tracker.get("sens")
+            if previous_std is not None:
+                change_time = reel.time_start or reel.time_end or window_start
+                sens_changes: List[Dict[str, object]] = []
+                for cls in SENSITIVITY_WATCH:
+                    prev_vals = previous_std.get(cls)
+                    curr_vals = current_watch_std.get(cls)
+                    delta = _sensitivity_tuple_delta(prev_vals, curr_vals)
+                    if not delta:
+                        continue
+                    sens_changes.append(
+                        {
+                            "class": cls,
+                            "previous": delta["previous"],
+                            "current": delta["current"],
+                        }
+                    )
+                if sens_changes:
+                    detail = {
+                        "changes": sens_changes,
+                        "previous_settings": _serialize_sensitivity_snapshot(previous_std),
+                        "current_settings": _serialize_sensitivity_snapshot(current_watch_std),
+                    }
+                    record_event(
+                        job_name,
+                        change_time,
+                        EVENT_SENSITIVITY,
+                        detail=detail,
+                        reel_code=reel.reel_code,
+                        count=len(sens_changes),
+                    )
+            tracker["sens"] = current_watch_std
+
+            monpoints = _extract_monpoints(reel.rlm_config.config_json) if reel.rlm_config else []
+            if monpoints:
+                job_order_entry.setdefault("rlm_points", []).extend(monpoints)
+                job_summary_entry.setdefault("rlm_points", []).extend(monpoints)
+
+            # RLM configuration drift
+            current_config_flat = (
+                _flatten_config(reel.rlm_config.config_json) if reel.rlm_config else {}
+            )
+            previous_config = tracker.get("rlm_config")
+            if previous_config is not None:
+                change_time = reel.time_start or reel.time_end or window_start
+                keys = sorted(set(previous_config) | set(current_config_flat))
+                config_changes = []
+                for key in keys:
+                    prev_val = previous_config.get(key)
+                    curr_val = current_config_flat.get(key)
+                    if prev_val == curr_val:
+                        continue
+                    config_changes.append(
+                        {
+                            "key": key,
+                            "old": None if prev_val is None else round(prev_val, 3),
+                            "new": None if curr_val is None else round(curr_val, 3),
+                        }
+                    )
+                if config_changes:
+                    changed_keys = [entry["key"] for entry in config_changes]
+                    detail = {
+                        "changes": config_changes,
+                        "previous_settings": _serialize_rlm_snapshot(previous_config, changed_keys),
+                        "current_settings": _serialize_rlm_snapshot(current_config_flat, changed_keys),
+                    }
+                    record_event(
+                        job_name,
+                        change_time,
+                        EVENT_RLM,
+                        detail=detail,
+                        reel_code=reel.reel_code,
+                        count=len(config_changes),
+                    )
+            tracker["rlm_config"] = current_config_flat
+
+            monitor_count = sum(
+                1
+                for monitor in reel.rlm_monitoring or []
+                if monitor.timestamp and window_start <= monitor.timestamp <= window_end
+            )
+            if monitor_count:
+                job_order_entry["rlm_monitor_count"] += monitor_count
+                job_summary_entry["rlm_monitor_count"] += monitor_count
 
         state_trend = []
         for bucket_time in sorted(state_buckets.keys()):
@@ -489,7 +999,7 @@ def api_overview():
             state_trend.append(entry)
 
         defects_by_type, defects_trend, defect_classes, total_defects = _defect_buckets(
-            defects, filters["start"], filters["end"]
+            defects, window_start, window_end
         )
 
         total_seconds = (
@@ -498,6 +1008,152 @@ def api_overview():
 
         def pct(value: float) -> float:
             return round(value / total_seconds * 100, 1) if total_seconds else 0.0
+
+        job_events = []
+        for entry in sorted(
+            event_aggregates.values(),
+            key=lambda item: (item["time"], item["job"], item["event_type"]),
+        ):
+            class_counts = entry["class_counts"]
+            breakdown = [
+                {"class": cls, "count": int(count)}
+                for cls, count in class_counts.most_common()
+                if count
+            ]
+            details = entry["details"]
+            event_payload: Dict[str, object] = {
+                "job": entry["job"],
+                "time": _iso(entry["time"]),
+                "event_type": entry["event_type"],
+                "count": int(entry["count"]),
+            }
+            if breakdown:
+                event_payload["class_breakdown"] = breakdown
+            if details:
+                max_details = 20
+                event_payload["details"] = details[:max_details]
+                remaining = len(details) - max_details
+                if remaining > 0:
+                    event_payload["details_more"] = remaining
+            reel_codes = entry.get("reel_codes")
+            if reel_codes:
+                event_payload["reel_codes"] = sorted({code for code in reel_codes if code})
+            job_events.append(event_payload)
+
+        job_event_summary = [
+            {"job": job, "event_type": event_type, "count": int(count)}
+            for job in sorted(summary_counts.keys())
+            for event_type, count in sorted(summary_counts[job].items())
+            if count
+        ]
+
+        job_defects_timeline = [
+            {"job": job, "time": _iso(bucket), "count": int(count)}
+            for (job, bucket), count in sorted(
+                job_defect_timeline.items(), key=lambda item: (item[0][1], item[0][0])
+            )
+        ]
+
+        job_operations_timeline = []
+        for (job, bucket), payload in sorted(
+            job_operations_timeline_map.items(),
+            key=lambda item: (item[1]["time"], item[0][0]),
+        ):
+            counts = payload["event_counts"]
+            total = int(sum(counts.values()))
+            if not total:
+                continue
+            events = []
+            reels_by_type = payload["reels_by_type"]
+            details_by_type = payload.get("details_by_type", {})
+            if isinstance(details_by_type, defaultdict):
+                details_by_type = {key: list(value) for key, value in details_by_type.items()}
+            for event_type, cnt in sorted(counts.items()):
+                reels = sorted({code for code in reels_by_type.get(event_type, set()) if code})
+                events.append(
+                    {
+                        "event_type": event_type,
+                        "count": int(cnt),
+                        "reel_codes": reels,
+                        "details": details_by_type.get(event_type, [])[:5],
+                    }
+                )
+            job_operations_timeline.append(
+                {
+                    "job": job,
+                    "time": _iso(payload["time"]),
+                    "total": total,
+                    "events": events,
+                }
+            )
+
+        def _dominant_phase(phase_seconds: Dict[str, float]) -> Optional[str]:
+            if not phase_seconds:
+                return None
+            return max(phase_seconds.items(), key=lambda item: item[1])[0]
+
+        def _top_counter(counter: Counter) -> Tuple[Optional[str], int]:
+            if not counter:
+                return None, 0
+            name, count = counter.most_common(1)[0]
+            return name, int(count)
+
+        def _prepare_breakdown(counter: Counter, limit: int | None = None) -> List[Dict[str, object]]:
+            return _counter_to_list(counter, limit)
+
+        job_order_metrics_payload: List[Dict[str, object]] = []
+        for (_, _), metrics in job_order_metrics.items():
+            defect_class_counter: Counter = metrics["defect_classes"]
+            mask_counter: Counter = metrics.get("mask_counter", Counter())
+            phase_seconds: Dict[str, float] = metrics["phase_seconds"]
+            dominant_phase = _dominant_phase(phase_seconds)
+            top_defect_class, top_defect_count = _top_counter(defect_class_counter)
+            top_mask_xml, top_mask_count = _top_counter(mask_counter)
+            job_order_metrics_payload.append(
+                {
+                    "job": metrics["job_display"],
+                    "order": metrics["order_display"],
+                    "reference_changes": int(metrics["reference_changes"]),
+                    "rlm_monitor_count": int(metrics["rlm_monitor_count"]),
+                    "defect_count": int(metrics["defect_count"]),
+                    "defect_type_count": len(defect_class_counter),
+                    "top_defect_class": top_defect_class,
+                    "top_defect_count": top_defect_count,
+                    "dominant_phase": dominant_phase,
+                    "mask_count": int(metrics.get("mask_count", 0)),
+                    "top_mask_xml": top_mask_xml,
+                    "top_mask_count": top_mask_count,
+                    "defect_breakdown": _prepare_breakdown(defect_class_counter, limit=8),
+                    "mask_breakdown": _prepare_breakdown(mask_counter, limit=8),
+                }
+            )
+
+        job_metrics_payload: List[Dict[str, object]] = []
+        for metrics in job_metrics_summary.values():
+            defect_class_counter: Counter = metrics["defect_classes"]
+            top_defect_class, top_defect_count = _top_counter(defect_class_counter)
+            mask_counter: Counter = metrics.get("mask_counter", Counter())
+            top_mask_xml, top_mask_count = _top_counter(mask_counter)
+            phase_seconds: Dict[str, float] = metrics["phase_seconds"]
+            dominant_phase = _dominant_phase(phase_seconds)
+            job_metrics_payload.append(
+                {
+                    "job": metrics["job_display"],
+                    "reference_changes": int(metrics["reference_changes"]),
+                    "rlm_monitor_count": int(metrics["rlm_monitor_count"]),
+                    "defect_count": int(metrics["defect_count"]),
+                    "defect_type_count": len(defect_class_counter),
+                    "top_defect_class": top_defect_class,
+                    "top_defect_count": top_defect_count,
+                    "dominant_phase": dominant_phase,
+                    "mask_count": int(metrics.get("mask_count", 0)),
+                    "top_mask_xml": top_mask_xml,
+                    "top_mask_count": top_mask_count,
+                    "defect_breakdown": _prepare_breakdown(defect_class_counter, limit=8),
+                    "mask_breakdown": _prepare_breakdown(mask_counter, limit=8),
+                }
+            )
+
 
         response = {
             "kpis": {
@@ -510,7 +1166,7 @@ def api_overview():
                 "inactive_length": round(totals["inactive_length"], 2),
                 "learn_length": round(totals["learn_length"], 2),
                 "total_defects": total_defects,
-                "defect_classes": defect_classes,
+                "defect_classes": int(defect_classes),
             },
             "defects_by_type": defects_by_type,
             "defects_trend": defects_trend,
@@ -532,6 +1188,12 @@ def api_overview():
                 for job, count in sorted(jobs_defects.items(), key=lambda item: item[1], reverse=True)
             ],
             "state_trend": state_trend,
+            "job_events": job_events,
+            "job_event_summary": job_event_summary,
+            "jobs_defects_timeline": job_defects_timeline,
+            "job_operations_timeline": job_operations_timeline,
+            "job_order_metrics": job_order_metrics_payload,
+            "job_metrics": job_metrics_payload,
         }
     return jsonify(response)
 
@@ -546,6 +1208,7 @@ def _baseline_for_job_order(
     baseline_filters["job"] = job
     baseline_filters["order"] = order
     baseline_filters.pop("reel_code", None)
+    baseline_filters.pop("reel_codes", None)
 
     query = _apply_reel_filters(
         session.query(Reel), baseline_filters, include_reel_code=False
@@ -578,7 +1241,7 @@ def api_job_explorer():
             return jsonify({"error": str(exc)}), 400
 
         page, page_size = _paginate()
-        base_query = _apply_reel_filters(session.query(Reel), filters)
+        base_query = _apply_reel_filters(session.query(Reel), filters, include_reel_code=False)
 
         total = base_query.count()
         reels = (
@@ -617,41 +1280,41 @@ def api_job_explorer():
                 end_val = _to_float(reel.reel_end) or 0.0
                 reel_meters = max(end_val - start_val, 0.0)
 
+            ordered_refs = _ordered_reference_images(reel.reference_images)
             ref_images = [
                 {
                     "filename": img.filename,
                     "image_src": (img.image_src or "").replace("\\", "/"),
                 }
-                for img in sorted(reel.reference_images or [], key=lambda x: x.filename or "")
+                for img in ordered_refs
             ]
 
-            # Reference change detection
-            ref_change_count = 0
+            ref_change_pairs = _reference_change_pairs(ordered_refs)
+            ref_change_count = len(ref_change_pairs)
             ref_change_times: List[str] = []
-            last_ref = None
-            for phase in sorted(reel.inspection_phases or [], key=lambda p: p.start_time or datetime.min):
-                ref_id = phase.refimgid
-                if ref_id and last_ref and ref_id != last_ref:
-                    ref_change_count += 1
-                    ref_change_times.append(_iso(phase.start_time))
-                if ref_id:
-                    last_ref = ref_id
 
             current_std = _standard_map(reel.sensitivity_sets)
             baseline_std = _standard_map(baseline.sensitivity_sets) if baseline else {}
             sens_changes = []
             for cls in sorted(set(current_std) | set(baseline_std)):
-                cur = current_std.get(cls, (None, None))
-                base = baseline_std.get(cls, (None, None))
-                if cur == base:
+                current_values = current_std.get(cls)
+                baseline_values = baseline_std.get(cls)
+                delta = _sensitivity_tuple_delta(baseline_values, current_values)
+                if not delta:
                     continue
-                thres_delta = (cur[0] or 0.0) - (base[0] or 0.0)
-                warn_delta = (cur[1] or 0.0) - (base[1] or 0.0)
+                prev_thresh = delta["previous"].get("threshold")
+                curr_thresh = delta["current"].get("threshold")
+                prev_warn = delta["previous"].get("warn")
+                curr_warn = delta["current"].get("warn")
                 sens_changes.append(
                     {
                         "name": cls,
-                        "thres_delta": round(thres_delta, 3),
-                        "warn_delta": round(warn_delta, 3),
+                        "previous_threshold": prev_thresh,
+                        "current_threshold": curr_thresh,
+                        "previous_warn": prev_warn,
+                        "current_warn": curr_warn,
+                        "thres_delta": round(curr_thresh - prev_thresh, 3) if prev_thresh is not None and curr_thresh is not None else None,
+                        "warn_delta": round(curr_warn - prev_warn, 3) if prev_warn is not None and curr_warn is not None else None,
                     }
                 )
 
@@ -764,7 +1427,7 @@ def api_reel_summary(reel_id: int):
                 "filename": img.filename,
                 "image_src": (img.image_src or "").replace("\\", "/"),
             }
-            for img in sorted(reel.reference_images or [], key=lambda x: x.filename or "")
+            for img in _ordered_reference_images(reel.reference_images)
         ]
 
         sensitivities = [
@@ -782,6 +1445,8 @@ def api_reel_summary(reel_id: int):
                 "timestamp": _iso(mask.timestamp),
                 "coords": mask.coords,
                 "format_value": _to_float(mask.format_value),
+                "xml_id": mask.xml_id,
+                "sensitivitysetid": mask.sensitivitysetid,
             }
             for mask in sorted(reel.masks or [], key=lambda x: x.timestamp or datetime.min)
         ]
@@ -832,6 +1497,7 @@ def api_reel_summary(reel_id: int):
                 "config": reel.rlm_config.config_json if reel.rlm_config else None,
                 "phases": rlm_phases,
                 "monitor_count": len(reel.rlm_monitoring or []),
+                "points": _extract_monpoints(reel.rlm_config.config_json) if reel.rlm_config else [],
             },
             "defects_summary": defects_summary,
         }

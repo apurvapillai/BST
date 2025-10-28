@@ -59,16 +59,12 @@
 
         <div class="filter-card">
           <label for="filterReel">Reel Code</label>
-          <select id="filterReel">
+          <select id="filterReel" multiple>
             <option value="">All</option>
           </select>
         </div>
       </div>
 
-      <div class="filter-actions">
-        <button id="applyFilters" class="apply-btn">Apply</button>
-        <button id="clearFilters" class="clear-btn" type="button">Clear</button>
-      </div>
     </div>
 
     <div class="filter-chips" id="activeFilterChips"></div>
@@ -130,8 +126,16 @@
         <div id="overviewDefectsTrend" class="chart"></div>
         <div id="overviewJobsMeters" class="chart"></div>
         <div id="overviewJobsTime" class="chart"></div>
-        <div id="overviewStateTrend" class="chart"></div>
-        <div id="overviewJobsDefects" class="chart"></div>
+        <div class="chart-row">
+          <div id="overviewRefChangesByJob" class="chart chart-medium"></div>
+          <div id="overviewRlmMonitorsByJob" class="chart chart-medium"></div>
+        </div>
+        <div class="chart-row">
+          <div id="overviewDefectsByJob" class="chart chart-medium"></div>
+          <div id="overviewMasksByJob" class="chart chart-medium"></div>
+        </div>
+        <div id="overviewJobsDefects" class="chart chart-span-full"></div>
+        <div id="overviewOperationsTimeline" class="chart chart-span-full"></div>
       </div>
     </section>
 
@@ -201,8 +205,15 @@
         </div>
       </div>
 
+      <div class="defect-summary" id="defectSummary">
+        <div class="defect-summary-card total">
+          <h4>Total Defects</h4>
+          <p data-defect-total>--</p>
+        </div>
+        <div class="defect-summary-types" id="defectSummaryTypes"></div>
+      </div>
+
       <div class="charts">
-        <div id="defectTrendChart" class="chart"></div>
         <div id="defectTypeChart" class="chart"></div>
         <div id="defectMagnitudeChart" class="chart"></div>
         <div id="defectSeverityChart" class="chart"></div>

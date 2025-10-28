@@ -22,6 +22,7 @@ body {
   padding: 20px 24px;
   box-shadow: 0 8px 24px rgba(15, 41, 77, 0.12);
   border: 1px solid rgba(135, 160, 190, 0.3);
+  margin-bottom: 20px;
 }
 
 .filter-grid {
@@ -66,6 +67,11 @@ body {
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+.filters select[multiple] {
+  height: auto;
+  min-height: 120px;
+}
+
 .filters select:focus,
 .filters input:focus {
   border-color: #1f7aec;
@@ -73,44 +79,14 @@ body {
   outline: none;
 }
 
-.filter-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
+.filters input[type="datetime-local"] {
+  text-align: center;
+  box-sizing: border-box;
 }
 
-.apply-btn {
-  background: #1f7aec;
-  color: #fff;
-  border: none;
-  padding: 10px 18px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 600;
-  transition: background 0.2s ease, box-shadow 0.2s ease;
-}
-
-.apply-btn:hover {
-  background: #145eb8;
-  box-shadow: 0 8px 18px rgba(20, 94, 184, 0.3);
-}
-
-.clear-btn {
-  background: #e6edf8;
-  color: #163d6d;
-  border: none;
-  padding: 10px 16px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 600;
-  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
-}
-
-.clear-btn:hover {
-  background: #d2dff5;
-  color: #0f2a4d;
-  box-shadow: 0 4px 14px rgba(15, 42, 77, 0.15);
+.filter-card input[type="datetime-local"] {
+  max-width: 100%;
+  align-self: stretch;
 }
 
 .filter-chips {
@@ -236,10 +212,26 @@ body {
   min-height: 360px;
 }
 
+.chart-span-full {
+  grid-column: 1 / -1;
+  min-height: 420px;
+}
+
+.chart-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 24px;
+}
+
+.chart-medium {
+  min-height: 360px;
+}
+
 /* Job explorer layout */
 .job-layout {
   display: grid;
-  grid-template-columns: 420px 1fr;
+  grid-template-columns: 420px minmax(0, 1fr);
   gap: 20px;
 }
 
@@ -247,6 +239,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .job-list-toolbar {
@@ -276,6 +270,9 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  overflow-y: auto;
+  max-height: calc(100vh - 280px);
+  padding-right: 8px;
 }
 
 .reel-card {
@@ -301,6 +298,11 @@ body {
 .reel-card.active {
   border-color: #1f7aec;
   box-shadow: 0 4px 12px rgba(31, 122, 236, 0.18);
+}
+
+.reel-card.reviewed {
+  border-color: #1f7aec;
+  box-shadow: 0 4px 14px rgba(31, 122, 236, 0.2);
 }
 
 .reel-header {
@@ -389,6 +391,11 @@ body {
   color: #b91c1c;
 }
 
+.badge.review {
+  background: #1f7aec;
+  color: #fff;
+}
+
 .phase-chips {
   display: flex;
   gap: 6px;
@@ -454,6 +461,28 @@ body {
   flex-wrap: wrap;
   color: #475569;
   font-size: 13px;
+}
+
+.add-reel-button {
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid #1f7aec;
+  background: #1f7aec;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, opacity 0.2s ease;
+}
+
+.add-reel-button:hover:not(:disabled) {
+  background: #145eb8;
+}
+
+.add-reel-button:disabled {
+  cursor: default;
+  opacity: 0.7;
+  background: #94a3b8;
+  border-color: #94a3b8;
 }
 
 .summary-section {
@@ -532,6 +561,66 @@ body {
   padding: 14px 18px;
   border-radius: 10px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.defect-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.defect-summary-card {
+  background: #fff;
+  border-radius: 10px;
+  padding: 16px 20px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  min-width: 160px;
+}
+
+.defect-summary-card h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #475569;
+}
+
+.defect-summary-card p {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.defect-summary-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.defect-summary-type {
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 12px 16px;
+  min-width: 140px;
+  box-shadow: inset 0 0 0 1px #dbeafe;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.defect-summary-type span {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #475569;
+}
+
+.defect-summary-type strong {
+  font-size: 18px;
+  color: #1e293b;
 }
 
 .defect-filter {

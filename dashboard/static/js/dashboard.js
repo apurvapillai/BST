@@ -39,7 +39,14 @@
       const url = new URL(window.location.href);
       url.search = "";
       Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined && value !== null && value !== "") {
+        if (value === undefined || value === null) return;
+        if (Array.isArray(value)) {
+          value
+            .filter((item) => item !== undefined && item !== null && item !== "")
+            .forEach((item) => url.searchParams.append(key, item));
+          return;
+        }
+        if (value !== "") {
           url.searchParams.set(key, value);
         }
       });
@@ -87,8 +94,6 @@
       job: Utils.qs("#filterJob"),
       order: Utils.qs("#filterOrder"),
       reel: Utils.qs("#filterReel"),
-      apply: Utils.qs("#applyFilters"),
-      clear: Utils.qs("#clearFilters"),
       chips: Utils.qs("#activeFilterChips"),
     };
 
@@ -105,9 +110,16 @@
         (elements.end ? elements.end.value : ""),
       job: "",
       order: "",
-      reel_code: "",
+      reel_codes: [],
     };
-    let state = { ...defaults };
+    let state = {
+      machine_id: defaults.machine_id,
+      start: defaults.start,
+      end: defaults.end,
+      job: defaults.job,
+      order: defaults.order,
+      reel_codes: [],
+    };
     let updating = false;
     let initialized = false;
     let refreshOptionsQueued = false;
@@ -128,42 +140,49 @@
 
     function applySearchParams() {
       const params = new URLSearchParams(window.location.search);
-      ["machine_id", "start", "end", "job", "order", "reel_code"].forEach((key) => {
+      ["machine_id", "start", "end", "job", "order"].forEach((key) => {
         if (params.has(key)) {
-          const value = params.get(key) || "";
-          if (key === "reel_code") {
-            state.reel_code = value;
-          } else {
-            state[key] = value;
-          }
+          state[key] = params.get(key) || "";
         }
       });
+      const reelParams = params.getAll("reel_code");
+      const normalized = Array.from(
+        new Set(
+          reelParams
+            .flatMap((entry) =>
+              entry && entry.includes(",")
+                ? entry.split(",").map((value) => value.trim())
+                : [entry]
+            )
+            .filter((value) => value)
+        )
+      );
+      state.reel_codes = normalized;
+
       updating = true;
       if (elements.machine) elements.machine.value = state.machine_id || elements.machine.value;
-      if (elements.start && state.start) elements.start.value = state.start;
-      if (elements.end && state.end) elements.end.value = state.end;
+      if (elements.start) elements.start.value = state.start || "";
+      if (elements.end) elements.end.value = state.end || "";
       if (elements.job) elements.job.value = state.job || "";
       if (elements.order) elements.order.value = state.order || "";
-      if (elements.reel) elements.reel.value = state.reel_code || "";
+      syncReelSelect();
       updating = false;
     }
 
     function attachListeners() {
       Object.entries(elements).forEach(([name, el]) => {
-        if (!el || name === "apply" || name === "clear" || name === "chips") return;
-        el.addEventListener("change", (evt) => handleInputChange(name, evt.target.value));
+        if (!el || name === "chips") return;
+        el.addEventListener("change", (evt) => {
+          if (name === "reel") {
+            handleInputChange(name, getSelectedReelsFromSelect());
+          } else {
+            handleInputChange(name, evt.target.value);
+          }
+        });
         if (name === "start" || name === "end") {
           el.addEventListener("blur", () => handleInputChange(name, el.value));
         }
       });
-      if (elements.apply) {
-        elements.apply.addEventListener("click", () => emit(true));
-      }
-      if (elements.clear) {
-        elements.clear.addEventListener("click", () => {
-          handleClear();
-        });
-      }
       if (elements.chips) {
         elements.chips.addEventListener("click", (evt) => {
           const button = evt.target.closest(".chip-remove");
@@ -172,9 +191,39 @@
           if (!chipEl) return;
           const key = chipEl.dataset.key;
           if (!key) return;
-          clearKey(key).catch((error) => console.error("Failed to clear filter chip", error));
+          const value = chipEl.dataset.value || undefined;
+          clearKey(key, value).catch((error) => console.error("Failed to clear filter chip", error));
         });
       }
+    }
+
+    function getSelectedReelsFromSelect() {
+      if (!elements.reel) return [];
+      return Array.from(elements.reel.selectedOptions)
+        .map((option) => option.value)
+        .filter((value) => value);
+    }
+
+    function syncReelSelect() {
+      if (!elements.reel) return;
+      const selectedSet = new Set(state.reel_codes);
+      const options = Array.from(elements.reel.options);
+      selectedSet.forEach((code) => {
+        if (!options.some((option) => option.value === code)) {
+          const option = document.createElement("option");
+          option.value = code;
+          option.textContent = code;
+          option.selected = true;
+          elements.reel.appendChild(option);
+        }
+      });
+      Array.from(elements.reel.options).forEach((option) => {
+        if (option.value === "") {
+          option.selected = !selectedSet.size;
+        } else {
+          option.selected = selectedSet.has(option.value);
+        }
+      });
     }
 
     function handleInputChange(field, value) {
@@ -184,7 +233,8 @@
           state.machine_id = value || "";
           state.job = "";
           state.order = "";
-          state.reel_code = "";
+          state.reel_codes = [];
+          syncReelSelect();
           scheduleOptionsRefresh();
           break;
         case "start":
@@ -198,16 +248,18 @@
         case "job":
           state.job = value || "";
           state.order = "";
-          state.reel_code = "";
+          state.reel_codes = [];
+          syncReelSelect();
           scheduleOptionsRefresh();
           break;
         case "order":
           state.order = value || "";
-          state.reel_code = "";
+          state.reel_codes = [];
+          syncReelSelect();
           scheduleOptionsRefresh();
           break;
         case "reel":
-          state.reel_code = value || "";
+          state.reel_codes = Array.isArray(value) ? value : [value].filter((entry) => entry);
           break;
         default:
           break;
@@ -219,11 +271,11 @@
       if (refreshOptionsQueued && !initial) return;
       refreshOptionsQueued = true;
       try {
-        const data = await Api.get("filters", {}, state);
+        const data = await Api.get("filters", {}, getState());
         updating = true;
-        updateSelect(elements.job, data.jobs || [], state.job);
-        updateSelect(elements.order, data.orders || [], state.order);
-        updateSelect(elements.reel, data.reel_codes || [], state.reel_code);
+        updateSelect(elements.job, data.jobs || [], state.job ? [state.job] : []);
+        updateSelect(elements.order, data.orders || [], state.order ? [state.order] : []);
+        updateSelect(elements.reel, data.reel_codes || [], state.reel_codes);
         updating = false;
       } catch (err) {
         console.error("Failed to refresh filter options", err);
@@ -232,31 +284,49 @@
       }
     }
 
-    function updateSelect(selectEl, values, currentValue) {
+    function updateSelect(selectEl, values, currentValues) {
       if (!selectEl) return;
-      const previousValue = selectEl.value;
+      const isMultiple = !!selectEl.multiple;
+      const selectedSet = new Set(currentValues || []);
       const frag = document.createDocumentFragment();
-      const defaultOption = document.createElement("option");
-      defaultOption.value = "";
-      defaultOption.textContent = "All";
-      frag.appendChild(defaultOption);
-      values.forEach((value) => {
+
+      if (!isMultiple) {
+        const defaultOption = document.createElement("option");
+        defaultOption.value = "";
+        defaultOption.textContent = "All";
+        defaultOption.selected = !selectedSet.size;
+        frag.appendChild(defaultOption);
+      } else if (!Array.from(selectedSet).length) {
+        const defaultOption = document.createElement("option");
+        defaultOption.value = "";
+        defaultOption.textContent = "All";
+        defaultOption.selected = true;
+        frag.appendChild(defaultOption);
+      }
+
+      const mergedValues = Array.from(new Set([...(values || []), ...(currentValues || [])])).filter(
+        (value) => value
+      );
+
+      mergedValues.forEach((value) => {
+        if (!value) return;
         const option = document.createElement("option");
         option.value = value;
         option.textContent = value;
+        option.selected = selectedSet.has(value);
         frag.appendChild(option);
       });
+
       selectEl.innerHTML = "";
       selectEl.appendChild(frag);
-      const desiredValue = currentValue && values.includes(currentValue) ? currentValue : "";
-      selectEl.value = desiredValue;
-      if (desiredValue !== currentValue) {
-        if (selectEl === elements.job) state.job = desiredValue;
-        if (selectEl === elements.order) state.order = desiredValue;
-        if (selectEl === elements.reel) state.reel_code = desiredValue;
-      }
-      if (selectEl.value !== previousValue) {
-        selectEl.dispatchEvent(new Event("change", { bubbles: false }));
+      if (isMultiple) {
+        Array.from(selectEl.options).forEach((option) => {
+          if (option.value === "") {
+            option.selected = !selectedSet.size;
+          }
+        });
+      } else {
+        selectEl.value = selectedSet.size ? Array.from(selectedSet)[0] : "";
       }
     }
 
@@ -275,8 +345,12 @@
         end: state.end,
         job: state.job,
         order: state.order,
-        reel_code: state.reel_code,
+        reel_code: [...state.reel_codes],
       };
+    }
+
+    function getReelCodes() {
+      return [...state.reel_codes];
     }
 
     function onChange(callback) {
@@ -284,22 +358,7 @@
       return () => listeners.delete(callback);
     }
 
-    async function handleClear() {
-      if (!elements.machine) return;
-      updating = true;
-      state = { ...defaults };
-      elements.machine.value = state.machine_id || elements.machine.value;
-      if (elements.start) elements.start.value = state.start || "";
-      if (elements.end) elements.end.value = state.end || "";
-      if (elements.job) elements.job.value = "";
-      if (elements.order) elements.order.value = "";
-      if (elements.reel) elements.reel.value = "";
-      updating = false;
-      await refreshOptions(true);
-      emit(true);
-    }
-
-    async function clearKey(key) {
+    async function clearKey(key, value) {
       switch (key) {
         case "machine_id":
           if (elements.machine) {
@@ -310,8 +369,8 @@
           if (elements.job) elements.job.value = "";
           state.order = "";
           if (elements.order) elements.order.value = "";
-          state.reel_code = "";
-          if (elements.reel) elements.reel.value = "";
+          state.reel_codes = [];
+          syncReelSelect();
           await refreshOptions(true);
           emit(true);
           break;
@@ -332,23 +391,27 @@
           if (elements.job) elements.job.value = "";
           state.order = "";
           if (elements.order) elements.order.value = "";
-          state.reel_code = "";
-          if (elements.reel) elements.reel.value = "";
+          state.reel_codes = [];
+          syncReelSelect();
           await refreshOptions(true);
           emit(true);
           break;
         case "order":
           state.order = "";
           if (elements.order) elements.order.value = "";
-          state.reel_code = "";
-          if (elements.reel) elements.reel.value = "";
+          state.reel_codes = [];
+          syncReelSelect();
           await refreshOptions(true);
           emit(true);
           break;
         case "reel_code":
-          state.reel_code = "";
-          if (elements.reel) elements.reel.value = "";
-          emit(true);
+          if (value) {
+            removeReel(value, { emit: true });
+          } else {
+            state.reel_codes = [];
+            syncReelSelect();
+            emit(true);
+          }
           break;
         default:
           break;
@@ -387,9 +450,9 @@
       if (state.order) {
         chips.push({ key: "order", label: `Order: ${state.order}`, removable: true });
       }
-      if (state.reel_code) {
-        chips.push({ key: "reel_code", label: `Reel: ${state.reel_code}`, removable: true });
-      }
+      state.reel_codes.forEach((code) => {
+        chips.push({ key: "reel_code", label: `Reel: ${code}`, removable: true, value: code });
+      });
 
       if (!chips.length) {
         elements.chips.innerHTML = "";
@@ -404,7 +467,9 @@
           const removeButton = chip.removable
             ? `<button type="button" class="chip-remove" aria-label="Clear ${chip.label}">&times;</button>`
             : "";
-          return `<span class="${classes.join(" ")}" data-key="${chip.key}"><span>${chip.label}</span>${removeButton}</span>`;
+          const attrs = [`data-key="${chip.key}"`];
+          if (chip.value) attrs.push(`data-value="${chip.value}"`);
+          return `<span class="${classes.join(" ")}" ${attrs.join(" ")}"><span>${chip.label}</span>${removeButton}</span>`;
         })
         .join("");
 
@@ -413,14 +478,39 @@
     }
 
     function set(field, value, { emit: shouldEmit = true, updateUrl = true } = {}) {
-      state[field] = value || "";
       updating = true;
-      if (field === "job" && elements.job) elements.job.value = state.job;
-      if (field === "order" && elements.order) elements.order.value = state.order;
-      if (field === "reel_code" && elements.reel) elements.reel.value = state.reel_code;
-      if (field === "start" && elements.start) elements.start.value = state.start || "";
-      if (field === "end" && elements.end) elements.end.value = state.end || "";
-      if (field === "machine_id" && elements.machine) elements.machine.value = state.machine_id || "";
+      switch (field) {
+        case "job":
+          state.job = value || "";
+          if (elements.job) elements.job.value = state.job;
+          break;
+        case "order":
+          state.order = value || "";
+          if (elements.order) elements.order.value = state.order;
+          break;
+        case "start":
+          state.start = value || "";
+          if (elements.start) elements.start.value = state.start || "";
+          break;
+        case "end":
+          state.end = value || "";
+          if (elements.end) elements.end.value = state.end || "";
+          break;
+        case "machine_id":
+          state.machine_id = value || "";
+          if (elements.machine) elements.machine.value = state.machine_id || "";
+          break;
+        case "reel_codes":
+          state.reel_codes = Array.isArray(value) ? value.filter((entry) => entry) : [];
+          syncReelSelect();
+          break;
+        case "reel_code":
+          state.reel_codes = value ? [value] : [];
+          syncReelSelect();
+          break;
+        default:
+          break;
+      }
       updating = false;
       if (shouldEmit) emit(false);
       if (updateUrl && !shouldEmit) {
@@ -428,8 +518,39 @@
       }
     }
 
-    return { init, getState, onChange, set };
+    function addReel(code) {
+      const value = (code || "").trim();
+      if (!value) return;
+      if (!state.reel_codes.includes(value)) {
+        state.reel_codes = [...state.reel_codes, value];
+        syncReelSelect();
+        emit(true);
+      }
+    }
+
+    function removeReel(code, { emit: shouldEmit = false } = {}) {
+      const value = (code || "").trim();
+      if (!value) return;
+      const next = state.reel_codes.filter((entry) => entry !== value);
+      if (next.length === state.reel_codes.length) return;
+      state.reel_codes = next;
+      syncReelSelect();
+      if (shouldEmit) emit(true);
+      else renderChips();
+    }
+
+    return { init, getState, onChange, set, addReel, removeReel, getReelCodes };
   })();
+
+  const RLM_METRIC_LABELS = {
+    format: "Format",
+    errexpand: "Err Expand",
+    errshrink: "Err Shrink",
+    wrnexpand: "Warn Expand",
+    wrnshrink: "Warn Shrink",
+    nomlength: "Nominal Length",
+    nomlenght: "Nominal Length",
+  };
 
   const Api = {
     async get(endpoint, extraParams = {}, baseFilters) {
@@ -443,6 +564,18 @@
       const url = new URL(`/dashboard/api/${endpoint}`, window.location.origin);
       Object.entries(params).forEach(([key, value]) => {
         if (value === undefined || value === null || value === "") return;
+        if (Array.isArray(value)) {
+          value
+            .filter((item) => item !== undefined && item !== null && item !== "")
+            .forEach((item) => {
+              if (key === "start" || key === "end") {
+                url.searchParams.append(key, Utils.normalizeDateInput(item));
+              } else {
+                url.searchParams.append(key, item);
+              }
+            });
+          return;
+        }
         if (key === "start" || key === "end") {
           url.searchParams.append(key, Utils.normalizeDateInput(value));
         } else {
@@ -520,6 +653,32 @@
   const OverviewTab = (() => {
     let initialized = false;
     let kpiMap = {};
+    const EVENT_ORDER = [
+      "defect",
+      "reference_change",
+      "mask_applied",
+      "sensitivity_change",
+      "rlm_config_change",
+    ];
+    const EVENT_META = {
+      defect: { label: "Defects", color: "#ef4444" },
+      reference_change: { label: "Reference Changes", color: "#2563eb" },
+      mask_applied: { label: "Masks Applied", color: "#f97316" },
+      sensitivity_change: { label: "Sensitivity Changes", color: "#0ea5e9" },
+      rlm_config_change: { label: "RLM Config Changes", color: "#14b8a6" },
+    };
+    const TIMELINE_TYPES = [
+      "sensitivity_change",
+      "mask_applied",
+      "rlm_config_change",
+      "reference_change",
+    ];
+    const TIMELINE_SYMBOL = {
+      sensitivity_change: "circle",
+      mask_applied: "square",
+      rlm_config_change: "diamond",
+      reference_change: "triangle-up",
+    };
 
     const load = Utils.debounce(async () => {
       try {
@@ -577,7 +736,9 @@
       const jobsMeters = data.jobs_meters || [];
       const jobsTime = data.jobs_time || [];
       const jobsDefects = data.jobs_defects || [];
-      const stateTrend = data.state_trend || [];
+      const jobEvents = data.job_events || [];
+      const jobsDefectsTrend = data.jobs_defects_timeline || [];
+      const jobMetrics = data.job_metrics || [];
 
       const jobsTimePct = jobsTime.map((job) => {
         const total =
@@ -681,60 +842,604 @@
         { responsive: true }
       );
 
-      Plotly.react(
-        "overviewStateTrend",
-        [
-          {
-            type: "scatter",
-            mode: "lines",
-            name: "Active",
-            x: stateTrend.map((d) => d.time),
-            y: stateTrend.map((d) => d.active_pct),
-            line: { color: "#22c55e", width: 2 },
+      renderJobsDefectsTrend(jobsDefectsTrend, jobsDefects);
+      renderJobMetricCards(jobMetrics);
+      renderOperationsTimeline(jobEvents);
+    }
+
+    function renderJobsDefectsTrend(trend, totals) {
+      const containerId = "overviewJobsDefects";
+      if (!document.getElementById(containerId)) return;
+
+      if (!trend.length) {
+        if (!totals.length) {
+          Plotly.react(
+            containerId,
+            [],
+            {
+              title: "Defects per Job (Trend)",
+              annotations: [
+                {
+                  text: "No defect activity in this window",
+                  showarrow: false,
+                  xref: "paper",
+                  yref: "paper",
+                  x: 0.5,
+                  y: 0.5,
+                  font: { color: "#94a3b8" },
+                },
+              ],
+              xaxis: { visible: false },
+              yaxis: { visible: false },
+              margin: { t: 60, l: 40, r: 20, b: 40 },
+            },
+            { responsive: true, displayModeBar: false }
+          );
+        } else {
+          Plotly.react(
+            containerId,
+            [
+              {
+                type: "bar",
+                x: totals.map((item) => item.job),
+                y: totals.map((item) => item.count),
+                marker: { color: "#8b5cf6" },
+              },
+            ],
+            {
+              title: "Defects per Job",
+              margin: { t: 60, l: 50, r: 20, b: 80 },
+            },
+            { responsive: true }
+          );
+        }
+        return;
+      }
+
+      const grouped = new Map();
+      trend.forEach((point) => {
+        const job = point.job || "Unassigned";
+        const entry = { time: point.time, count: point.count || 0 };
+        if (!grouped.has(job)) grouped.set(job, []);
+        grouped.get(job).push(entry);
+      });
+
+      const traces = Array.from(grouped.entries()).map(([job, points]) => {
+        const sortedPoints = points
+          .slice()
+          .sort((a, b) => new Date(a.time || 0).getTime() - new Date(b.time || 0).getTime());
+        const xs = sortedPoints.map((item) => item.time);
+        const ys = sortedPoints.map((item) => item.count || 0);
+        const texts = sortedPoints.map((item) => buildDefectsTrendHover(job, item));
+        const sizes = ys.map((value) => Math.min(6 + value * 2, 20));
+        return {
+          type: "scatter",
+          mode: "lines+markers",
+          name: job,
+          x: xs,
+          y: ys,
+          text: texts,
+          hoverinfo: "text",
+          line: { shape: "linear" },
+          marker: {
+            size: sizes,
+            sizemode: "diameter",
+            line: { color: "#0f172a", width: 1 },
           },
-          {
-            type: "scatter",
-            mode: "lines",
-            name: "Inactive",
-            x: stateTrend.map((d) => d.time),
-            y: stateTrend.map((d) => d.inactive_pct),
-            line: { color: "#ef4444", width: 2 },
-          },
-          {
-            type: "scatter",
-            mode: "lines",
-            name: "Learn",
-            x: stateTrend.map((d) => d.time),
-            y: stateTrend.map((d) => d.learn_pct),
-            line: { color: "#f59e0b", width: 2 },
-          },
-        ],
-        {
-          title: "Phase Mix Trend (%)",
-          xaxis: { type: "date" },
-          yaxis: { title: "Percent", ticksuffix: "%", range: [0, 100] },
-          legend: { orientation: "h", x: 0, y: 1.15 },
-          margin: { t: 60, l: 60, r: 30, b: 60 },
-        },
-        { responsive: true }
+        };
+      });
+
+      const layout = {
+        title: "Defects per Job (Trend)",
+        xaxis: { type: "date", title: "Time" },
+        yaxis: { title: "Defects" },
+        legend: { orientation: "h", x: 0, y: 1.1 },
+        margin: { t: 70, l: 60, r: 20, b: 90 },
+      };
+
+      Plotly.react(containerId, traces, layout, { responsive: true });
+    }
+
+    function renderOperationsTimeline(events) {
+      const containerId = "overviewOperationsTimeline";
+      if (!document.getElementById(containerId)) return;
+
+      const filtered = (events || []).filter((event) =>
+        TIMELINE_TYPES.includes(event.event_type)
       );
 
+      if (!filtered.length) {
+        Plotly.react(
+          containerId,
+          [],
+          {
+            title: "Operational Changes Timeline",
+            annotations: [
+              {
+                text: "No operational changes in this window",
+                showarrow: false,
+                xref: "paper",
+                yref: "paper",
+                x: 0.5,
+                y: 0.6,
+                font: { color: "#94a3b8" },
+              },
+            ],
+            xaxis: { title: "Time", type: "date" },
+            yaxis: {
+              title: "Change",
+              range: [-0.1, 1.2],
+              tickvals: [0, 1],
+              ticktext: ["No change", "Change"],
+              zeroline: true,
+            },
+            margin: { t: 60, l: 60, r: 20, b: 60 },
+            shapes: [
+              {
+                type: "line",
+                xref: "paper",
+                x0: 0,
+                x1: 1,
+                y0: 0,
+                y1: 0,
+                line: { color: "#cbd5f5", width: 1, dash: "dot" },
+              },
+            ],
+          },
+          { responsive: true, displayModeBar: false }
+        );
+        return;
+      }
+
+      const grouped = new Map();
+      filtered.forEach((event) => {
+        const type = event.event_type || "other";
+        if (!grouped.has(type)) {
+          grouped.set(type, { meta: getEventMeta(type), list: [] });
+        }
+        grouped.get(type).list.push(event);
+      });
+
+      const typesInData = Array.from(
+        new Set(filtered.map((event) => event.event_type || "other"))
+      );
+      const orderedTypes = TIMELINE_TYPES.filter((type) => typesInData.includes(type));
+
+      const traces = orderedTypes
+        .map((type) => {
+          const bucket = grouped.get(type);
+          if (!bucket) return null;
+          const xs = bucket.list.map((event) => event.time);
+          const ys = bucket.list.map(() => 1);
+          const texts = bucket.list.map((event) => buildOperationHover(event, bucket.meta.label));
+          return {
+            type: "scatter",
+            mode: "markers",
+            name: bucket.meta.label,
+            x: xs,
+            y: ys,
+            marker: {
+              size: 14,
+              symbol: TIMELINE_SYMBOL[type] || "circle",
+              color: bucket.meta.color,
+              opacity: 0.85,
+              line: { color: "#0f172a", width: 1 },
+            },
+            hoverinfo: "text",
+            text: texts,
+          };
+        })
+        .filter(Boolean);
+
+      const layout = {
+        title: "Operational Changes Timeline",
+        xaxis: { title: "Time", type: "date" },
+        yaxis: {
+          title: "Change",
+          range: [-0.1, 1.2],
+          tickvals: [0, 1],
+          ticktext: ["No change", "Change"],
+          zeroline: true,
+        },
+        legend: { orientation: "h", x: 0, y: 1.1 },
+        margin: { t: 70, l: 60, r: 20, b: 80 },
+        shapes: [
+          {
+            type: "line",
+            xref: "paper",
+            x0: 0,
+            x1: 1,
+            y0: 0,
+            y1: 0,
+            line: { color: "#cbd5f5", width: 1, dash: "dot" },
+          },
+        ],
+      };
+
+      Plotly.react(containerId, traces, layout, { responsive: true, displayModeBar: false });
+    }
+
+    function renderJobMetricCards(jobMetrics) {
+      const configs = [
+        {
+          id: "overviewRefChangesByJob",
+          title: "Reference Changes by Job",
+          key: "reference_changes",
+          color: "#6366f1",
+          label: "Reference changes",
+        },
+        {
+          id: "overviewRlmMonitorsByJob",
+          title: "RLM Monitor Points by Job",
+          key: "rlm_monitor_count",
+          color: "#0ea5e9",
+          label: "RLM monitors",
+        },
+        {
+          id: "overviewDefectsByJob",
+          title: "Defects by Job",
+          key: "defect_count",
+          label: "Defects",
+          breakdownKey: "defect_breakdown",
+          palette: ["#f97316", "#fb923c", "#fdba74", "#facc15", "#fde047", "#bef264"],
+        },
+        {
+          id: "overviewMasksByJob",
+          title: "Masks Applied by Job",
+          key: "mask_count",
+          label: "Masks applied",
+          breakdownKey: "mask_breakdown",
+          palette: ["#ec4899", "#f472b6", "#f9a8d4", "#d946ef", "#a855f7", "#c4b5fd"],
+        },
+      ];
+
+      configs.forEach((config) => renderSingleJobMetricChart(jobMetrics, config));
+    }
+
+    function renderSingleJobMetricChart(jobMetrics, config) {
+      const container = document.getElementById(config.id);
+      if (!container) return;
+
+      const source = Array.isArray(jobMetrics) ? jobMetrics : [];
+      if (!source.length) {
+        renderJobMetricPlaceholder(config.id, config.title);
+        return;
+      }
+
+      const sorted = source
+        .slice()
+        .sort((a, b) => (b[config.key] || 0) - (a[config.key] || 0))
+        .slice(0, 8);
+
+      const hasValues = sorted.some((item) => (item[config.key] || 0) > 0);
+      if (!hasValues) {
+        renderJobMetricPlaceholder(config.id, config.title);
+        return;
+      }
+
+      const labels = sorted.map((item) => item.job || "Unassigned");
+      const totals = sorted.map((item) => item[config.key] || 0);
+
+      if (config.breakdownKey) {
+        const breakdownData = buildStackedSeries(sorted, config.breakdownKey, totals, config.palette);
+        Plotly.react(
+          config.id,
+          breakdownData.traces,
+          {
+            title: config.title,
+            margin: { t: 90, l: 70, r: 30, b: 80 },
+            height: 360,
+            barmode: "stack",
+            xaxis: { automargin: true },
+            yaxis: { rangemode: "tozero", title: config.label },
+            legend: { orientation: "h", x: 0, y: 1.15 },
+          },
+          { responsive: true }
+        );
+        return;
+      }
+
+      const customData = sorted.map((item) => [
+        item.top_defect_class || "None",
+        item.top_defect_count || 0,
+        item.dominant_phase || "N/A",
+        item.top_mask_xml || "None",
+        item.top_mask_count || 0,
+      ]);
+
       Plotly.react(
-        "overviewJobsDefects",
+        config.id,
         [
           {
             type: "bar",
-            x: jobsDefects.map((d) => d.job),
-            y: jobsDefects.map((d) => d.count),
-            marker: { color: "#8b5cf6" },
+            x: labels,
+            y: totals,
+            marker: { color: config.color },
+            customdata: customData,
+            hovertemplate:
+              `<b>%{x}</b><br>${config.label}: %{y}<br>` +
+              "Top defect: %{customdata[0]} (%{customdata[1]})<br>" +
+              "Top mask: %{customdata[3]} (%{customdata[4]})<br>" +
+              "Dominant phase: %{customdata[2]}<extra></extra>",
           },
         ],
         {
-          title: "Defects per Job",
-          margin: { t: 40, l: 40, r: 20, b: 80 },
+          title: config.title,
+          margin: { t: 70, l: 70, r: 30, b: 80 },
+          height: 360,
+          yaxis: { rangemode: "tozero", title: config.label },
+          xaxis: { automargin: true },
         },
-        { responsive: true }
+        { responsive: true, displayModeBar: false }
       );
+    }
+
+    function buildStackedSeries(items, breakdownKey, totals, palette = []) {
+      const maxSegments = 6;
+      const accumTotals = new Map();
+
+      items.forEach((item) => {
+        (item[breakdownKey] || []).forEach(({ name, count }) => {
+          if (!name || !count) return;
+          accumTotals.set(name, (accumTotals.get(name) || 0) + count);
+        });
+      });
+
+      const topCategories = Array.from(accumTotals.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, maxSegments)
+        .map(([name]) => name);
+      const topSet = new Set(topCategories);
+
+      const traces = [];
+      const colorPalette =
+        palette.length >= topCategories.length
+          ? palette
+          : [
+              "#f97316",
+              "#fb923c",
+              "#fde047",
+              "#22c55e",
+              "#2dd4bf",
+              "#60a5fa",
+              "#c084fc",
+              "#f472b6",
+            ];
+
+      topCategories.forEach((category, idx) => {
+        const color = colorPalette[idx % colorPalette.length];
+        const values = items.map((item) => {
+          const breakdown = item[breakdownKey] || [];
+          const match = breakdown.find((entry) => entry.name === category);
+          return match ? match.count || 0 : 0;
+        });
+        traces.push({
+          type: "bar",
+          name: category,
+          x: items.map((item) => item.job || "Unassigned"),
+          y: values,
+          marker: { color },
+          hovertemplate: "<b>%{x}</b><br>" + `${category}: %{y}<extra></extra>`,
+        });
+      });
+
+      const otherValues = items.map((item, idx) => {
+        const breakdown = item[breakdownKey] || [];
+        const residual =
+          (totals[idx] || 0) -
+          breakdown.reduce((sum, entry) => (topSet.has(entry.name) ? sum + (entry.count || 0) : sum), 0);
+        return Math.max(residual, 0);
+      });
+
+      if (otherValues.some((value) => value > 0)) {
+        traces.push({
+          type: "bar",
+          name: "Other",
+          x: items.map((item) => item.job || "Unassigned"),
+          y: otherValues,
+          marker: { color: "#94a3b8" },
+          hovertemplate: "<b>%{x}</b><br>Other: %{y}<extra></extra>",
+        });
+      }
+
+      return { traces };
+    }
+
+    function renderJobMetricPlaceholder(containerId, title) {
+      Plotly.react(
+        containerId,
+        [],
+        {
+          title,
+          annotations: [
+            {
+              text: "No data in this window",
+              showarrow: false,
+              xref: "paper",
+              yref: "paper",
+              x: 0.5,
+              y: 0.5,
+              font: { color: "#94a3b8" },
+            },
+          ],
+          xaxis: { visible: false },
+          yaxis: { visible: false },
+          margin: { t: 50, l: 20, r: 20, b: 40 },
+          height: 360,
+        },
+        { responsive: true, displayModeBar: false }
+      );
+    }
+
+    function getEventMeta(type) {
+      if (EVENT_META[type]) return EVENT_META[type];
+      const label = (type || "Other")
+        .split("_")
+        .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+        .join(" ");
+      return { label, color: "#475569" };
+    }
+
+    function buildOperationHover(event, label) {
+      const lines = [];
+      lines.push(`<b>${event.job || "Unassigned"}</b>`);
+      if (event.time) {
+        const date = new Date(event.time);
+        if (!Number.isNaN(date.getTime())) {
+          lines.push(date.toLocaleString());
+        }
+      }
+      lines.push(`${label} change`);
+      lines.push(`Count: ${event.count || 0}`);
+      lines.push(...describeOperationEvent(event));
+      return lines.filter(Boolean).join("<br>");
+    }
+
+    function describeOperationEvent(event) {
+      const lines = [];
+      switch (event.event_type) {
+        case "defect":
+          if (Array.isArray(event.class_breakdown) && event.class_breakdown.length) {
+            const top = event.class_breakdown.slice(0, 4).map(
+              (item) => `${item.class || "Unknown"} (${item.count})`
+            );
+            lines.push(`Top classes: ${top.join(", ")}`);
+            if (event.class_breakdown.length > 4) {
+              lines.push(`+${event.class_breakdown.length - 4} more classes`);
+            }
+          }
+          break;
+        case "reference_change":
+          if (Array.isArray(event.details) && event.details.length) {
+            const detail = event.details[0];
+            const fromRef = detail.from || "previous";
+            const toRef = detail.to || "new";
+            lines.push(`Reference: ${fromRef} → ${toRef}`);
+            if (detail.from_filename || detail.to_filename) {
+              const fileFrom = detail.from_filename || "—";
+              const fileTo = detail.to_filename || "—";
+              lines.push(`File: ${fileFrom} → ${fileTo}`);
+            }
+          } else {
+            lines.push("Reference image updated");
+          }
+          break;
+        case "mask_applied":
+          if (Array.isArray(event.details) && event.details.length) {
+            const detail = event.details[0];
+            const xml = detail.xml_id || "Mask";
+            const sens = detail.sensitivity_id || detail.sensitivitysetid || "";
+            const formatVal =
+              detail.format_value !== undefined && detail.format_value !== null
+                ? Utils.formatNumber(detail.format_value, 2)
+                : "—";
+            let maskLine = `${xml} · Format ${formatVal}`;
+            if (sens) maskLine += ` · Sens ${sens}`;
+            lines.push(maskLine);
+          }
+          break;
+        case "sensitivity_change": {
+          const summary = Array.isArray(event.details) ? event.details[0] : null;
+          if (summary && Array.isArray(summary.changes)) {
+            summary.changes.slice(0, 4).forEach((change) => {
+              lines.push(formatSensitivityChange(change));
+            });
+            if (summary.changes.length > 4) {
+              lines.push(`+${summary.changes.length - 4} more changes`);
+            }
+          }
+          if (summary && summary.previous_settings) {
+            lines.push(`Prev: ${formatSensitivitySnapshot(summary.previous_settings)}`);
+          }
+          if (summary && summary.current_settings) {
+            lines.push(`Current: ${formatSensitivitySnapshot(summary.current_settings)}`);
+          }
+          break;
+        }
+        case "rlm_config_change": {
+          const summary = Array.isArray(event.details) ? event.details[0] : null;
+          if (summary && Array.isArray(summary.changes)) {
+            summary.changes.slice(0, 5).forEach((change) => {
+              lines.push(formatRlmChange(change));
+            });
+            if (summary.changes.length > 5) {
+              lines.push(`+${summary.changes.length - 5} more keys`);
+            }
+          }
+          if (summary && summary.previous_settings) {
+            lines.push(`Prev: ${formatRlmSnapshot(summary.previous_settings)}`);
+          }
+          if (summary && summary.current_settings) {
+            lines.push(`Current: ${formatRlmSnapshot(summary.current_settings)}`);
+          }
+          break;
+        }
+        default:
+          break;
+      }
+
+      if (Array.isArray(event.reel_codes) && event.reel_codes.length) {
+        lines.push(`Reels: ${event.reel_codes.join(", ")}`);
+      }
+
+      return lines.filter(Boolean);
+    }
+
+    function formatSensitivityChange(change) {
+      if (!change || !change.class) return "";
+      const prev = change.previous || {};
+      const curr = change.current || {};
+      const parts = [];
+      parts.push(`${change.class}:`);
+      parts.push(`T ${Utils.formatNumber(prev.threshold, 3)} → ${Utils.formatNumber(curr.threshold, 3)}`);
+      parts.push(`W ${Utils.formatNumber(prev.warn, 3)} → ${Utils.formatNumber(curr.warn, 3)}`);
+      return parts.join(" ");
+    }
+
+    function formatSensitivitySnapshot(snapshot) {
+      const entries = Object.entries(snapshot || {});
+      if (!entries.length) return "—";
+      const maxEntries = 5;
+      const rendered = entries.slice(0, maxEntries).map(([cls, values]) => {
+        if (!values) return `${cls}: (n/a)`;
+        return `${cls}: T ${Utils.formatNumber(values.threshold, 3)}, W ${Utils.formatNumber(values.warn, 3)}`;
+      });
+      const remainder = entries.length - maxEntries;
+      if (remainder > 0) {
+        rendered.push(`+${remainder} more classes`);
+      }
+      return rendered.join("; ");
+    }
+
+    function formatRlmChange(change) {
+      if (!change || !change.key) return "";
+      const oldVal = Utils.formatNumber(change.old, 3);
+      const newVal = Utils.formatNumber(change.new, 3);
+      return `${change.key}: ${oldVal} → ${newVal}`;
+    }
+
+    function formatRlmSnapshot(snapshot) {
+      const entries = Object.entries(snapshot || {});
+      if (!entries.length) return "—";
+      const maxEntries = 6;
+      const rendered = entries.slice(0, maxEntries).map(([key, value]) => `${key}: ${Utils.formatNumber(value, 3)}`);
+      const remainder = entries.length - maxEntries;
+      if (remainder > 0) {
+        rendered.push(`+${remainder} more keys`);
+      }
+      return rendered.join(", ");
+    }
+
+    function buildDefectsTrendHover(job, point) {
+      const lines = [`<b>${job}</b>`];
+      if (point.time) {
+        const date = new Date(point.time);
+        if (!Number.isNaN(date.getTime())) {
+          lines.push(date.toLocaleString());
+        }
+      }
+      lines.push(`Defects: ${point.count || 0}`);
+      return lines.join("<br>");
     }
 
     return { init, activate, onFiltersUpdated };
@@ -752,6 +1457,7 @@
       cachedItems: [],
       pageInfo: null,
     };
+    const summaryCache = new Map();
 
     const load = Utils.debounce(async () => {
       try {
@@ -787,7 +1493,6 @@
 
     function onFiltersUpdated() {
       state.page = 1;
-      state.selectedReelId = null;
       load();
     }
 
@@ -826,7 +1531,26 @@
     function renderList() {
       if (!listEl) return;
       listEl.innerHTML = "";
-      if (!state.cachedItems.length) {
+      const selectedCodes = Filters.getReelCodes();
+      const selectedSet = new Set(selectedCodes);
+      const orderMap = new Map(selectedCodes.map((code, index) => [code, index]));
+      const pinned = [];
+      const others = [];
+      state.cachedItems.forEach((item) => {
+        if (item.reel_code && selectedSet.has(item.reel_code)) {
+          pinned.push(item);
+        } else {
+          others.push(item);
+        }
+      });
+      pinned.sort((a, b) => {
+        const aIndex = orderMap.has(a.reel_code) ? orderMap.get(a.reel_code) : 0;
+        const bIndex = orderMap.has(b.reel_code) ? orderMap.get(b.reel_code) : 0;
+        return (aIndex ?? 0) - (bIndex ?? 0);
+      });
+      const items = pinned.concat(others);
+
+      if (!items.length) {
         const empty = document.createElement("div");
         empty.className = "placeholder";
         empty.textContent = "No reels found for this window.";
@@ -837,11 +1561,15 @@
         return;
       }
 
-      state.cachedItems.forEach((item) => {
+      items.forEach((item) => {
         const card = document.createElement("div");
         card.className = "reel-card";
+        card.dataset.reelId = item.reel_id || "";
         if (state.selectedReelId === item.reel_id) {
           card.classList.add("active");
+        }
+        if (item.reel_code && selectedSet.has(item.reel_code)) {
+          card.classList.add("reviewed");
         }
         if ((item.ref_change_count || 0) > 1) {
           card.classList.add("alert");
@@ -869,12 +1597,20 @@
             ${renderPhaseChips(item.phase_mix_pct || {})}
             ${item.sens_standard_changed ? '<span class="badge warn">Sensitivity drift</span>' : ""}
             ${item.rlm_enabled ? '<span class="badge success">RLM enabled</span>' : '<span class="badge danger">RLM disabled</span>'}
+            ${item.reel_code && selectedSet.has(item.reel_code) ? '<span class="badge review">In review</span>' : ""}
           </div>
         `;
 
         card.addEventListener("click", () => selectReel(item));
         listEl.appendChild(card);
       });
+
+      if (state.selectedReelId) {
+        const current = items.find((item) => item.reel_id === state.selectedReelId);
+        if (current) {
+          renderDetail(state.selectedReelId, true);
+        }
+      }
     }
 
     function renderPhaseChips(mix) {
@@ -912,9 +1648,15 @@
         state.selectedReelId = null;
         return;
       }
-      const filterReel = Filters.getState().reel_code;
-      if (filterReel) {
-        const match = state.cachedItems.find((item) => item.reel_code === filterReel);
+      if (state.selectedReelId) {
+        const existing = state.cachedItems.find((item) => item.reel_id === state.selectedReelId);
+        if (existing) {
+          return;
+        }
+      }
+      const selectedReels = Filters.getReelCodes();
+      if (selectedReels.length) {
+        const match = state.cachedItems.find((item) => item.reel_code && selectedReels.includes(item.reel_code));
         if (match) {
           selectReel(match, { updateFilter: false, immediate: true });
           return;
@@ -924,10 +1666,10 @@
       selectReel(initial, { updateFilter: false, immediate: true });
     }
 
-    async function selectReel(item, { updateFilter = true, immediate = false } = {}) {
+    async function selectReel(item, { updateFilter = false, immediate = false } = {}) {
       state.selectedReelId = item.reel_id;
       if (updateFilter) {
-        Filters.set("reel_code", item.reel_code || "", { emit: true, updateUrl: true });
+        Filters.addReel(item.reel_code || "");
       }
       renderList();
       await renderDetail(item.reel_id, immediate);
@@ -935,14 +1677,30 @@
 
     async function renderDetail(reelId, immediate) {
       if (!detailEl) return;
-      detailEl.innerHTML = "<div class=\"placeholder\">Loading reel summary…</div>";
+      const cached = summaryCache.get(reelId);
+      if (cached) {
+        detailEl.innerHTML = buildSummary(cached);
+        attachGalleryListeners(detailEl);
+        attachSummaryActions(detailEl);
+        if (immediate) {
+          return;
+        }
+      } else {
+        detailEl.innerHTML = "<div class=\"placeholder\">Loading reel summary…</div>";
+      }
+
       try {
         const summary = await Api.get(`reel/${reelId}/summary`);
+        summaryCache.set(reelId, summary);
+        if (state.selectedReelId !== reelId) return;
         detailEl.innerHTML = buildSummary(summary);
         attachGalleryListeners(detailEl);
+        attachSummaryActions(detailEl);
       } catch (err) {
         console.error("Failed to load reel summary", err);
-        detailEl.innerHTML = `<div class="placeholder">Failed to load reel summary: ${err.message}</div>`;
+        if (!cached) {
+          detailEl.innerHTML = `<div class="placeholder">Failed to load reel summary: ${err.message}</div>`;
+        }
       }
     }
 
@@ -958,6 +1716,12 @@
         typeof reel.reel_start === "number" && typeof reel.reel_end === "number"
           ? reel.reel_end - reel.reel_start
           : null;
+      const inReview = reel.reel_code ? Filters.getReelCodes().includes(reel.reel_code) : false;
+      const addButton = reel.reel_code
+        ? `<button class="add-reel-button" data-add-reel="${reel.reel_code}" ${inReview ? "disabled" : ""}>${
+            inReview ? "In review" : "Add to review"
+          }</button>`
+        : "";
 
       const phaseTimeline = renderTimeline(phases, "Inspection timeline");
       const rlmPhaseTimeline =
@@ -965,17 +1729,33 @@
           ? renderTimeline(rlm.phases, "RLM timeline")
           : "<span class='badge'>No RLM phases</span>";
 
-      const rlmMetrics = rlm.config ? extractRlmMetrics(rlm.config) : [];
-      const rlmConfigTable = rlmMetrics.length
+      const rlmPoints = rlm.points || [];
+      const rlmPointsTable = rlmPoints.length
         ? `<table class="data-table">
-             <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+             <thead>
+               <tr>
+                 <th>ID</th>
+                 <th>Timestamp</th>
+                 <th>Format</th>
+                 <th>Web Speed</th>
+                 <th>Cur Length</th>
+               </tr>
+             </thead>
              <tbody>
-               ${rlmMetrics
-                 .map((metric) => `<tr><td>${metric.label}</td><td>${metric.value}</td></tr>`)
+               ${rlmPoints
+                 .map((point) =>
+                   `<tr>
+                      <td>${point.id || "—"}</td>
+                      <td>${formatTime(point.timestamp)}</td>
+                      <td>${formatMetricCell(point.format)}</td>
+                      <td>${formatMetricCell(point.webspeed)}</td>
+                      <td>${formatMetricCell(point.curlength)}</td>
+                    </tr>`
+                 )
                  .join("")}
              </tbody>
            </table>`
-        : "<span class='badge'>No RLM config metrics</span>";
+        : "<span class='badge'>No RLM monitoring points</span>";
 
       const sensitivityTable = sensitivities.length
         ? `<table class="data-table">
@@ -1028,6 +1808,7 @@
             <span>Machine: ${reel.machine || "N/A"}</span>
             <span>Length: ${Utils.formatMeters(reelMeters)}</span>
             <span>Format: ${Utils.formatNumber(reel.format_length, 2)} × ${Utils.formatNumber(reel.format_width, 2)}</span>
+            ${addButton}
           </div>
         </div>
 
@@ -1070,7 +1851,7 @@
             <span>Monitor points: ${rlm.monitor_count || 0}</span>
             <span>Config: ${rlm.config ? "Loaded" : "Not available"}</span>
           </div>
-          ${rlmConfigTable}
+          ${rlmPointsTable}
           ${rlmPhaseTimeline}
         </div>
 
@@ -1088,28 +1869,85 @@
         return coords.length > 48 ? `${coords.slice(0, 48)}…` : coords;
       }
 
-      function extractRlmMetrics(config) {
-        const defs = [
-          { key: "format", label: "Format" },
-          { key: "errexpand", label: "Err Expand" },
-          { key: "errshrink", label: "Err Shrink" },
-          { key: "wrnexpand", label: "Warn Expand" },
-          { key: "wrnshrink", label: "Warn Shrink" },
-          { key: "nomlength", label: "Nominal Length" },
-          { key: "nomlenght", label: "Nominal Length" },
-        ];
-        const seen = new Set();
-        const rows = [];
-        defs.forEach(({ key, label }) => {
-          if (seen.has(label)) return;
-          const value = findMetricValue(config, key);
-          if (value === null || value === undefined || value === "") return;
-          const numeric = Number(value);
-          const display = Number.isFinite(numeric) ? Utils.formatNumber(numeric, 3) : value;
-          rows.push({ label, value: display });
-          seen.add(label);
+function extractRlmMetrics(config) {
+        const groups = new Map();
+
+        function recordMetric(path, key, rawValue) {
+          if (rawValue === null || rawValue === undefined || rawValue === "") return;
+          const groupKey = path || "Config";
+          const row = groups.get(groupKey) || { label: prettifyLabel(groupKey) };
+          const label = RLM_METRIC_LABELS[key];
+          const numeric = Number(rawValue);
+          row[label] = Number.isFinite(numeric) ? Number(numeric.toFixed(3)) : rawValue;
+          groups.set(groupKey, row);
+        }
+
+        function walk(node, path = "") {
+          if (!node || typeof node !== "object") return;
+          if (Array.isArray(node)) {
+            node.forEach((child, idx) => {
+              const nextPath = path ? `${path}[${idx}]` : `[${idx}]`;
+              walk(child, nextPath);
+            });
+            return;
+          }
+
+          Object.keys(RLM_METRIC_LABELS).forEach((key) => {
+            const value = getMetricValue(node, key);
+            if (value !== undefined) {
+              recordMetric(path, key, value);
+            }
+          });
+
+          Object.entries(node).forEach(([key, value]) => {
+            if (key === "_attrs" || key === "_children") return;
+            if (value && typeof value === "object") {
+              const nextPath = path ? `${path}.${key}` : key;
+              walk(value, nextPath);
+            }
+          });
+
+          if (node._attrs && typeof node._attrs === "object") {
+            walk(node._attrs, path ? `${path}._attrs` : "_attrs");
+          }
+          if (Array.isArray(node._children)) {
+            node._children.forEach((child, idx) => {
+              walk(child, path ? `${path}._children[${idx}]` : `_children[${idx}]`);
+            });
+          }
+        }
+
+        function getMetricValue(node, key) {
+          if (Object.prototype.hasOwnProperty.call(node, key)) {
+            return node[key];
+          }
+          if (node._attrs && Object.prototype.hasOwnProperty.call(node._attrs, key)) {
+            return node._attrs[key];
+          }
+          return undefined;
+        }
+
+        function prettifyLabel(rawPath) {
+          if (!rawPath) return "Config";
+          return rawPath
+            .replace(/_children\[\d+\]/g, "")
+            .replace(/_attrs/g, "attrs")
+            .replace(/^\./, "")
+            .replace(/\.+/g, ".")
+            || "Config";
+        }
+
+        walk(config);
+
+        const columns = Array.from(new Set(Object.values(RLM_METRIC_LABELS)));
+        return Array.from(groups.values()).map((row) => {
+          columns.forEach((col) => {
+            if (!Object.prototype.hasOwnProperty.call(row, col)) {
+              row[col] = null;
+            }
+          });
+          return row;
         });
-        return rows;
       }
 
       function findMetricValue(node, target) {
@@ -1140,6 +1978,14 @@
         }
         return null;
       }
+    }
+
+    function formatMetricCell(value) {
+      if (value === null || value === undefined || value === "") return "—";
+      if (typeof value === "number") return Utils.formatNumber(value, 3);
+      const numeric = Number(value);
+      if (Number.isFinite(numeric)) return Utils.formatNumber(numeric, 3);
+      return value;
     }
 
     function renderTimeline(phases, ariaLabel) {
@@ -1176,6 +2022,24 @@
       });
     }
 
+    function attachSummaryActions(scope) {
+      if (!scope) return;
+      const button = scope.querySelector("[data-add-reel]");
+      if (!button) return;
+      const reelCode = button.dataset.addReel || "";
+      const isAlreadySelected = reelCode && Filters.getReelCodes().includes(reelCode);
+      if (isAlreadySelected) {
+        button.disabled = true;
+        button.textContent = "In review";
+      }
+      button.addEventListener("click", () => {
+        if (!reelCode) return;
+        Filters.addReel(reelCode);
+        button.disabled = true;
+        button.textContent = "In review";
+      });
+    }
+
     function formatRange(start, end) {
       if (!start && !end) return "N/A";
       const startStr = start ? formatTime(start) : "N/A";
@@ -1204,6 +2068,8 @@
     let positionMax;
     let tableBody;
     let paginationEl;
+    let summaryTotalEl;
+    let summaryTypesEl;
 
     const state = {
       page: 1,
@@ -1234,8 +2100,10 @@
 
         const data = await Api.get("defects", params);
         state.pageInfo = data.page_info || null;
-        updateTypeOptions(data.by_type || []);
-        renderCharts(data);
+        const byType = data.by_type || [];
+        updateTypeOptions(byType);
+        renderSummary(data.page_info, byType);
+        renderCharts(data, byType);
         renderTable(data.rows || []);
         renderPagination();
       } catch (err) {
@@ -1257,6 +2125,8 @@
       positionMax = Utils.qs("#positionMax");
       tableBody = Utils.qs("#defectTable tbody");
       paginationEl = Utils.qs("#defectPagination");
+      summaryTotalEl = Utils.qs("[data-defect-total]");
+      summaryTypesEl = Utils.qs("#defectSummaryTypes");
 
       [
         [typeSelect, "class_name"],
@@ -1304,9 +2174,8 @@
       }
     }
 
-    function renderCharts(data) {
-      const byType = data.by_type || [];
-      const trend = data.trend || [];
+    function renderCharts(data, byTypeOverride) {
+      const byType = byTypeOverride || data.by_type || [];
       const magnitude = data.magnitude_hist || [];
       const severity = data.severity_hist || [];
       const position = data.position_hist || [];
@@ -1322,21 +2191,6 @@
           },
         ],
         { title: "Defects by Type", margin: { t: 40, l: 40, r: 20, b: 80 } },
-        { responsive: true }
-      );
-
-      Plotly.react(
-        "defectTrendChart",
-        [
-          {
-            type: "scatter",
-            mode: "lines+markers",
-            x: trend.map((item) => item.time),
-            y: trend.map((item) => item.count),
-            line: { color: "#2563eb" },
-          },
-        ],
-        { title: "Defects Over Time", xaxis: { type: "date" }, margin: { t: 40, l: 40, r: 20, b: 60 } },
         { responsive: true }
       );
 
@@ -1381,6 +2235,25 @@
         { title: "Position Distribution", margin: { t: 40, l: 40, r: 20, b: 80 } },
         { responsive: true }
       );
+    }
+
+    function renderSummary(pageInfo, byType) {
+      if (summaryTotalEl) {
+        const total = pageInfo && typeof pageInfo.total === "number" ? pageInfo.total : null;
+        summaryTotalEl.textContent = total === null ? "--" : Utils.formatNumber(total);
+      }
+
+      if (summaryTypesEl) {
+        if (!byType.length) {
+          summaryTypesEl.innerHTML = "<span class='badge'>No defect types</span>";
+          return;
+        }
+        const items = byType.map(
+          (entry) =>
+            `<span class="badge">${entry.class || "Unknown"}: ${Utils.formatNumber(entry.count)}</span>`
+        );
+        summaryTypesEl.innerHTML = items.join("");
+      }
     }
 
     function renderTable(rows) {
