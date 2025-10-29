@@ -1483,7 +1483,7 @@
           <div class="heatmap-gallery" id="heatmap-gallery-${slug}"></div>
           <div class="heatmap-stack">
             <div class="heatmap-wrapper heatmap-empty" id="heatmap-overview-${slug}"></div>
-            <div class="heatmap-legend" id="heatmap-overview-${slug}-legend"></div>
+            <div class="heatmap-legend heatmap-legend-overview" id="heatmap-overview-${slug}-legend"></div>
           </div>
         </div>
       `;
@@ -2248,7 +2248,7 @@
            </div>`;
       const heatmapInner = `
           ${wrapperHtml}
-          <div class="heatmap-legend" id="${heatmapId}-legend"></div>
+          <div class="heatmap-legend heatmap-legend-job" id="${heatmapId}-legend"></div>
         `;
       const heatmapSection = `
         <div class="summary-section">

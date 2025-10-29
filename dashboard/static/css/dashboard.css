@@ -657,8 +657,16 @@ body {
   margin-top: 12px;
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(2, minmax(120px, 1fr));
-  max-width: 320px;
+}
+
+.heatmap-legend-overview {
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
+  max-width: 360px;
+}
+
+.heatmap-legend-job {
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  max-width: none;
 }
 
 .heatmap-legend-item {
