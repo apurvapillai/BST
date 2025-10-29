@@ -741,6 +741,9 @@ def api_overview():
         jobs_time = defaultdict(lambda: {"active": 0.0, "inactive": 0.0, "learn": 0.0})
         jobs_defects = defaultdict(int)
         state_buckets: Dict[datetime, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        job_reference_latest: Dict[str, Dict[str, Any]] = {}
+        job_heatmap_records: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        job_heatmap_dims: Dict[str, Dict[str, Optional[float]]] = {}
 
         totals = {
             "length": 0.0,
@@ -808,6 +811,19 @@ def api_overview():
                 reel.inspection_phases or [], key=lambda p: p.start_time or datetime.min
             )
             phase_mix = _phase_mix_for_reel(reel, window_start, window_end)
+
+            width_val = _to_float(reel.format_width)
+            length_val = _to_float(reel.format_length)
+            if (
+                job_display not in job_heatmap_dims
+                and width_val is not None
+                and length_val is not None
+            ):
+                job_heatmap_dims[job_display] = {
+                    "format_width": width_val,
+                    "format_length": length_val,
+                }
+
             for key in ("active", "inactive", "learn"):
                 seconds = phase_mix.get(key, {}).get("seconds", 0.0)
                 length = phase_mix.get(key, {}).get("length", 0.0)
@@ -824,6 +840,14 @@ def api_overview():
                 if defect.defect_time and window_start <= defect.defect_time <= window_end:
                     if job_name:
                         jobs_defects[job_name] += 1
+                    if defect.coords_json:
+                        job_heatmap_records[job_display].append(
+                            {
+                                "coords": defect.coords_json,
+                                "magnitude_value": _to_float(defect.magnitude_value),
+                                "severity_value": _to_float(defect.severity_value),
+                            }
+                        )
                     record_event(
                         job_name,
                         defect.defect_time,
@@ -863,6 +887,21 @@ def api_overview():
                         detail=detail,
                         reel_code=reel.reel_code,
                     )
+
+            if ordered_refs:
+                reel_timestamp = reel.time_end or reel.time_start or datetime.min
+                images: List[Dict[str, str]] = []
+                for ref in ordered_refs:
+                    image_src = (ref.image_src or "").replace("\\", "/")
+                    if not image_src:
+                        continue
+                    images.append({"filename": ref.filename, "image_src": image_src})
+                    if len(images) >= 6:
+                        break
+                if images:
+                    current_ref = job_reference_latest.get(job_display)
+                    if not current_ref or (reel_timestamp and reel_timestamp > current_ref.get("time", datetime.min)):
+                        job_reference_latest[job_display] = {"time": reel_timestamp, "images": images}
 
             # Mask applications
             for mask in reel.masks or []:
@@ -1128,6 +1167,12 @@ def api_overview():
                 }
             )
 
+        for job_name in job_set:
+            display = job_label(job_name)
+            job_heatmap_records.setdefault(display, [])
+            job_heatmap_dims.setdefault(display, {"format_width": None, "format_length": None})
+            job_reference_latest.setdefault(display, {"time": None, "images": []})
+
         job_metrics_payload: List[Dict[str, object]] = []
         for metrics in job_metrics_summary.values():
             defect_class_counter: Counter = metrics["defect_classes"]
@@ -1154,6 +1199,19 @@ def api_overview():
                 }
             )
 
+        job_heatmap_payload: List[Dict[str, Any]] = []
+        for job, entries in sorted(job_heatmap_records.items()):
+            dims = job_heatmap_dims.get(job) or {}
+            refs = (job_reference_latest.get(job) or {}).get("images", [])
+            job_heatmap_payload.append(
+                {
+                    "job": job,
+                    "format_width": dims.get("format_width"),
+                    "format_length": dims.get("format_length"),
+                    "defects": entries,
+                    "reference_images": refs,
+                }
+            )
 
         response = {
             "kpis": {
@@ -1194,6 +1252,7 @@ def api_overview():
             "job_operations_timeline": job_operations_timeline,
             "job_order_metrics": job_order_metrics_payload,
             "job_metrics": job_metrics_payload,
+            "job_heatmaps": job_heatmap_payload,
         }
     return jsonify(response)
 
@@ -1475,6 +1534,19 @@ def api_reel_summary(reel_id: int):
             "types": len({d.class_name for d in reel.defects or [] if d.class_name}),
         }
 
+        defects_payload = [
+            {
+                "defect_id": defect.defect_id,
+                "class_name": defect.class_name,
+                "defect_time": _iso(defect.defect_time),
+                "format_position": _to_float(defect.format_position),
+                "magnitude_value": _to_float(defect.magnitude_value),
+                "severity_value": _to_float(defect.severity_value),
+                "coords": defect.coords_json or [],
+            }
+            for defect in sorted(reel.defects or [], key=lambda x: x.defect_time or datetime.min)
+        ]
+
         response = {
             "reel": {
                 "reel_id": reel.reel_id,
@@ -1500,6 +1572,7 @@ def api_reel_summary(reel_id: int):
                 "points": _extract_monpoints(reel.rlm_config.config_json) if reel.rlm_config else [],
             },
             "defects_summary": defects_summary,
+            "defects": defects_payload,
         }
         return jsonify(response)
 

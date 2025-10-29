@@ -14,6 +14,10 @@
   </div>
 
   <div class="app-shell">
+    <div id="globalLoading" class="loading-overlay hidden">
+      <div class="loading-spinner"></div>
+      <p>Loading…</p>
+    </div>
     <!-- Global Filters -->
     <div class="filters" id="globalFilters"
          data-default-machine="{{ default_machine_id }}"
@@ -136,6 +140,22 @@
         </div>
         <div id="overviewJobsDefects" class="chart chart-span-full"></div>
         <div id="overviewOperationsTimeline" class="chart chart-span-full"></div>
+        <div class="chart chart-span-full" id="overviewHeatmapBlock">
+          <div class="chart-header">
+            <h3>Job Defect Footprints</h3>
+          </div>
+          <div id="overviewHeatmapCanvas" class="overview-heatmap-center">
+            <div class="heatmap-flex">
+              <div class="heatmap-gallery heatmap-reference-empty">No reference images for this job.</div>
+              <div class="heatmap-stack">
+                <div class="heatmap-wrapper heatmap-empty">
+                  <span class="badge">No data yet for the selected window.</span>
+                </div>
+                <div class="heatmap-legend"></div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 

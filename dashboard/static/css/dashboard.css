@@ -10,6 +10,50 @@ body {
 .app-shell {
   max-width: 1800px;
   margin: 0 auto;
+  position: relative;
+}
+
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(1.5px);
+  transition: opacity 0.2s ease;
+}
+
+.loading-overlay.hidden {
+  pointer-events: none;
+  opacity: 0;
+}
+
+.loading-spinner {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 5px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #38bdf8;
+  animation: spin 0.9s linear infinite;
+  margin-bottom: 16px;
+}
+
+.loading-overlay p {
+  color: #f8fafc;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 /* Global filters */
@@ -444,7 +488,7 @@ body {
 
 .summary-header {
   display: flex;
-  justify-content: space-between;
+  justify-content: center;
   align-items: center;
   margin-bottom: 16px;
 }
@@ -495,6 +539,171 @@ body {
   text-transform: uppercase;
   color: #6b7280;
   letter-spacing: 0.6px;
+}
+
+
+.overview-heatmap-center {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0;
+}
+
+.heatmap-wrapper {
+  position: relative;
+  width: 100%;
+  max-width: 720px;
+  min-width: 400px;
+  aspect-ratio: 1 / 1;
+  background: #f8fafc;
+  border: 1px solid #d8e1f2;
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.heatmap-wrapper.heatmap-empty {
+  color: #475569;
+  font-size: 13px;
+  text-align: center;
+  padding: 0 12px;
+}
+
+.heatmap-wrapper canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.heatmap-flex {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  align-items: center;
+}
+
+.heatmap-gallery {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 140px;
+  gap: 12px;
+  justify-content: center;
+  width: 100%;
+}
+
+.heatmap-gallery img {
+  width: 140px;
+  height: 140px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid #dbe4f3;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.heatmap-gallery img:hover {
+  transform: scale(1.03);
+}
+
+.heatmap-reference-empty {
+  color: #64748b;
+  font-size: 13px;
+  text-align: center;
+  padding: 10px 12px;
+}
+
+.heatmap-stack {
+  display: grid;
+  grid-template-columns: minmax(520px, 720px) minmax(260px, 320px);
+  gap: 18px;
+  justify-content: center;
+  align-items: stretch;
+  width: 100%;
+}
+
+
+.heatmap-notice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+}
+
+
+.chart-header {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.chart-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #1f2937;
+}
+
+.chart-header select {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #1f2937;
+  font-size: 13px;
+}
+
+.heatmap-legend {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  max-width: 320px;
+}
+
+.heatmap-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border: 1px solid #dbe4f3;
+  border-radius: 8px;
+  color: #475569;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.heatmap-legend-item .swatch {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  flex: 0 0 auto;
+}
+
+.heatmap-legend-item .legend-coords {
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  gap: 2px;
+}
+
+.heatmap-legend-item .legend-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 140px;
+  font-weight: 500;
+}
+
+
+.heatmap-legend-item.disabled {
+  opacity: 0.45;
+}
+
+.heatmap-legend-item input {
+  margin-right: 8px;
+  cursor: pointer;
 }
 
 .gallery {
@@ -794,3 +1003,8 @@ body {
 
 .clear-btn:hover {
   background: #cbd5e1;
+
+.heatmap-legend-item .legend-meta {
+  font-weight: 500;
+  color: #475569;
+}

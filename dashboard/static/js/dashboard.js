@@ -85,6 +85,337 @@
     },
   };
 
+  const HEATMAP_BUCKETS = [
+    { key: "A1", min: 0, max: 100, label: "<100", fill: "rgba(30, 64, 175, 0.45)", stroke: "rgba(30, 58, 138, 0.95)", legend: "#1d4ed8" },
+    { key: "A2", min: 100, max: 500, label: "100-500", fill: "rgba(37, 99, 235, 0.45)", stroke: "rgba(29, 78, 216, 0.95)", legend: "#2563eb" },
+    { key: "A3", min: 500, max: 1000, label: "500-1000", fill: "rgba(59, 130, 246, 0.45)", stroke: "rgba(37, 99, 235, 0.95)", legend: "#3b82f6" },
+    { key: "A4", min: 1000, max: 5000, label: "1000-5000", fill: "rgba(14, 165, 233, 0.45)", stroke: "rgba(2, 132, 199, 0.95)", legend: "#0ea5e9" },
+    { key: "A5", min: 5000, max: 10000, label: "5000-10000", fill: "rgba(6, 182, 212, 0.45)", stroke: "rgba(8, 145, 178, 0.95)", legend: "#06b6d4" },
+    { key: "A6", min: 10000, max: 25000, label: "10000-25000", fill: "rgba(16, 185, 129, 0.45)", stroke: "rgba(5, 150, 105, 0.95)", legend: "#10b981" },
+    { key: "A7", min: 25000, max: 50000, label: "25000-50000", fill: "rgba(34, 197, 94, 0.45)", stroke: "rgba(22, 163, 74, 0.95)", legend: "#22c55e" },
+    { key: "A8", min: 50000, max: 75000, label: "50000-75000", fill: "rgba(250, 204, 21, 0.45)", stroke: "rgba(234, 179, 8, 0.95)", legend: "#facc15" },
+    { key: "A9", min: 75000, max: 100000, label: "75000-100000", fill: "rgba(249, 115, 22, 0.45)", stroke: "rgba(234, 88, 12, 0.95)", legend: "#f97316" },
+    { key: "A10", min: 100000, max: Infinity, label: ">100000", fill: "rgba(220, 38, 38, 0.5)", stroke: "rgba(185, 28, 28, 0.95)", legend: "#dc2626" },
+  ];
+
+  const JobHeatmap = (() => {
+    const PADDING = 24;
+    const FALLBACK_SIZE = 360;
+    const reelState = new Map();
+
+    function polygonArea(xs, ys) {
+      const len = Math.min(xs.length, ys.length);
+      if (len < 3) return 0;
+      let area = 0;
+      for (let i = 0, j = len - 1; i < len; j = i, i += 1) {
+        area += (xs[j] + xs[i]) * (ys[j] - ys[i]);
+      }
+      return Math.abs(area) / 2;
+    }
+
+    function domId(reel) {
+      const id = reel && reel.reel_id !== undefined && reel.reel_id !== null ? reel.reel_id : "unknown";
+      return `heatmap-${id}`;
+    }
+
+    function attach(scope, summary) {
+      if (!scope || !summary) return;
+      const reel = summary.reel || {};
+      const container = scope.querySelector(`#${domId(reel)}`);
+      if (!container) return;
+      const defects = Array.isArray(summary.defects) ? summary.defects : [];
+      const key = reel.reel_id ?? domId(reel);
+      let state = reelState.get(key);
+      if (!state) {
+        state = { disabledBuckets: new Set() };
+        reelState.set(key, state);
+      }
+      window.requestAnimationFrame(() => render(container, reel, defects, state));
+    }
+
+    function render(container, reel, defects, state) {
+      state.disabledBuckets = state.disabledBuckets || new Set();
+      const rawWidth = Number(reel?.format_width);
+      const rawLength = Number(reel?.format_length);
+      const hasDimensionsOriginal =
+        Number.isFinite(rawWidth) && Number.isFinite(rawLength) && rawWidth > 0 && rawLength > 0;
+      let workingWidth = rawWidth;
+      let workingLength = rawLength;
+
+      const aggregatesMap = new Map();
+      let globalMinX = Infinity;
+      let globalMaxX = -Infinity;
+      let globalMinY = Infinity;
+      let globalMaxY = -Infinity;
+
+      defects.forEach((defect) => {
+        if (!Array.isArray(defect.coords)) return;
+        const magnitude = Number(defect.magnitude_value) || 0;
+        const severity = Number(defect.severity_value) || 0;
+        defect.coords.forEach((shape) => {
+          const xs = Array.isArray(shape.x) ? shape.x.map(Number).filter((n) => Number.isFinite(n)) : [];
+          const ys = Array.isArray(shape.y) ? shape.y.map(Number).filter((n) => Number.isFinite(n)) : [];
+          const count = Math.min(xs.length, ys.length);
+          if (count < 3) return;
+          const area = polygonArea(xs, ys);
+          const key =
+            xs.slice(0, count).map((val) => val.toFixed(1)).join("|") +
+            "::" +
+            ys.slice(0, count).map((val) => val.toFixed(1)).join("|");
+          let entry = aggregatesMap.get(key);
+          if (!entry) {
+            entry = {
+              xs: xs.slice(0, count),
+              ys: ys.slice(0, count),
+              count: 0,
+              magnitudeSum: 0,
+              severitySum: 0,
+              minX: Infinity,
+              maxX: -Infinity,
+              minY: Infinity,
+              maxY: -Infinity,
+              area: 0,
+            };
+            aggregatesMap.set(key, entry);
+          }
+          entry.count += 1;
+          entry.magnitudeSum += magnitude;
+          entry.severitySum += severity;
+          entry.minX = Math.min(entry.minX, ...xs);
+          entry.maxX = Math.max(entry.maxX, ...xs);
+          entry.minY = Math.min(entry.minY, ...ys);
+          entry.maxY = Math.max(entry.maxY, ...ys);
+          entry.area = area;
+          globalMinX = Math.min(globalMinX, entry.minX);
+          globalMaxX = Math.max(globalMaxX, entry.maxX);
+          globalMinY = Math.min(globalMinY, entry.minY);
+          globalMaxY = Math.max(globalMaxY, entry.maxY);
+        });
+      });
+
+      const aggregates = Array.from(aggregatesMap.values());
+      if (!aggregates.length) {
+        container.classList.add("heatmap-empty");
+        container.innerHTML = "<span class='badge'>No defect coordinates</span>";
+        renderLegend(container, reel, [], state, () => {});
+        return;
+      }
+
+      if (!hasDimensionsOriginal) {
+        const widthSpan = globalMaxX - globalMinX;
+        const lengthSpan = globalMaxY - globalMinY;
+        workingWidth = widthSpan > 0 ? widthSpan : FALLBACK_SIZE / 4;
+        workingLength = lengthSpan > 0 ? lengthSpan : FALLBACK_SIZE / 4;
+      }
+
+      container.classList.remove("heatmap-empty");
+      container.innerHTML = "";
+
+      const dpr = window.devicePixelRatio || 1;
+      const availableWidth = container.clientWidth || FALLBACK_SIZE;
+      const size = Math.max(PADDING * 4, availableWidth);
+      const canvas = document.createElement("canvas");
+      canvas.width = size * dpr;
+      canvas.height = size * dpr;
+      canvas.style.width = `${size}px`;
+      canvas.style.height = `${size}px`;
+
+      const ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+
+      ctx.fillStyle = "#f0f4fb";
+      ctx.fillRect(0, 0, size, size);
+
+      ctx.save();
+      ctx.translate(size / 2, size / 2);
+
+      const scale = Math.max(workingWidth, workingLength)
+        ? (size - PADDING * 2) / Math.max(workingWidth, workingLength)
+        : 1;
+      const drawWidth = workingWidth * scale;
+      const drawLength = workingLength * scale;
+      const centerX = hasDimensionsOriginal ? 0 : (globalMinX + globalMaxX) / 2;
+      const centerY = hasDimensionsOriginal ? 0 : (globalMinY + globalMaxY) / 2;
+
+      ctx.fillStyle = "#e1e7f5";
+      ctx.fillRect(-drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
+
+      ctx.strokeStyle = "#4a5a7a";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(-drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
+
+      ctx.strokeStyle = "rgba(74, 90, 122, 0.35)";
+      ctx.beginPath();
+      ctx.moveTo(-drawWidth / 2, 0);
+      ctx.lineTo(drawWidth / 2, 0);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, -drawLength / 2);
+      ctx.lineTo(0, drawLength / 2);
+      ctx.stroke();
+
+      ctx.lineJoin = "round";
+      const bucketStats = new Map(
+        HEATMAP_BUCKETS.map((bucket) => [
+          bucket.key,
+          {
+            bucket,
+            defectTotal: 0,
+            polygonCount: 0,
+            magnitudeSum: 0,
+            severitySum: 0,
+            minX: Infinity,
+            maxX: -Infinity,
+            minY: Infinity,
+            maxY: -Infinity,
+            areaSum: 0,
+          },
+        ])
+      );
+
+      aggregates.forEach((agg) => {
+        const bucket = bucketForArea(agg.area || 0);
+        agg.bucketKey = bucket.key;
+        const stats = bucketStats.get(bucket.key);
+        if (!stats) return;
+        stats.defectTotal += agg.count;
+        stats.polygonCount += 1;
+        stats.magnitudeSum += agg.magnitudeSum;
+        stats.severitySum += agg.severitySum;
+        stats.minX = Math.min(stats.minX, agg.minX);
+        stats.maxX = Math.max(stats.maxX, agg.maxX);
+        stats.minY = Math.min(stats.minY, agg.minY);
+        stats.maxY = Math.max(stats.maxY, agg.maxY);
+        stats.areaSum += (agg.area || 0) * agg.count;
+      });
+
+      aggregates.forEach((agg) => {
+        const bucket = bucketForArea(agg.area || 0);
+        if (state.disabledBuckets.has(bucket.key)) return;
+        ctx.beginPath();
+        ctx.moveTo((agg.xs[0] - centerX) * scale, -(agg.ys[0] - centerY) * scale);
+        for (let i = 1; i < agg.xs.length; i += 1) {
+          ctx.lineTo((agg.xs[i] - centerX) * scale, -(agg.ys[i] - centerY) * scale);
+        }
+        ctx.closePath();
+        ctx.fillStyle = bucket.fill;
+        ctx.fill();
+        ctx.strokeStyle = bucket.stroke;
+        ctx.lineWidth = 0.9;
+        ctx.stroke();
+      });
+
+      ctx.restore();
+      ctx.fillStyle = "#4a5a7a";
+      ctx.font = "12px sans-serif";
+      ctx.textBaseline = "bottom";
+      ctx.textAlign = "left";
+      ctx.fillText(`X: ±${Utils.formatNumber(workingWidth / 2, 1)}`, 8, size - 8);
+      ctx.textBaseline = "top";
+      ctx.textAlign = "right";
+      ctx.fillText(`Y: ±${Utils.formatNumber(workingLength / 2, 1)}`, size - 8, 8);
+
+      container.appendChild(canvas);
+      renderLegend(
+        container,
+        reel,
+        Array.from(bucketStats.values()),
+        state,
+        () => render(container, reel, defects, state)
+      );
+    }
+
+    function bucketForArea(area) {
+      const areaValue = Number.isFinite(area) && area > 0 ? area : 0;
+      for (const bucket of HEATMAP_BUCKETS) {
+        if (areaValue <= bucket.max) return bucket;
+      }
+      return HEATMAP_BUCKETS[HEATMAP_BUCKETS.length - 1];
+    }
+
+    function renderLegend(container, reel, bucketStatsArray, state, rerender) {
+      const legendEl = container.parentElement?.querySelector(`#${domId(reel)}-legend`);
+      if (!legendEl) return;
+      const statsMap = new Map((bucketStatsArray || []).map((entry) => [entry.bucket.key, entry]));
+      const html = HEATMAP_BUCKETS.map((bucket) => {
+        const stats = statsMap.get(bucket.key);
+        const defectTotal = stats ? stats.defectTotal : 0;
+        const hasData = defectTotal > 0;
+        if (!hasData) {
+          state.disabledBuckets.delete(bucket.key);
+        }
+        const toggledOff = state.disabledBuckets.has(bucket.key);
+        const checkboxDisabled = hasData ? "" : "disabled";
+        const checkedAttr = hasData && !toggledOff ? "checked" : "";
+        const itemClass = !hasData || toggledOff ? "disabled" : "";
+        const avgMag = hasData && stats ? stats.magnitudeSum / defectTotal : 0;
+        const avgSev = hasData && stats ? stats.severitySum / defectTotal : 0;
+        const countLabel = hasData ? `${defectTotal} defect${defectTotal === 1 ? "" : "s"}` : "0 defects";
+        return `
+          <label class="heatmap-legend-item ${itemClass}">
+            <input type="checkbox" data-bucket="${bucket.key}" ${checkedAttr} ${checkboxDisabled}>
+            <span class="swatch" style="background:${bucket.legend}"></span>
+            <span class="legend-label">${bucket.label}</span>
+            <span class="legend-count">${countLabel}</span>
+            <span class="legend-meta">Mag ${Utils.formatNumber(avgMag, 2)} · Sev ${Utils.formatNumber(avgSev, 2)}</span>
+          </label>
+        `;
+      }).join(" ");
+
+      legendEl.innerHTML = html;
+      legendEl.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+        if (input.disabled) return;
+        input.addEventListener("change", (event) => {
+          const bucketKey = event.target.dataset.bucket;
+          if (!bucketKey) return;
+          if (event.target.checked) {
+            state.disabledBuckets.delete(bucketKey);
+          } else {
+            state.disabledBuckets.add(bucketKey);
+          }
+          window.requestAnimationFrame(() => rerender());
+        });
+      });
+    }
+
+    return { domId, attach };
+  })();
+
+  const LoadingOverlay = (() => {
+    let overlay = null;
+
+    function ensure() {
+      if (!overlay) {
+        overlay = document.getElementById("globalLoading");
+      }
+      return overlay;
+    }
+
+    function show() {
+      const el = ensure();
+      if (el) {
+        el.classList.remove("hidden");
+      }
+    }
+
+    function hide() {
+      const el = ensure();
+      if (el) {
+        el.classList.add("hidden");
+      }
+    }
+
+    function reset() {
+      const el = ensure();
+      if (el) {
+        el.classList.add("hidden");
+      }
+    }
+
+    return { show, hide, reset };
+  })();
+
+
   const Filters = (() => {
     const root = document.getElementById("globalFilters");
     const elements = {
@@ -270,6 +601,7 @@
     async function refreshOptions(initial = false) {
       if (refreshOptionsQueued && !initial) return;
       refreshOptionsQueued = true;
+      LoadingOverlay.show();
       try {
         const data = await Api.get("filters", {}, getState());
         updating = true;
@@ -281,6 +613,7 @@
         console.error("Failed to refresh filter options", err);
       } finally {
         refreshOptionsQueued = false;
+        LoadingOverlay.hide();
       }
     }
 
@@ -653,6 +986,11 @@
   const OverviewTab = (() => {
     let initialized = false;
     let kpiMap = {};
+    let heatmapContainer;
+    const heatmapState = {
+      jobs: [],
+      selectedJob: "",
+    };
     const EVENT_ORDER = [
       "defect",
       "reference_change",
@@ -681,12 +1019,15 @@
     };
 
     const load = Utils.debounce(async () => {
+      LoadingOverlay.show();
       try {
         const data = await Api.get("overview");
         renderKpis(data.kpis || {});
         renderCharts(data);
       } catch (err) {
         console.error("Overview load failed", err);
+      } finally {
+        LoadingOverlay.hide();
       }
     }, FETCH_DEBOUNCE_MS);
 
@@ -696,6 +1037,7 @@
         const key = card.dataset.kpi;
         kpiMap[key] = card.querySelector("p");
       });
+      heatmapContainer = Utils.qs("#overviewHeatmapCanvas");
       initialized = true;
     }
 
@@ -739,6 +1081,7 @@
       const jobEvents = data.job_events || [];
       const jobsDefectsTrend = data.jobs_defects_timeline || [];
       const jobMetrics = data.job_metrics || [];
+      const jobHeatmaps = data.job_heatmaps || [];
 
       const jobsTimePct = jobsTime.map((job) => {
         const total =
@@ -845,6 +1188,7 @@
       renderJobsDefectsTrend(jobsDefectsTrend, jobsDefects);
       renderJobMetricCards(jobMetrics);
       renderOperationsTimeline(jobEvents);
+      renderJobHeatmap(jobHeatmaps);
     }
 
     function renderJobsDefectsTrend(trend, totals) {
@@ -1094,6 +1438,93 @@
       ];
 
       configs.forEach((config) => renderSingleJobMetricChart(jobMetrics, config));
+    }
+
+    function renderJobHeatmap(jobHeatmaps) {
+      if (!heatmapContainer) return;
+
+      const filters = Filters.getState();
+      const activeJobRaw = (filters.job || "").trim();
+      if (!activeJobRaw) {
+        heatmapState.jobs = [];
+        heatmapState.selectedJob = "";
+        heatmapContainer.innerHTML =
+          "<div class=\"heatmap-wrapper heatmap-empty heatmap-notice\"><span class='badge'>Select a job to view the heatmap.</span></div>";
+        return;
+      }
+
+      const activeDisplay = activeJobRaw || "Unassigned";
+      const normalized = (jobHeatmaps || []).map((job) => ({
+        job: job.job || "Unassigned",
+        format_width: job.format_width,
+        format_length: job.format_length,
+        defects: job.defects || [],
+        reference_images: job.reference_images || [],
+      }));
+
+      const selectedEntry =
+        normalized.find((job) => job.job === activeDisplay) ||
+        normalized.find((job) => job.job.toLowerCase() === activeDisplay.toLowerCase());
+
+      if (!selectedEntry) {
+        heatmapState.jobs = [];
+        heatmapState.selectedJob = activeDisplay;
+        heatmapContainer.innerHTML =
+          `<div class=\"heatmap-wrapper heatmap-empty heatmap-notice\"><span class='badge'>No defect coordinates for ${activeDisplay} in this window.</span></div>`;
+        return;
+      }
+
+      heatmapState.jobs = [selectedEntry];
+      heatmapState.selectedJob = selectedEntry.job;
+
+      const slug = slugifyJob(selectedEntry.job);
+      heatmapContainer.innerHTML = `
+        <div class="heatmap-flex">
+          <div class="heatmap-gallery" id="heatmap-gallery-${slug}"></div>
+          <div class="heatmap-stack">
+            <div class="heatmap-wrapper heatmap-empty" id="heatmap-overview-${slug}"></div>
+            <div class="heatmap-legend" id="heatmap-overview-${slug}-legend"></div>
+          </div>
+        </div>
+      `;
+
+      JobHeatmap.attach(heatmapContainer, {
+        reel: {
+          reel_id: `overview-${slug}`,
+          format_width: selectedEntry.format_width,
+          format_length: selectedEntry.format_length,
+        },
+        defects: (selectedEntry.defects || []).map((defect) => ({
+          coords: defect.coords,
+          magnitude_value: Number(defect.magnitude_value ?? 0),
+          severity_value: Number(defect.severity_value ?? 0),
+        })),
+      });
+
+      renderReferenceGallery(heatmapContainer.querySelector(`#heatmap-gallery-${slug}`), selectedEntry.reference_images || []);
+    }
+
+    function renderReferenceGallery(container, references) {
+      if (!container) return;
+      if (!references || !references.length) {
+        container.innerHTML = "<div class=\"heatmap-reference-empty\">No reference images for this job.</div>";
+        return;
+      }
+      container.innerHTML = references
+        .slice(0, 6)
+        .map((ref, idx) => {
+          const src = urlForStatic(ref.image_src);
+          const alt = (ref.filename || `Reference ${idx + 1}`).replace(/"/g, "&quot;");
+          return `<img src="${src}" alt="${alt}" onclick="showImageModal('${src}')">`;
+        })
+        .join("");
+    }
+
+    function slugifyJob(name) {
+      return String(name || "unassigned")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "unassigned";
     }
 
     function renderSingleJobMetricChart(jobMetrics, config) {
@@ -1460,6 +1891,7 @@
     const summaryCache = new Map();
 
     const load = Utils.debounce(async () => {
+      LoadingOverlay.show();
       try {
         const data = await Api.get("job-explorer", { page: state.page });
         state.cachedItems = applySort(data.items || []);
@@ -1469,6 +1901,8 @@
         ensureSelection();
       } catch (err) {
         console.error("Job explorer load failed", err);
+      } finally {
+        LoadingOverlay.hide();
       }
     }, FETCH_DEBOUNCE_MS);
 
@@ -1682,6 +2116,7 @@
         detailEl.innerHTML = buildSummary(cached);
         attachGalleryListeners(detailEl);
         attachSummaryActions(detailEl);
+        JobHeatmap.attach(detailEl, cached);
         if (immediate) {
           return;
         }
@@ -1689,6 +2124,7 @@
         detailEl.innerHTML = "<div class=\"placeholder\">Loading reel summary…</div>";
       }
 
+      LoadingOverlay.show();
       try {
         const summary = await Api.get(`reel/${reelId}/summary`);
         summaryCache.set(reelId, summary);
@@ -1696,11 +2132,14 @@
         detailEl.innerHTML = buildSummary(summary);
         attachGalleryListeners(detailEl);
         attachSummaryActions(detailEl);
+        JobHeatmap.attach(detailEl, summary);
       } catch (err) {
         console.error("Failed to load reel summary", err);
         if (!cached) {
           detailEl.innerHTML = `<div class="placeholder">Failed to load reel summary: ${err.message}</div>`;
         }
+      } finally {
+        LoadingOverlay.hide();
       }
     }
 
@@ -1711,6 +2150,8 @@
       const masks = data.masks || [];
       const phases = data.inspection_phases || [];
       const rlm = data.rlm || {};
+      const defects = data.defects || [];
+      const defectsWithCoords = defects.filter((defect) => Array.isArray(defect.coords) && defect.coords.length);
       const defectsSummary = data.defects_summary || { total: 0, types: 0 };
       const reelMeters =
         typeof reel.reel_start === "number" && typeof reel.reel_end === "number"
@@ -1794,6 +2235,28 @@
            </table>`
         : "<span class='badge'>No masks</span>";
 
+      const formatWidth = Number(reel.format_width);
+      const formatLength = Number(reel.format_length);
+      const heatmapId = JobHeatmap.domId(reel);
+      const hasDimensions =
+        Number.isFinite(formatWidth) && Number.isFinite(formatLength) && formatWidth > 0 && formatLength > 0;
+      const canRenderHeatmap = hasDimensions && defectsWithCoords.length > 0;
+      const wrapperHtml = canRenderHeatmap
+        ? `<div class="heatmap-wrapper" id="${heatmapId}"></div>`
+        : `<div class="heatmap-wrapper heatmap-empty" id="${heatmapId}">
+             <span class='badge'>${hasDimensions ? "No defect coordinates" : "Format dimensions unavailable"}</span>
+           </div>`;
+      const heatmapInner = `
+          ${wrapperHtml}
+          <div class="heatmap-legend" id="${heatmapId}-legend"></div>
+        `;
+      const heatmapSection = `
+        <div class="summary-section">
+          <h4>Defect Heatmap</h4>
+          ${heatmapInner}
+        </div>
+      `;
+
       return `
         <div class="summary-header">
           <div>
@@ -1834,6 +2297,8 @@
           <h4>Inspection Phases</h4>
           ${phaseTimeline}
         </div>
+
+        ${heatmapSection}
 
         <div class="summary-section">
           <h4>Sensitivity (Standard)</h4>
@@ -2085,6 +2550,7 @@ function extractRlmMetrics(config) {
     };
 
     const load = Utils.debounce(async () => {
+      LoadingOverlay.show();
       try {
         const params = {
           page: state.page,
@@ -2111,6 +2577,8 @@ function extractRlmMetrics(config) {
         if (tableBody) {
           tableBody.innerHTML = `<tr><td colspan="11">Failed to load defects: ${err.message}</td></tr>`;
         }
+      } finally {
+        LoadingOverlay.hide();
       }
     }, FETCH_DEBOUNCE_MS);
 
