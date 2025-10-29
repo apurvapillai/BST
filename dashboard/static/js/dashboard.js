@@ -89,13 +89,13 @@
     { key: "A1", min: 0, max: 100, label: "<100", fill: "rgba(30, 64, 175, 0.45)", stroke: "rgba(30, 58, 138, 0.95)", legend: "#1d4ed8" },
     { key: "A2", min: 100, max: 500, label: "100-500", fill: "rgba(37, 99, 235, 0.45)", stroke: "rgba(29, 78, 216, 0.95)", legend: "#2563eb" },
     { key: "A3", min: 500, max: 1000, label: "500-1000", fill: "rgba(59, 130, 246, 0.45)", stroke: "rgba(37, 99, 235, 0.95)", legend: "#3b82f6" },
-    { key: "A4", min: 1000, max: 5000, label: "1000-5000", fill: "rgba(14, 165, 233, 0.45)", stroke: "rgba(2, 132, 199, 0.95)", legend: "#0ea5e9" },
-    { key: "A5", min: 5000, max: 10000, label: "5000-10000", fill: "rgba(6, 182, 212, 0.45)", stroke: "rgba(8, 145, 178, 0.95)", legend: "#06b6d4" },
-    { key: "A6", min: 10000, max: 25000, label: "10000-25000", fill: "rgba(16, 185, 129, 0.45)", stroke: "rgba(5, 150, 105, 0.95)", legend: "#10b981" },
-    { key: "A7", min: 25000, max: 50000, label: "25000-50000", fill: "rgba(34, 197, 94, 0.45)", stroke: "rgba(22, 163, 74, 0.95)", legend: "#22c55e" },
-    { key: "A8", min: 50000, max: 75000, label: "50000-75000", fill: "rgba(250, 204, 21, 0.45)", stroke: "rgba(234, 179, 8, 0.95)", legend: "#facc15" },
-    { key: "A9", min: 75000, max: 100000, label: "75000-100000", fill: "rgba(249, 115, 22, 0.45)", stroke: "rgba(234, 88, 12, 0.95)", legend: "#f97316" },
-    { key: "A10", min: 100000, max: Infinity, label: ">100000", fill: "rgba(220, 38, 38, 0.5)", stroke: "rgba(185, 28, 28, 0.95)", legend: "#dc2626" },
+    { key: "A4", min: 1000, max: 10000, label: "1000-10000", fill: "rgba(14, 165, 233, 0.45)", stroke: "rgba(2, 132, 199, 0.95)", legend: "#0ea5e9" },
+    { key: "A5", min: 10000, max: 50000, label: "10000-50000", fill: "rgba(6, 182, 212, 0.45)", stroke: "rgba(8, 145, 178, 0.95)", legend: "#06b6d4" },
+    { key: "A6", min: 50000, max: 100000, label: "50000-100000", fill: "rgba(16, 185, 129, 0.45)", stroke: "rgba(5, 150, 105, 0.95)", legend: "#10b981" },
+    { key: "A7", min: 100000, max: 250000, label: "100000-250000", fill: "rgba(34, 197, 94, 0.45)", stroke: "rgba(22, 163, 74, 0.95)", legend: "#22c55e" },
+    { key: "A8", min: 250000, max: 500000, label: "250000-500000", fill: "rgba(250, 204, 21, 0.45)", stroke: "rgba(234, 179, 8, 0.95)", legend: "#facc15" },
+    { key: "A9", min: 500000, max: 1000000, label: "500000-1000000", fill: "rgba(249, 115, 22, 0.45)", stroke: "rgba(234, 88, 12, 0.95)", legend: "#f97316" },
+    { key: "A10", min: 1000000, max: Infinity, label: ">1000000", fill: "rgba(220, 38, 38, 0.5)", stroke: "rgba(185, 28, 28, 0.95)", legend: "#dc2626" },
   ];
 
   const JobHeatmap = (() => {
@@ -2778,13 +2778,17 @@ function extractRlmMetrics(config) {
 
   function urlForStatic(path) {
     if (!path) return "";
+    // remove leading static/ if present
     const clean = path.replace(/^\/?static\//, "").replace(/^\/+/, "");
     const encoded = clean
       .split("/")
-      .map((segment) => encodeURIComponent(segment))
+      .map(encodeURIComponent)
       .join("/");
-    return `${window.location.origin}/dashboard/static/${encoded}`;
+
+    // ✅ use /static, not /dashboard/static
+    return `${window.location.origin}/static/${encoded}`;
   }
+
 
   function bindTabNav() {
     Utils.qsa(".tab").forEach((button) => {

@@ -988,7 +988,7 @@ body {
     align-items: stretch;
   }
 }
-}
+
 
 .clear-btn {
   background: #e2e8f0;
@@ -1007,4 +1007,5 @@ body {
 .heatmap-legend-item .legend-meta {
   font-weight: 500;
   color: #475569;
+}
 }
