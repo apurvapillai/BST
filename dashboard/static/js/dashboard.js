@@ -175,9 +175,22 @@
           backgroundImageUrl: null,
           backgroundImageLoading: false,
           referenceBackground: null,
+          onLegendChange: null,
         };
         reelState.set(key, state);
       }
+      const bucketState = summary.bucketState;
+      if (bucketState) {
+        if (Array.isArray(bucketState.enabledBuckets) && bucketState.enabledBuckets.length) {
+          const enabledSet = new Set(bucketState.enabledBuckets);
+          state.disabledBuckets = new Set(
+            HEATMAP_BUCKETS.filter((bucket) => !enabledSet.has(bucket.key)).map((bucket) => bucket.key)
+          );
+        } else if (Array.isArray(bucketState.disabledBuckets)) {
+          state.disabledBuckets = new Set(bucketState.disabledBuckets);
+        }
+      }
+      state.onLegendChange = typeof summary.onLegendChange === "function" ? summary.onLegendChange : null;
       const referenceBackground = summary.referenceBackground || summary.reference_background || null;
       const normalizedBackground = referenceBackground || null;
       if (state.referenceBackground !== normalizedBackground) {
@@ -477,6 +490,9 @@
             state.disabledBuckets.add(bucketKey);
           }
           window.requestAnimationFrame(() => rerender());
+          if (typeof state.onLegendChange === "function") {
+            state.onLegendChange(new Set(state.disabledBuckets));
+          }
         });
       });
     }
@@ -3129,6 +3145,8 @@ function extractRlmMetrics(config) {
     let severityMax;
     let positionMin;
     let positionMax;
+    let sizeMinInput;
+    let sizeMaxInput;
     let tableBody;
     let paginationEl;
     let summaryTotalEl;
@@ -3137,6 +3155,7 @@ function extractRlmMetrics(config) {
     let chipsEl;
     let updating = false;
     let typeOptionCache = new Set();
+    const defaultBucketKeys = HEATMAP_BUCKETS.map((bucket) => bucket.key);
 
     const state = {
       page: 1,
@@ -3149,7 +3168,130 @@ function extractRlmMetrics(config) {
       position_min: "",
       position_max: "",
       pageInfo: null,
+      size_min: "",
+      size_max: "",
+      size_buckets: new Set(defaultBucketKeys),
     };
+
+    function parseSizeInput(value) {
+      if (value === undefined || value === null) return null;
+      const str = `${value}`.trim();
+      if (!str) return null;
+      const num = Number(str);
+      return Number.isFinite(num) ? num : null;
+    }
+
+    function computeSizeRanges() {
+      const ranges = [];
+      const minValue = parseSizeInput(state.size_min);
+      const maxValue = parseSizeInput(state.size_max);
+
+      let enabledKeys = defaultBucketKeys;
+      if (state.size_buckets instanceof Set) {
+        if (state.size_buckets.size === 0) {
+          return [];
+        }
+        if (state.size_buckets.size < defaultBucketKeys.length) {
+          enabledKeys = Array.from(state.size_buckets);
+        }
+      }
+
+      const baseRanges = enabledKeys
+        .map((key) => HEATMAP_BUCKETS.find((bucket) => bucket.key === key))
+        .filter(Boolean)
+        .map((bucket) => [bucket.min, bucket.max]);
+
+      const workingRanges = baseRanges.length ? baseRanges : [[0, Infinity]];
+
+      workingRanges.forEach(([low, high]) => {
+        let min = low;
+        let max = high;
+        if (minValue !== null) min = Math.max(min, minValue);
+        if (maxValue !== null) max = Math.min(max, maxValue);
+        if (max > min) ranges.push([min, max]);
+      });
+
+      if (!ranges.length && (minValue !== null || maxValue !== null)) {
+        const fallbackMin = minValue !== null ? minValue : 0;
+        const fallbackMax = maxValue !== null ? maxValue : Infinity;
+        if (fallbackMax > fallbackMin) {
+          ranges.push([fallbackMin, fallbackMax]);
+        }
+      }
+
+      return ranges;
+    }
+
+    function polygonAreaXY(xs, ys) {
+      const len = Math.min(xs.length, ys.length);
+      if (len < 3) return 0;
+      let area = 0;
+      for (let i = 0, j = len - 1; i < len; j = i, i += 1) {
+        area += (xs[j] + xs[i]) * (ys[j] - ys[i]);
+      }
+      return Math.abs(area) / 2;
+    }
+
+    function normalizeShape(shape) {
+      if (!shape || typeof shape !== "object") return null;
+      const xs = Array.isArray(shape.x)
+        ? shape.x
+            .map((value) => {
+              const num = Number(value);
+              return Number.isFinite(num) ? num : null;
+            })
+            .filter((value) => value !== null)
+        : [];
+      const ys = Array.isArray(shape.y)
+        ? shape.y
+            .map((value) => {
+              const num = Number(value);
+              return Number.isFinite(num) ? num : null;
+            })
+            .filter((value) => value !== null)
+        : [];
+      if (xs.length < 3 || ys.length < 3) return null;
+      const count = Math.min(xs.length, ys.length);
+      const trimmedX = xs.slice(0, count);
+      const trimmedY = ys.slice(0, count);
+      const area = polygonAreaXY(trimmedX, trimmedY);
+      if (area <= 0) return null;
+      return { x: trimmedX, y: trimmedY, area };
+    }
+
+    function shapeMatchesRanges(area, ranges) {
+      return ranges.some(([min, max]) => {
+        if (area < min) return false;
+        if (!Number.isFinite(max)) return true;
+        return area <= max;
+      });
+    }
+
+    function filterFootprints(defects) {
+      const ranges = computeSizeRanges();
+      if (!ranges.length) return [];
+      const filtered = [];
+      defects.forEach((defect) => {
+        if (!defect || typeof defect !== "object") return;
+        const shapes = Array.isArray(defect.coords) ? defect.coords : [];
+        const filteredShapes = [];
+        shapes.forEach((shape) => {
+          const normalized = normalizeShape(shape);
+          if (!normalized) return;
+          if (!shapeMatchesRanges(normalized.area, ranges)) return;
+          filteredShapes.push({
+            x: normalized.x,
+            y: normalized.y,
+          });
+        });
+        if (!filteredShapes.length) return;
+        filtered.push({
+          ...defect,
+          coords: filteredShapes,
+        });
+      });
+      return filtered;
+    }
 
     const load = Utils.debounce(async () => {
       LoadingOverlay.show();
@@ -3165,6 +3307,16 @@ function extractRlmMetrics(config) {
         if (state.severity_max) params.severity_max = state.severity_max;
         if (state.position_min) params.position_min = state.position_min;
         if (state.position_max) params.position_max = state.position_max;
+        if (state.size_min) params.size_min = state.size_min;
+        if (state.size_max) params.size_max = state.size_max;
+        if (state.size_buckets instanceof Set) {
+          const bucketSelection = Array.from(state.size_buckets);
+          if (bucketSelection.length === 0) {
+            params.size_bucket = ["__none__"];
+          } else if (bucketSelection.length < HEATMAP_BUCKETS.length) {
+            params.size_bucket = bucketSelection;
+          }
+        }
 
         const data = await Api.get("defects", params);
         state.pageInfo = data.page_info || null;
@@ -3194,6 +3346,8 @@ function extractRlmMetrics(config) {
       severityMax = Utils.qs("#severityMax");
       positionMin = Utils.qs("#positionMin");
       positionMax = Utils.qs("#positionMax");
+      sizeMinInput = Utils.qs("#sizeMin");
+      sizeMaxInput = Utils.qs("#sizeMax");
       tableBody = Utils.qs("#defectTable tbody");
       paginationEl = Utils.qs("#defectPagination");
       summaryTotalEl = Utils.qs("[data-defect-total]");
@@ -3218,6 +3372,8 @@ function extractRlmMetrics(config) {
         [severityMax, "severity_max"],
         [positionMin, "position_min"],
         [positionMax, "position_max"],
+        [sizeMinInput, "size_min"],
+        [sizeMaxInput, "size_max"],
       ].forEach(([el, key]) => {
         if (!el) return;
         el.addEventListener("input", () => handleLocalFilterChange(key, el.value));
@@ -3303,6 +3459,15 @@ function extractRlmMetrics(config) {
           if (positionMin) positionMin.value = "";
           if (positionMax) positionMax.value = "";
           break;
+        case "size_range":
+          state.size_min = "";
+          state.size_max = "";
+          if (sizeMinInput) sizeMinInput.value = "";
+          if (sizeMaxInput) sizeMaxInput.value = "";
+          break;
+        case "size_buckets":
+          state.size_buckets = new Set(defaultBucketKeys);
+          break;
         default:
           break;
       }
@@ -3358,6 +3523,9 @@ function extractRlmMetrics(config) {
       state.severity_max = "";
       state.position_min = "";
       state.position_max = "";
+      state.size_min = "";
+      state.size_max = "";
+      state.size_buckets = new Set(defaultBucketKeys);
       state.page = 1;
       state.pageInfo = null;
       if (typeSelect) typeSelect.value = "";
@@ -3368,6 +3536,8 @@ function extractRlmMetrics(config) {
       if (severityMax) severityMax.value = "";
       if (positionMin) positionMin.value = "";
       if (positionMax) positionMax.value = "";
+      if (sizeMinInput) sizeMinInput.value = "";
+      if (sizeMaxInput) sizeMaxInput.value = "";
       updating = false;
       renderDefectChips();
     }
@@ -3400,6 +3570,16 @@ function extractRlmMetrics(config) {
         chips.push({ key: "position", label: positionLabel });
       }
 
+      const sizeRangeLabel = buildRangeLabel("Size", state.size_min, state.size_max);
+      if (sizeRangeLabel) {
+        chips.push({ key: "size_range", label: sizeRangeLabel });
+      }
+
+      const bucketLabel = buildBucketChipLabel();
+      if (bucketLabel) {
+        chips.push({ key: "size_buckets", label: bucketLabel });
+      }
+
       if (!chips.length || !isActive) {
         chipsEl.innerHTML = "";
         chipsEl.classList.add("hidden");
@@ -3430,6 +3610,42 @@ function extractRlmMetrics(config) {
       if (hasMin && hasMax) return `${prefix}: ${minValue} – ${maxValue}`;
       if (hasMin) return `${prefix} ≥ ${minValue}`;
       return `${prefix} ≤ ${maxValue}`;
+    }
+
+    function buildBucketChipLabel() {
+      if (!(state.size_buckets instanceof Set)) return "";
+      if (state.size_buckets.size === 0) return "Size buckets: None";
+      if (state.size_buckets.size === defaultBucketKeys.length) return "";
+      const labels = HEATMAP_BUCKETS.filter((bucket) => state.size_buckets.has(bucket.key)).map(
+        (bucket) => bucket.label
+      );
+      if (!labels.length) return "Size buckets: None";
+      const preview = labels.slice(0, 4).join(", ");
+      const remainder = labels.length > 4 ? ` +${labels.length - 4}` : "";
+      return `Size buckets: ${preview}${remainder}`;
+    }
+
+    function handleLegendBucketChange(disabledBuckets) {
+      const nextEnabled = new Set(defaultBucketKeys);
+      if (disabledBuckets instanceof Set) {
+        disabledBuckets.forEach((key) => nextEnabled.delete(key));
+      } else if (Array.isArray(disabledBuckets)) {
+        disabledBuckets.forEach((key) => nextEnabled.delete(key));
+      }
+      if (setsEqual(nextEnabled, state.size_buckets)) return;
+      state.size_buckets = nextEnabled;
+      state.page = 1;
+      renderDefectChips();
+      load();
+    }
+
+    function setsEqual(a, b) {
+      if (!(a instanceof Set) || !(b instanceof Set)) return false;
+      if (a.size !== b.size) return false;
+      for (const value of a) {
+        if (!b.has(value)) return false;
+      }
+      return true;
     }
 
     function renderCharts(data, byTypeOverride) {
@@ -3573,8 +3789,17 @@ function extractRlmMetrics(config) {
       const latestReference = referenceImages.length ? referenceImages[0] : null;
       const referenceBackground =
         latestReference && latestReference.image_src ? urlForStatic(latestReference.image_src) : null;
+      const filteredDefects = filterFootprints(defects);
 
-      JobHeatmap.attach(tabScope, { reel, defects, referenceBackground });
+      const bucketState =
+        state.size_buckets instanceof Set ? Array.from(state.size_buckets) : defaultBucketKeys.slice();
+      JobHeatmap.attach(tabScope, {
+        reel,
+        defects: filteredDefects,
+        referenceBackground,
+        bucketState: { enabledBuckets: bucketState },
+        onLegendChange: handleLegendBucketChange,
+      });
       MaskHeatmap.attach(tabScope, { reel, masks, referenceBackground });
 
       renderMaskCoords(coordsEl, masks);

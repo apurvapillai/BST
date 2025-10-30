@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import copy
+import json
+import math
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from flask import Blueprint, jsonify, render_template, request
-from sqlalchemy import and_, case, exists, func, or_, text
+from sqlalchemy import and_, case, exists, false, func, or_, text
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from db.connection import SessionLocal
@@ -28,6 +30,22 @@ from db.models import (
 DAYS_DEFAULT_RANGE = 7
 MAX_PAGE_SIZE = 500
 SENTINEL_NONE = "__NONE__"
+SIZE_BUCKET_SENTINEL_NONE = "__none__"
+
+HEATMAP_BUCKETS = [
+    {"key": "A1", "min": 0.0, "max": 100.0},
+    {"key": "A2", "min": 100.0, "max": 500.0},
+    {"key": "A3", "min": 500.0, "max": 1000.0},
+    {"key": "A4", "min": 1000.0, "max": 10000.0},
+    {"key": "A5", "min": 10000.0, "max": 50000.0},
+    {"key": "A6", "min": 50000.0, "max": 100000.0},
+    {"key": "A7", "min": 100000.0, "max": 250000.0},
+    {"key": "A8", "min": 250000.0, "max": 500000.0},
+    {"key": "A9", "min": 500000.0, "max": 1000000.0},
+    {"key": "A10", "min": 1000000.0, "max": math.inf},
+]
+HEATMAP_BUCKET_MAP = {entry["key"]: entry for entry in HEATMAP_BUCKETS}
+DEFAULT_SIZE_RANGE = (0.0, math.inf)
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -68,6 +86,103 @@ def _default_window() -> Tuple[datetime, datetime]:
     end = datetime.utcnow()
     start = end - timedelta(days=DAYS_DEFAULT_RANGE)
     return start, end
+
+
+def _polygon_area(xs: List[float], ys: List[float]) -> float:
+    count = min(len(xs), len(ys))
+    if count < 3:
+        return 0.0
+    area = 0.0
+    last_index = count - 1
+    for idx in range(count):
+        area += (xs[last_index] + xs[idx]) * (ys[last_index] - ys[idx])
+        last_index = idx
+    return abs(area) / 2.0
+
+
+def _defect_polygon_areas(coords_data) -> List[float]:
+    if coords_data is None:
+        return []
+    if isinstance(coords_data, str):
+        try:
+            coords = json.loads(coords_data)
+        except (TypeError, ValueError):
+            return []
+    else:
+        coords = coords_data
+    if not isinstance(coords, (list, tuple)):
+        return []
+    areas: List[float] = []
+    for shape in coords:
+        if not isinstance(shape, dict):
+            continue
+        xs_raw = shape.get("x")
+        ys_raw = shape.get("y")
+        if not isinstance(xs_raw, (list, tuple)) or not isinstance(ys_raw, (list, tuple)):
+            continue
+        xs: List[float] = []
+        ys: List[float] = []
+        for value in xs_raw:
+            try:
+                xs.append(float(value))
+            except (TypeError, ValueError):
+                continue
+        for value in ys_raw:
+            try:
+                ys.append(float(value))
+            except (TypeError, ValueError):
+                continue
+        count = min(len(xs), len(ys))
+        if count < 3:
+            continue
+        areas.append(_polygon_area(xs[:count], ys[:count]))
+    return areas
+
+
+def _resolve_size_ranges(
+    bucket_keys: List[str],
+    size_min: Optional[float],
+    size_max: Optional[float],
+) -> List[Tuple[float, float]]:
+    if bucket_keys:
+        base_ranges = [
+            (HEATMAP_BUCKET_MAP[key]["min"], HEATMAP_BUCKET_MAP[key]["max"])
+            for key in bucket_keys
+            if key in HEATMAP_BUCKET_MAP
+        ]
+    else:
+        base_ranges = [DEFAULT_SIZE_RANGE]
+    ranges: List[Tuple[float, float]] = []
+    for lower, upper in base_ranges:
+        low = lower
+        high = upper
+        if size_min is not None:
+            low = max(low, size_min)
+        if size_max is not None:
+            high = min(high, size_max)
+        if high <= low:
+            continue
+        ranges.append((low, high))
+    if not bucket_keys and not ranges and (size_min is not None or size_max is not None):
+        low = size_min if size_min is not None else DEFAULT_SIZE_RANGE[0]
+        high = size_max if size_max is not None else DEFAULT_SIZE_RANGE[1]
+        if high > low:
+            ranges.append((low, high))
+    return ranges
+
+
+def _matches_size_ranges(coords_data, ranges: List[Tuple[float, float]]) -> bool:
+    if not ranges:
+        return False
+    areas = _defect_polygon_areas(coords_data)
+    candidate_areas = areas or [0.0]
+    for area in candidate_areas:
+        for lower, upper in ranges:
+            if area < lower:
+                continue
+            if math.isinf(upper) or area <= upper:
+                return True
+    return False
 
 
 def _validate_filters(session: Session) -> Dict[str, Optional[str]]:
@@ -1705,6 +1820,34 @@ def api_defects():
             "position_min": request.args.get("position_min", type=float),
             "position_max": request.args.get("position_max", type=float),
         }
+        size_min = request.args.get("size_min", type=float)
+        size_max = request.args.get("size_max", type=float)
+
+        raw_size_buckets = request.args.getlist("size_bucket")
+        if len(raw_size_buckets) == 1 and "," in raw_size_buckets[0]:
+            raw_size_buckets = [
+                entry.strip()
+                for entry in raw_size_buckets[0].split(",")
+                if entry.strip()
+            ]
+
+        bucket_none_selected = False
+        size_bucket_keys: List[str] = []
+        for key in raw_size_buckets:
+            if key == SIZE_BUCKET_SENTINEL_NONE:
+                bucket_none_selected = True
+                size_bucket_keys = []
+                break
+            if key in HEATMAP_BUCKET_MAP and key not in size_bucket_keys:
+                size_bucket_keys.append(key)
+        if size_bucket_keys and len(size_bucket_keys) >= len(HEATMAP_BUCKETS):
+            size_bucket_keys = []
+        size_filter_active = (
+            bucket_none_selected
+            or bool(size_bucket_keys)
+            or size_min is not None
+            or size_max is not None
+        )
 
         phase_filter = request.args.get("phase")
         if phase_filter not in (None, "", "active", "inactive", "learn"):
@@ -1717,6 +1860,25 @@ def api_defects():
             numeric_filters,
             phase_filter or None,
         )
+
+        if size_filter_active:
+            if bucket_none_selected:
+                base_query = base_query.filter(false())
+            else:
+                allowed_ranges = _resolve_size_ranges(size_bucket_keys, size_min, size_max)
+                if not allowed_ranges:
+                    base_query = base_query.filter(false())
+                else:
+                    area_rows = base_query.with_entities(Defect.defect_id, Defect.coords_json).all()
+                    matching_ids = {
+                        defect_id
+                        for defect_id, coords in area_rows
+                        if _matches_size_ranges(coords, allowed_ranges)
+                    }
+                    if not matching_ids:
+                        base_query = base_query.filter(false())
+                    else:
+                        base_query = base_query.filter(Defect.defect_id.in_(matching_ids))
 
         page, page_size = _paginate()
         rows_query = base_query.options(
