@@ -871,10 +871,16 @@ body {
   margin-bottom: 16px;
 }
 
+.table-wrapper h4{
+  margin-top: 20px;
+  
+}
+
 #defectTable {
   width: 100%;
   border-collapse: collapse;
 }
+
 
 #defectTable th,
 #defectTable td {
@@ -1084,8 +1090,8 @@ body {
 }
 
 #defectTable thead tr {
-  background: #1e293b;
-  color: #f8fafc;
+  background: #e7f0ff;
+  color: black;
 }
 
 #defectTable thead th {
