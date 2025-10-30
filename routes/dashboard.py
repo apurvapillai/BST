@@ -27,7 +27,7 @@ from db.models import (
 )
 
 
-DAYS_DEFAULT_RANGE = 7
+DAYS_DEFAULT_RANGE = 2
 MAX_PAGE_SIZE = 500
 SENTINEL_NONE = "__NONE__"
 SIZE_BUCKET_SENTINEL_NONE = "__none__"

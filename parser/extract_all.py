@@ -5,7 +5,7 @@ from parser.extract_one import extract_one
 DATA_DIR = "data"
 
 # --- 👇 Adjustable cutoff date (edit anytime) ---
-CUTOFF_DATE = datetime(2025, 10, 21)  # only process ZIPs newer than this
+CUTOFF_DATE = datetime(2025, 10, 30)  # only process ZIPs newer than this
 
 
 def extract_all():

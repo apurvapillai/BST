@@ -18,7 +18,7 @@ session = requests.Session()
 session.headers.update(headers)
 
 # Define cutoff date (only download zips newer than this)
-CUTOFF_DATE = datetime(2025, 10, 21)  # adjust as needed
+CUTOFF_DATE = datetime(2025, 10, 30)  # adjust as needed
 
 # Fetch the main page
 resp = session.get(BASE_PAGE)
