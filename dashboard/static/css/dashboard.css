@@ -734,6 +734,19 @@ body {
   font-size: 13px;
 }
 
+.data-table-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: 260px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  margin-top: 12px;
+}
+
+.data-table-scroll table {
+  margin: 0;
+}
+
 .data-table th,
 .data-table td {
   border: 1px solid #e2e8f0;

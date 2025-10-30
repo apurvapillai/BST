@@ -504,8 +504,8 @@
     const PADDING = 24;
     const FALLBACK_SIZE = 360;
     const MASK_COLOR = {
-      fill: "rgba(250, 204, 21, 0.12)",
-      stroke: "rgba(217, 119, 6, 0.25)",
+      fill: "rgba(239, 68, 68, 0.35)",
+      stroke: "rgba(185, 28, 28, 0.85)",
     };
     const heatmapState = new Map();
 
@@ -2754,30 +2754,32 @@
 
       const rlmPoints = rlm.points || [];
       const rlmPointsTable = rlmPoints.length
-        ? `<table class="data-table">
-             <thead>
-               <tr>
-                 <th>ID</th>
-                 <th>Timestamp</th>
-                 <th>Format</th>
-                 <th>Web Speed</th>
-                 <th>Cur Length</th>
-               </tr>
-             </thead>
-             <tbody>
-               ${rlmPoints
-                 .map((point) =>
-                   `<tr>
-                      <td>${point.id || "—"}</td>
-                      <td>${formatTime(point.timestamp)}</td>
-                      <td>${formatMetricCell(point.format)}</td>
-                      <td>${formatMetricCell(point.webspeed)}</td>
-                      <td>${formatMetricCell(point.curlength)}</td>
-                    </tr>`
-                 )
-                 .join("")}
-             </tbody>
-           </table>`
+        ? `<div class="data-table-scroll rlm-table-scroll">
+             <table class="data-table">
+               <thead>
+                 <tr>
+                   <th>ID</th>
+                   <th>Timestamp</th>
+                   <th>Format</th>
+                   <th>Web Speed</th>
+                   <th>Cur Length</th>
+                 </tr>
+               </thead>
+               <tbody>
+                 ${rlmPoints
+                   .map((point) =>
+                     `<tr>
+                        <td>${point.id || "—"}</td>
+                        <td>${formatTime(point.timestamp)}</td>
+                        <td>${formatMetricCell(point.format)}</td>
+                        <td>${formatMetricCell(point.webspeed)}</td>
+                        <td>${formatMetricCell(point.curlength)}</td>
+                      </tr>`
+                   )
+                   .join("")}
+               </tbody>
+             </table>
+           </div>`
         : "<span class='badge'>No RLM monitoring points</span>";
 
       const sensitivityTable = sensitivities.length
