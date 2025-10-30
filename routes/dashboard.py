@@ -1230,16 +1230,22 @@ def api_overview():
         job_heatmap_payload: List[Dict[str, Any]] = []
         for job, entries in sorted(job_heatmap_records.items()):
             dims = job_heatmap_dims.get(job) or {}
-            refs = (job_reference_latest.get(job) or {}).get("images", [])
-            job_heatmap_payload.append(
-                {
-                    "job": job,
-                    "format_width": dims.get("format_width"),
-                    "format_length": dims.get("format_length"),
-                    "defects": entries,
-                    "reference_images": refs,
-                }
-            )
+        refs = (job_reference_latest.get(job) or {}).get("images", [])
+        first_ref = None
+        for ref in refs:
+            if ref.get("image_src"):
+                first_ref = ref["image_src"]
+                break
+        job_heatmap_payload.append(
+            {
+                "job": job,
+                "format_width": dims.get("format_width"),
+                "format_length": dims.get("format_length"),
+                "defects": entries,
+                "reference_images": refs,
+                "reference_background": first_ref,
+            }
+        )
 
         response = {
             "kpis": {

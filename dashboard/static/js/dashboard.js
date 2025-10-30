@@ -1985,6 +1985,7 @@
         format_length: job.format_length,
         defects: job.defects || [],
         reference_images: job.reference_images || [],
+        reference_background: job.reference_background || null,
       }));
 
       const selectedEntry =
@@ -2013,6 +2014,11 @@
         </div>
       `;
 
+      const references = Array.isArray(selectedEntry.reference_images) ? selectedEntry.reference_images : [];
+      const localFirstRef = references.find((ref) => ref && ref.image_src);
+      const backgroundSrc = selectedEntry.reference_background || (localFirstRef ? localFirstRef.image_src : null);
+      const referenceBackground = backgroundSrc ? urlForStatic(backgroundSrc) : null;
+
       JobHeatmap.attach(heatmapContainer, {
         reel: {
           reel_id: `overview-${slug}`,
@@ -2024,9 +2030,10 @@
           magnitude_value: Number(defect.magnitude_value ?? 0),
           severity_value: Number(defect.severity_value ?? 0),
         })),
+        referenceBackground,
       });
 
-      renderReferenceGallery(heatmapContainer.querySelector(`#heatmap-gallery-${slug}`), selectedEntry.reference_images || []);
+      renderReferenceGallery(heatmapContainer.querySelector(`#heatmap-gallery-${slug}`), references || []);
     }
 
     function renderReferenceGallery(container, references) {
@@ -2040,7 +2047,7 @@
         .map((ref, idx) => {
           const src = urlForStatic(ref.image_src);
           const alt = (ref.filename || `Reference ${idx + 1}`).replace(/"/g, "&quot;");
-          return `<img src="${src}" alt="${alt}" onclick="showImageModal('${src}')">`;
+          return `<img src="${src}" alt="${alt}" loading="lazy" decoding="async" onclick="showImageModal('${src}')">`;
         })
         .join("");
     }
