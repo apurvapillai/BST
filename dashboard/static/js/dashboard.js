@@ -3518,9 +3518,11 @@ function extractRlmMetrics(config) {
               <td>
                 ${
                   row.image_src
-                    ? `<img src="${urlForStatic(row.image_src)}" alt="defect" onclick="showImageModal('${urlForStatic(
-                  row.image_src
-                )}')" loading="lazy" decoding="async">`
+                    ? `<img src="${urlForStatic(row.image_src)}" alt="defect" data-label="${[row.job_name, row.order_number, row.defect_time]
+                        .filter(Boolean)
+                        .join(" · ")}" data-index="${row.defect_id || ""}" onclick="showImageModal('${urlForStatic(
+                        row.image_src
+                      )}', this)" loading="lazy" decoding="async">`
                     : ""
                 }
               </td>
@@ -3698,11 +3700,20 @@ function extractRlmMetrics(config) {
 
   document.addEventListener("DOMContentLoaded", init);
 
-  window.showImageModal = function showImageModal(src) {
+  window.showImageModal = function showImageModal(src, element) {
     const modal = document.getElementById("imageModal");
     const img = document.getElementById("modalImage");
+    const meta = document.getElementById("modalMeta");
     if (!modal || !img) return;
     img.src = src;
+    const cells = Array.from(document.querySelectorAll("#defectTable tbody td img"));
+    const index = cells.findIndex((cell) => cell === element);
+    img.dataset.index = index >= 0 ? String(index) : "";
+    if (meta) {
+      const label = element && element.dataset.label ? element.dataset.label : "";
+      const counter = index >= 0 ? `${index + 1} / ${cells.length}` : "";
+      meta.textContent = counter ? `${counter} · ${label}`.trim() : label;
+    }
     modal.style.display = "block";
   };
 
@@ -3710,6 +3721,34 @@ function extractRlmMetrics(config) {
     const modal = document.getElementById("imageModal");
     const img = document.getElementById("modalImage");
     if (modal) modal.style.display = "none";
-    if (img) img.src = "";
+    if (img) {
+      img.src = "";
+      img.dataset.index = "";
+    }
   };
+
+  document.addEventListener("keydown", (event) => {
+    const modal = document.getElementById("imageModal");
+    const img = document.getElementById("modalImage");
+    if (!modal || !img || modal.style.display !== "block") return;
+    const currentIndex = Number(img.dataset.index);
+    if (Number.isNaN(currentIndex) || currentIndex < 0) return;
+    const cells = Array.from(document.querySelectorAll("#defectTable tbody td img"));
+    if (!cells.length) return;
+    if (event.key === "ArrowRight") {
+      const nextIndex = (currentIndex + 1) % cells.length;
+      const nextImg = cells[nextIndex];
+      if (nextImg) {
+        img.src = nextImg.src;
+        img.dataset.index = String(nextIndex);
+      }
+    } else if (event.key === "ArrowLeft") {
+      const prevIndex = (currentIndex - 1 + cells.length) % cells.length;
+      const prevImg = cells[prevIndex];
+      if (prevImg) {
+        img.src = prevImg.src;
+        img.dataset.index = String(prevIndex);
+      }
+    }
+  });
 })();
