@@ -942,12 +942,33 @@
     let firstEmit = true;
     const scheduleOptionsRefresh = Utils.debounce(() => refreshOptions(), 200);
 
+    function hasJobSelection() {
+      return Boolean((state.job || "").trim());
+    }
+
+    function setDisabledState(el, disabled) {
+      if (!el) return;
+      el.disabled = disabled;
+      const card = el.closest(".filter-card");
+      if (card) {
+        card.classList.toggle("filter-card--disabled", disabled);
+      }
+    }
+
+    function updateDependentFilters() {
+      const disableSecondary = !hasJobSelection();
+      setDisabledState(elements.order, disableSecondary);
+      setDisabledState(elements.reel, disableSecondary);
+    }
+
     function init() {
       if (!elements.machine) return;
       applySearchParams();
+      updateDependentFilters();
       renderChips();
       attachListeners();
       refreshOptions(true).then(() => {
+        updateDependentFilters();
         emit(true);
         initialized = true;
       });
@@ -979,6 +1000,9 @@
   if (elements.start) elements.start.value = state.start || "";
   if (elements.end) elements.end.value = state.end || "";
   if (elements.job) elements.job.value = state.job || "";
+  if (!hasJobSelection()) {
+    state.order = "";
+  }
   if (state.order === ORDER_NONE) {
     ensureOrderOption(ORDER_NONE, "None");
     if (elements.order) elements.order.value = ORDER_NONE;
@@ -987,6 +1011,7 @@
   }
       syncReelSelect();
       updating = false;
+      updateDependentFilters();
     }
 
     function attachListeners() {
@@ -1052,7 +1077,9 @@
         case "machine":
           state.machine_id = value || "";
           state.job = "";
+          if (elements.job) elements.job.value = "";
           state.order = "";
+          if (elements.order) elements.order.value = "";
           state.reel_codes = [];
           syncReelSelect();
           scheduleOptionsRefresh();
@@ -1067,7 +1094,9 @@
           break;
         case "job":
           state.job = value || "";
+          if (elements.job) elements.job.value = state.job;
           state.order = "";
+          if (elements.order) elements.order.value = "";
           state.reel_codes = [];
           syncReelSelect();
           scheduleOptionsRefresh();
@@ -1084,6 +1113,7 @@
         default:
           break;
       }
+      updateDependentFilters();
       if (firstEmit) {
         firstEmit = false;
         emit(false);
@@ -1103,6 +1133,7 @@
         updateSelect(elements.order, data.orders || [], state.order ? [state.order] : []);
         updateSelect(elements.reel, data.reel_codes || [], state.reel_codes);
         updating = false;
+        updateDependentFilters();
       } catch (err) {
         console.error("Failed to refresh filter options", err);
       } finally {
@@ -1202,6 +1233,7 @@
           if (elements.order) elements.order.value = "";
           state.reel_codes = [];
           syncReelSelect();
+          updateDependentFilters();
           await refreshOptions(true);
           emit(true);
           break;
@@ -1224,6 +1256,7 @@
           if (elements.order) elements.order.value = "";
           state.reel_codes = [];
           syncReelSelect();
+          updateDependentFilters();
           await refreshOptions(true);
           emit(true);
           break;
@@ -1232,6 +1265,7 @@
           if (elements.order) elements.order.value = "";
           state.reel_codes = [];
           syncReelSelect();
+          updateDependentFilters();
           await refreshOptions(true);
           emit(true);
           break;
@@ -1315,6 +1349,10 @@
         case "job":
           state.job = value || "";
           if (elements.job) elements.job.value = state.job;
+          state.order = "";
+          if (elements.order) elements.order.value = "";
+          state.reel_codes = [];
+          syncReelSelect();
           break;
         case "order":
           state.order = value || "";
@@ -1346,6 +1384,7 @@
         default:
           break;
       }
+      updateDependentFilters();
       updating = false;
       if (shouldEmit) emit(false);
       if (updateUrl && !shouldEmit) {
@@ -1387,6 +1426,7 @@
             break;
         }
       });
+      updateDependentFilters();
       updating = false;
       if (shouldEmit) emit(false);
       if (updateUrl) {

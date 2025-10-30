@@ -111,6 +111,28 @@ body {
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+
+.filters select:disabled,
+.filters input:disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+  cursor: not-allowed;
+  border-color: rgba(135, 160, 190, 0.3);
+}
+
+.filter-card--disabled {
+  opacity: 0.65;
+}
+
+.filter-card--disabled label {
+  color: #94a3b8;
+}
+
+.filter-card--disabled select,
+.filter-card--disabled input {
+  pointer-events: none;
+}
+
 .filters select[multiple] {
   height: auto;
   min-height: 120px;
