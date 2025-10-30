@@ -1016,3 +1016,104 @@ body {
   color: #475569;
 }
 }
+
+.defect-footprints-inline {
+  display: flex;
+  gap: 18px;
+  flex-wrap: nowrap;
+}
+
+.defect-footprints-inline .defect-footprint {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.defect-footprint-legends {
+  margin-top: 16px;
+}
+
+.defect-footprint-legends .heatmap-legend {
+  margin-top: 0;
+}
+
+
+.defect-footprints-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 18px;
+}
+
+.defect-footprints-grid .legend-span {
+  grid-column: 1 / -1;
+}
+
+
+.defect-footprints-legend-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.defect-footprints-legend-grid .heatmap-legend {
+  grid-column: 1 / -1;
+  margin-top: 0;
+}
+
+
+.defect-table-section {
+  margin-top: 24px;
+}
+
+.defect-table-title {
+  margin: 0 0 12px;
+  font-size: 15px;
+  text-transform: uppercase;
+  color: #6b7280;
+  letter-spacing: 0.6px;
+}
+
+
+.defect-table-title {
+  margin: 0 0 16px;
+  font-size: 16px;
+  text-transform: uppercase;
+  color: #1f2937;
+  letter-spacing: 0.8px;
+  text-align: center;
+}
+
+#defectTable thead tr {
+  background: #1e293b;
+  color: #f8fafc;
+}
+
+#defectTable thead th {
+  font-weight: 600;
+  padding: 10px 12px;
+  text-align: center;
+  letter-spacing: 0.4px;
+}
+
+#defectTable tbody tr:nth-child(even) {
+  background: #f8fafc;
+}
+
+#defectTable tbody tr:hover {
+  background: #f1f5f9;
+}
+
+#defectTable tbody td {
+  padding: 10px 12px;
+  text-align: center;
+}
+
+#defectTable tbody td:first-child,
+#defectTable thead th:first-child {
+  text-align: left;
+}
+
+#defectTable tbody td:last-child,
+#defectTable thead th:last-child {
+  text-align: center;
+}

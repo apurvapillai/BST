@@ -241,26 +241,26 @@
         <div id="defectPositionChart" class="chart"></div>
       </div>
 
-      <div class="defect-footprints">
+      <div class="defect-footprints-grid">
         <div class="defect-footprint">
           <h4>Defect Heatmap</h4>
           <div class="heatmap-wrapper heatmap-empty" id="heatmap-defect-explorer">
             <span class="badge">Load defects to view footprints.</span>
           </div>
-          <div class="heatmap-legend heatmap-legend-job" id="heatmap-defect-explorer-legend"></div>
         </div>
         <div class="defect-footprint">
           <h4>Mask Footprints</h4>
           <div class="heatmap-wrapper heatmap-empty" id="mask-heatmap-defect-explorer">
             <span class="badge">No mask data for current filters.</span>
           </div>
-          <div class="mask-coords" id="mask-heatmap-defect-explorer-coords">
-            <span class="badge">No mask coordinates yet.</span>
-          </div>
         </div>
       </div>
+      <div class="defect-footprints-legend-grid">
+        <div class="heatmap-legend heatmap-legend-job" id="heatmap-defect-explorer-legend"></div>
+      </div>
 
-      <div class="table-wrapper">
+      <div class="table-wrapper defect-table-section">
+        <h4 class="defect-table-title">Defect Records</h4>
         <table id="defectTable">
           <thead>
             <tr>

@@ -436,7 +436,7 @@
     }
 
     function renderLegend(container, reel, bucketStatsArray, state, rerender) {
-      const legendEl = container.parentElement?.querySelector(`#${domId(reel)}-legend`);
+      const legendEl = document.getElementById(`${domId(reel)}-legend`);
       if (!legendEl) return;
       const statsMap = new Map((bucketStatsArray || []).map((entry) => [entry.bucket.key, entry]));
       const html = HEATMAP_BUCKETS.map((bucket) => {
