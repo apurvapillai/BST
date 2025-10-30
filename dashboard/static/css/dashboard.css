@@ -754,6 +754,82 @@ body {
   text-align: left;
 }
 
+.data-table th {
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.summary-section table.data-table th {
+  background: #eef2ff !important;
+  color: #0f172a !important;
+}
+
+.summary-section table.data-table td {
+  color: #1f2937;
+}
+
+.summary-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.stat-pill {
+  background: linear-gradient(135deg, rgba(30, 64, 175, 0.08), rgba(59, 130, 246, 0.08));
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  border-radius: 10px;
+  padding: 12px 16px;
+  min-width: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-pill .stat-label {
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  color: #1d4ed8;
+}
+
+.stat-pill .stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.defect-class-grid {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.defect-class-card {
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.defect-class-name {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #1d4ed8;
+}
+
+.defect-class-count {
+  font-size: 22px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
 .timeline {
   position: relative;
   height: 32px;
@@ -876,7 +952,8 @@ body {
   color: #94a3b8;
 }
 
-.table-wrapper {
+.table-wrapper,
+.summary-section .data-table-scroll {
   background: #fff;
   border-radius: 10px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);

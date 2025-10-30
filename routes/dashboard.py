@@ -1685,6 +1685,16 @@ def api_reel_summary(reel_id: int):
         defects_summary = {
             "total": len(reel.defects or []),
             "types": len({d.class_name for d in reel.defects or [] if d.class_name}),
+            "by_class": [
+                {"class": class_name, "count": count}
+                for class_name, count in sorted(
+                    Counter(
+                        d.class_name for d in reel.defects or [] if d.class_name
+                    ).items(),
+                    key=lambda item: item[1],
+                    reverse=True,
+                )
+            ],
         }
 
         defects_payload = [

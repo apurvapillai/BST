@@ -1567,6 +1567,24 @@
     };
 
     const load = Utils.debounce(async () => {
+      if (!heatmapContainer) {
+        heatmapContainer = Utils.qs("#overviewHeatmapCanvas");
+      }
+      if (heatmapContainer) {
+        const { job = "", order = "" } = Filters.getState();
+        const jobValue = typeof job === "string" ? job.trim() : "";
+        const orderValue = typeof order === "string" ? order.trim() : "";
+        const hasSelection = Boolean(jobValue) || Boolean(orderValue);
+        if (hasSelection) {
+          heatmapState.jobs = [];
+          heatmapState.selectedJob = "";
+          heatmapContainer.innerHTML =
+            `<div class="heatmap-wrapper heatmap-empty heatmap-notice"><span class='badge'>Loading heatmap…</span></div>`;
+        } else if (!heatmapState.jobs.length) {
+          heatmapContainer.innerHTML =
+            `<div class="heatmap-wrapper heatmap-empty heatmap-notice"><span class='badge'>Select a job or order to view the heatmap.</span></div>`;
+        }
+      }
       LoadingOverlay.show();
       try {
         const data = await Api.get("overview");
@@ -1595,6 +1613,23 @@
     }
 
     function onFiltersUpdated() {
+      if (!heatmapContainer) {
+        heatmapContainer = Utils.qs("#overviewHeatmapCanvas");
+      }
+      if (heatmapContainer) {
+        const { job = "", order = "" } = Filters.getState();
+        const jobValue = typeof job === "string" ? job.trim() : "";
+        const orderValue =
+          typeof order === "string"
+            ? order.trim()
+            : "";
+        const hasSelection = Boolean(jobValue) || Boolean(orderValue);
+        heatmapState.jobs = [];
+        heatmapState.selectedJob = "";
+        heatmapContainer.innerHTML = hasSelection
+          ? `<div class="heatmap-wrapper heatmap-empty heatmap-notice"><span class='badge'>Loading heatmap…</span></div>`
+          : `<div class="heatmap-wrapper heatmap-empty heatmap-notice"><span class='badge'>Select a job or order to view the heatmap.</span></div>`;
+      }
       load();
     }
 
@@ -2003,6 +2038,11 @@
 
 
       }
+
+      heatmapState.jobs = [];
+      heatmapState.selectedJob = "";
+      heatmapContainer.innerHTML =
+        `<div class="heatmap-wrapper heatmap-empty heatmap-notice"><span class='badge'>Loading heatmap…</span></div>`;
 
       const activeDisplayJob = activeJobRaw || "Unassigned";
       const activeDisplayOrder = activeOrderRaw || null;
@@ -2851,6 +2891,21 @@
         </div>
       `;
 
+      const classCards = Array.isArray(defectsSummary.by_class)
+        ? defectsSummary.by_class
+            .map((entry) => {
+              const label = entry && entry.class ? entry.class : "Unknown";
+              const count = entry && Number.isFinite(entry.count) ? entry.count : 0;
+              return `
+                <div class="defect-class-card">
+                  <span class="defect-class-name">${label}</span>
+                  <span class="defect-class-count">${Utils.formatNumber(count, 0)}</span>
+                </div>
+              `;
+            })
+            .join("")
+        : "";
+
       return `
         <div class="summary-header">
           <div>
@@ -2867,6 +2922,25 @@
             <span>Format: ${Utils.formatNumber(reel.format_length, 2)} × ${Utils.formatNumber(reel.format_width, 2)}</span>
             ${addButton}
           </div>
+        </div>
+
+        <div class="summary-section summary-section--defects">
+          <h4>Defects Summary</h4>
+          <div class="summary-metadata summary-stats">
+            <div class="stat-pill">
+              <span class="stat-label">Total defects</span>
+              <span class="stat-value">${Utils.formatNumber(defectsSummary.total || 0, 0)}</span>
+            </div>
+            <div class="stat-pill">
+              <span class="stat-label">Categories</span>
+              <span class="stat-value">${Utils.formatNumber(defectsSummary.types || 0, 0)}</span>
+            </div>
+          </div>
+          ${
+            classCards
+              ? `<div class="defect-class-grid">${classCards}</div>`
+              : "<span class='badge'>No defect categories</span>"
+          }
         </div>
 
         <div class="summary-section">
@@ -2915,13 +2989,6 @@
           ${rlmPhaseTimeline}
         </div>
 
-        <div class="summary-section">
-          <h4>Defects Summary</h4>
-          <div class="summary-metadata">
-            <span>Total defects: ${defectsSummary.total || 0}</span>
-            <span>Types: ${defectsSummary.types || 0}</span>
-          </div>
-        </div>
       `;
 
       function truncateCoords(coords = "") {
