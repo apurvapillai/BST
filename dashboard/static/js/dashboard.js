@@ -85,6 +85,47 @@
     },
   };
 
+  const ORDER_NONE = "__NONE__";
+
+  const backgroundImageCache = new Map();
+
+  function requestBackgroundImage(url, callback) {
+    if (!url || typeof callback !== "function") return;
+    let entry = backgroundImageCache.get(url);
+    if (entry) {
+      if (entry.status === "loaded") {
+        callback(entry.image);
+        return;
+      }
+      if (entry.status === "loading") {
+        entry.callbacks.push(callback);
+        return;
+      }
+      if (entry.status === "error") {
+        callback(null);
+        return;
+      }
+    } else {
+      const img = new Image();
+      entry = { image: img, status: "loading", callbacks: [callback] };
+      backgroundImageCache.set(url, entry);
+      img.decoding = "async";
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        entry.status = "loaded";
+        entry.callbacks.forEach((cb) => cb(img));
+        entry.callbacks = [];
+      };
+      img.onerror = () => {
+        entry.status = "error";
+        entry.callbacks.forEach((cb) => cb(null));
+        entry.callbacks = [];
+      };
+      img.src = url;
+      return;
+    }
+  }
+
   const HEATMAP_BUCKETS = [
     { key: "A1", min: 0, max: 100, label: "<100", fill: "rgba(30, 64, 175, 0.45)", stroke: "rgba(30, 58, 138, 0.95)", legend: "#1d4ed8" },
     { key: "A2", min: 100, max: 500, label: "100-500", fill: "rgba(37, 99, 235, 0.45)", stroke: "rgba(29, 78, 216, 0.95)", legend: "#2563eb" },
@@ -127,8 +168,24 @@
       const key = reel.reel_id ?? domId(reel);
       let state = reelState.get(key);
       if (!state) {
-        state = { disabledBuckets: new Set() };
+        state = {
+          disabledBuckets: new Set(),
+          backgroundImage: null,
+          backgroundImageUrl: null,
+          backgroundImageLoading: false,
+          referenceBackground: null,
+        };
         reelState.set(key, state);
+      }
+      const referenceBackground = summary.referenceBackground || summary.reference_background || null;
+      const normalizedBackground = referenceBackground || null;
+      if (state.referenceBackground !== normalizedBackground) {
+        state.referenceBackground = normalizedBackground;
+        if (state.backgroundImageUrl !== normalizedBackground) {
+          state.backgroundImageUrl = normalizedBackground;
+          state.backgroundImage = null;
+        }
+        state.backgroundImageLoading = false;
       }
       window.requestAnimationFrame(() => render(container, reel, defects, state));
     }
@@ -141,6 +198,16 @@
         Number.isFinite(rawWidth) && Number.isFinite(rawLength) && rawWidth > 0 && rawLength > 0;
       let workingWidth = rawWidth;
       let workingLength = rawLength;
+      const referenceBackground = state.referenceBackground;
+      if (!referenceBackground) {
+        state.backgroundImage = null;
+        state.backgroundImageUrl = null;
+        state.backgroundImageLoading = false;
+      } else if (state.backgroundImageUrl !== referenceBackground) {
+        state.backgroundImageUrl = referenceBackground;
+        state.backgroundImage = null;
+        state.backgroundImageLoading = false;
+      }
 
       const aggregatesMap = new Map();
       let globalMinX = Infinity;
@@ -237,8 +304,43 @@
       const centerX = hasDimensionsOriginal ? 0 : (globalMinX + globalMaxX) / 2;
       const centerY = hasDimensionsOriginal ? 0 : (globalMinY + globalMaxY) / 2;
 
-      ctx.fillStyle = "#e1e7f5";
-      ctx.fillRect(-drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
+      let backgroundImage = null;
+      if (referenceBackground) {
+        if (state.backgroundImage) {
+          backgroundImage = state.backgroundImage;
+        } else if (!state.backgroundImageLoading) {
+          state.backgroundImageLoading = true;
+          requestBackgroundImage(referenceBackground, (img) => {
+            state.backgroundImageLoading = false;
+            if (!img) {
+              if (state.backgroundImageUrl === referenceBackground) {
+                state.backgroundImage = null;
+              }
+              return;
+            }
+            if (state.referenceBackground !== referenceBackground || !container.isConnected) {
+              return;
+            }
+            state.backgroundImage = img;
+            window.requestAnimationFrame(() => {
+              if (!container.isConnected) return;
+              render(container, reel, defects, state);
+            });
+          });
+        }
+      }
+
+      if (backgroundImage) {
+        ctx.save();
+        ctx.scale(1, -1);
+        ctx.drawImage(backgroundImage, -drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
+        ctx.restore();
+        ctx.fillStyle = "rgba(15, 23, 42, 0.05)";
+        ctx.fillRect(-drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
+      } else {
+        ctx.fillStyle = "#e1e7f5";
+        ctx.fillRect(-drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
+      }
 
       ctx.strokeStyle = "#4a5a7a";
       ctx.lineWidth = 1;
@@ -381,6 +483,370 @@
     return { domId, attach };
   })();
 
+  const MaskHeatmap = (() => {
+    const PADDING = 24;
+    const FALLBACK_SIZE = 360;
+    const MASK_COLOR = {
+      fill: "rgba(250, 204, 21, 0.45)",
+      stroke: "rgba(217, 119, 6, 0.9)",
+    };
+    const heatmapState = new Map();
+
+    function domId(reel) {
+      const id = reel && reel.reel_id !== undefined && reel.reel_id !== null ? reel.reel_id : "unknown";
+      return `mask-heatmap-${id}`;
+    }
+
+    function attach(scope, summary) {
+      if (!scope || !summary) return;
+      const reel = summary.reel || {};
+      const container = scope.querySelector(`#${domId(reel)}`);
+      if (!container) return;
+      const masks = Array.isArray(summary.masks) ? summary.masks : [];
+      const key = container.id || domId(reel);
+      let state = heatmapState.get(key);
+      if (!state) {
+        state = {
+          backgroundImage: null,
+          backgroundImageUrl: null,
+          backgroundImageLoading: false,
+          referenceBackground: null,
+        };
+        heatmapState.set(key, state);
+      }
+      const referenceBackground = summary.referenceBackground || summary.reference_background || null;
+      const normalizedBackground = referenceBackground || null;
+      if (state.referenceBackground !== normalizedBackground) {
+        state.referenceBackground = normalizedBackground;
+        if (state.backgroundImageUrl !== normalizedBackground) {
+          state.backgroundImageUrl = normalizedBackground;
+          state.backgroundImage = null;
+        }
+        state.backgroundImageLoading = false;
+      }
+      window.requestAnimationFrame(() => render(container, reel, masks, state));
+    }
+
+    function render(container, reel, masks, state) {
+      const parsed = collectMasks(masks);
+      const rawWidth = Number(reel?.format_width);
+      const rawLength = Number(reel?.format_length);
+      const hasDimensionsOriginal =
+        Number.isFinite(rawWidth) && Number.isFinite(rawLength) && rawWidth > 0 && rawLength > 0;
+
+      let workingWidth = rawWidth;
+      let workingLength = rawLength;
+      const referenceBackground = state.referenceBackground;
+      if (!referenceBackground) {
+        state.backgroundImage = null;
+        state.backgroundImageUrl = null;
+        state.backgroundImageLoading = false;
+      } else if (state.backgroundImageUrl !== referenceBackground) {
+        state.backgroundImageUrl = referenceBackground;
+        state.backgroundImage = null;
+        state.backgroundImageLoading = false;
+      }
+
+      if (!parsed.shapes.length) {
+        const message = hasDimensionsOriginal ? "No mask coordinates" : "Format dimensions unavailable";
+        container.classList.add("heatmap-empty");
+        container.innerHTML = `<span class='badge'>${message}</span>`;
+        return;
+      }
+
+      if (!hasDimensionsOriginal) {
+        const spanWidth = parsed.bounds.maxX - parsed.bounds.minX;
+        const spanLength = parsed.bounds.maxY - parsed.bounds.minY;
+        workingWidth = spanWidth > 0 ? spanWidth : FALLBACK_SIZE / 4;
+        workingLength = spanLength > 0 ? spanLength : FALLBACK_SIZE / 4;
+      }
+
+      container.classList.remove("heatmap-empty");
+      container.innerHTML = "";
+
+      const dpr = window.devicePixelRatio || 1;
+      const availableWidth = container.clientWidth || FALLBACK_SIZE;
+      const size = Math.max(PADDING * 4, availableWidth);
+      const canvas = document.createElement("canvas");
+      canvas.width = size * dpr;
+      canvas.height = size * dpr;
+      canvas.style.width = `${size}px`;
+      canvas.style.height = `${size}px`;
+
+      const ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+
+      ctx.fillStyle = "#f0f4fb";
+      ctx.fillRect(0, 0, size, size);
+
+      ctx.save();
+      ctx.translate(size / 2, size / 2);
+
+      const scale = Math.max(workingWidth, workingLength)
+        ? (size - PADDING * 2) / Math.max(workingWidth, workingLength)
+        : 1;
+      const drawWidth = workingWidth * scale;
+      const drawLength = workingLength * scale;
+      const bounds = parsed.bounds;
+      const centerX = hasDimensionsOriginal ? 0 : (bounds.minX + bounds.maxX) / 2 || 0;
+      const centerY = hasDimensionsOriginal ? 0 : (bounds.minY + bounds.maxY) / 2 || 0;
+
+      let backgroundImage = null;
+      if (referenceBackground) {
+        if (state.backgroundImage) {
+          backgroundImage = state.backgroundImage;
+        } else if (!state.backgroundImageLoading) {
+          state.backgroundImageLoading = true;
+          requestBackgroundImage(referenceBackground, (img) => {
+            state.backgroundImageLoading = false;
+            if (!img) {
+              if (state.backgroundImageUrl === referenceBackground) {
+                state.backgroundImage = null;
+              }
+              return;
+            }
+            if (state.referenceBackground !== referenceBackground || !container.isConnected) {
+              return;
+            }
+            state.backgroundImage = img;
+            window.requestAnimationFrame(() => {
+              if (!container.isConnected) return;
+              render(container, reel, masks, state);
+            });
+          });
+        }
+      }
+
+      if (backgroundImage) {
+        ctx.save();
+        ctx.scale(1, -1);
+        ctx.drawImage(backgroundImage, -drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
+        ctx.restore();
+        ctx.fillStyle = "rgba(15, 23, 42, 0.05)";
+        ctx.fillRect(-drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
+      } else {
+        ctx.fillStyle = "#e1e7f5";
+        ctx.fillRect(-drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
+      }
+
+      ctx.strokeStyle = "#4a5a7a";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(-drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
+
+      ctx.strokeStyle = "rgba(74, 90, 122, 0.35)";
+      ctx.beginPath();
+      ctx.moveTo(-drawWidth / 2, 0);
+      ctx.lineTo(drawWidth / 2, 0);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, -drawLength / 2);
+      ctx.lineTo(0, drawLength / 2);
+      ctx.stroke();
+
+      parsed.shapes.forEach((shape) => {
+        if (!shape.points.length) return;
+        ctx.beginPath();
+        const first = shape.points[0];
+        ctx.moveTo((first.x - centerX) * scale, -(first.y - centerY) * scale);
+        for (let i = 1; i < shape.points.length; i += 1) {
+          const point = shape.points[i];
+          ctx.lineTo((point.x - centerX) * scale, -(point.y - centerY) * scale);
+        }
+        ctx.closePath();
+        ctx.fillStyle = MASK_COLOR.fill;
+        ctx.fill();
+        ctx.strokeStyle = MASK_COLOR.stroke;
+        ctx.lineWidth = 0.9;
+        ctx.stroke();
+      });
+
+      ctx.restore();
+      ctx.fillStyle = "#4a5a7a";
+      ctx.font = "12px sans-serif";
+      ctx.textBaseline = "bottom";
+      ctx.textAlign = "left";
+      ctx.fillText(`X: ±${Utils.formatNumber(workingWidth / 2, 1)}`, 8, size - 8);
+      ctx.textBaseline = "top";
+      ctx.textAlign = "right";
+      ctx.fillText(`Y: ±${Utils.formatNumber(workingLength / 2, 1)}`, size - 8, 8);
+
+      container.appendChild(canvas);
+    }
+
+    function collectMasks(masks) {
+      const shapes = [];
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+
+      masks.forEach((mask) => {
+        const polygons = parseMaskCoords(mask?.coords);
+        if (!polygons.length) return;
+        polygons.forEach((points) => {
+          const normalized = points.filter((pt) => Number.isFinite(pt.x) && Number.isFinite(pt.y));
+          if (normalized.length < 3) return;
+          normalized.forEach((pt) => {
+            minX = Math.min(minX, pt.x);
+            maxX = Math.max(maxX, pt.x);
+            minY = Math.min(minY, pt.y);
+            maxY = Math.max(maxY, pt.y);
+          });
+          shapes.push({ points: normalized });
+        });
+      });
+
+      if (!shapes.length) {
+        return { shapes: [], bounds: { minX: 0, maxX: 0, minY: 0, maxY: 0 } };
+      }
+
+      return {
+        shapes,
+        bounds: {
+          minX,
+          maxX,
+          minY,
+          maxY,
+        },
+      };
+    }
+
+    function parseMaskCoords(raw) {
+      if (!raw) return [];
+      if (Array.isArray(raw)) {
+        return normalizeArrayCoords(raw);
+      }
+      const text = String(raw || "").trim();
+      if (!text) return [];
+
+      if (/^\s*[\[{]/.test(text)) {
+        try {
+          const parsed = JSON.parse(text);
+          const normalized = normalizeArrayCoords(parsed);
+          if (normalized.length) return normalized;
+        } catch (err) {
+          // ignore JSON parse failures
+        }
+      }
+
+      const segments = text
+        .split(/\|+/)
+        .map((segment) => segment.trim())
+        .filter(Boolean);
+      if (!segments.length) {
+        segments.push(text);
+      }
+
+      const polygons = [];
+      segments.forEach((segment) => {
+        const pairs = [];
+        const pairRegex = /(-?\d+(?:\.\d+)?)\s*(?:,|:|;|\s)\s*(-?\d+(?:\.\d+)?)/g;
+        let match;
+        while ((match = pairRegex.exec(segment)) !== null) {
+          const x = Number(match[1]);
+          const y = Number(match[2]);
+          if (Number.isFinite(x) && Number.isFinite(y)) {
+            pairs.push({ x, y });
+          }
+        }
+
+        if (pairs.length >= 3) {
+          polygons.push(pairs);
+          return;
+        }
+        if (pairs.length === 2) {
+          const [p1, p2] = pairs;
+          polygons.push([
+            { x: p1.x, y: p1.y },
+            { x: p2.x, y: p1.y },
+            { x: p2.x, y: p2.y },
+            { x: p1.x, y: p2.y },
+          ]);
+          return;
+        }
+
+        const tokens = segment.match(/-?\d+(?:\.\d+)?/g);
+        if (!tokens) return;
+        const points = [];
+        for (let i = 0; i + 1 < tokens.length; i += 2) {
+          const x = Number(tokens[i]);
+          const y = Number(tokens[i + 1]);
+          if (Number.isFinite(x) && Number.isFinite(y)) {
+            points.push({ x, y });
+          }
+        }
+        if (points.length >= 3) {
+          polygons.push(points);
+        } else if (points.length === 2) {
+          const [p1, p2] = points;
+          polygons.push([
+            { x: p1.x, y: p1.y },
+            { x: p2.x, y: p1.y },
+            { x: p2.x, y: p2.y },
+            { x: p1.x, y: p2.y },
+          ]);
+        }
+      });
+
+      return polygons;
+    }
+
+    function normalizeArrayCoords(value) {
+      if (!value) return [];
+      if (!Array.isArray(value) && value && typeof value === "object") {
+        if (Array.isArray(value.x) && Array.isArray(value.y)) {
+          const pts = [];
+          const len = Math.min(value.x.length, value.y.length);
+          for (let i = 0; i < len; i += 1) {
+            const x = Number(value.x[i]);
+            const y = Number(value.y[i]);
+            if (Number.isFinite(x) && Number.isFinite(y)) {
+              pts.push({ x, y });
+            }
+          }
+          return pts.length >= 3 ? [pts] : [];
+        }
+        return [];
+      }
+      if (Array.isArray(value) && value.length && value.every((item) => typeof item === "object" && !Array.isArray(item))) {
+        const polygons = [];
+        value.forEach((entry) => {
+          if (entry && Array.isArray(entry.x) && Array.isArray(entry.y)) {
+            const pts = [];
+            const len = Math.min(entry.x.length, entry.y.length);
+            for (let i = 0; i < len; i += 1) {
+              const x = Number(entry.x[i]);
+              const y = Number(entry.y[i]);
+              if (Number.isFinite(x) && Number.isFinite(y)) {
+                pts.push({ x, y });
+              }
+            }
+            if (pts.length >= 3) {
+              polygons.push(pts);
+            }
+          }
+        });
+        return polygons;
+      }
+
+      if (Array.isArray(value) && value.length && Array.isArray(value[0])) {
+        const pts = value
+          .map((point) => {
+            if (!Array.isArray(point) || point.length < 2) return null;
+            const x = Number(point[0]);
+            const y = Number(point[1]);
+            return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
+          })
+          .filter(Boolean);
+        return pts.length >= 3 ? [pts] : [];
+      }
+
+      return [];
+    }
+
+    return { domId, attach };
+  })();
+
   const LoadingOverlay = (() => {
     let overlay = null;
 
@@ -473,10 +939,10 @@
       const params = new URLSearchParams(window.location.search);
       ["machine_id", "start", "end", "job", "order"].forEach((key) => {
         if (params.has(key)) {
-          state[key] = params.get(key) || "";
-        }
-      });
-      const reelParams = params.getAll("reel_code");
+      state[key] = params.get(key) || "";
+    }
+  });
+  const reelParams = params.getAll("reel_code");
       const normalized = Array.from(
         new Set(
           reelParams
@@ -488,14 +954,19 @@
             .filter((value) => value)
         )
       );
-      state.reel_codes = normalized;
+  state.reel_codes = normalized;
 
-      updating = true;
-      if (elements.machine) elements.machine.value = state.machine_id || elements.machine.value;
-      if (elements.start) elements.start.value = state.start || "";
-      if (elements.end) elements.end.value = state.end || "";
-      if (elements.job) elements.job.value = state.job || "";
-      if (elements.order) elements.order.value = state.order || "";
+  updating = true;
+  if (elements.machine) elements.machine.value = state.machine_id || elements.machine.value;
+  if (elements.start) elements.start.value = state.start || "";
+  if (elements.end) elements.end.value = state.end || "";
+  if (elements.job) elements.job.value = state.job || "";
+  if (state.order === ORDER_NONE) {
+    ensureOrderOption(ORDER_NONE, "None");
+    if (elements.order) elements.order.value = ORDER_NONE;
+  } else if (elements.order) {
+    elements.order.value = state.order || "";
+  }
       syncReelSelect();
       updating = false;
     }
@@ -645,7 +1116,11 @@
         if (!value) return;
         const option = document.createElement("option");
         option.value = value;
-        option.textContent = value;
+        if (selectEl === elements.order && value === ORDER_NONE) {
+          option.textContent = "None";
+        } else {
+          option.textContent = value;
+        }
         option.selected = selectedSet.has(value);
         frag.appendChild(option);
       });
@@ -781,7 +1256,8 @@
         chips.push({ key: "job", label: `Job: ${state.job}`, removable: true });
       }
       if (state.order) {
-        chips.push({ key: "order", label: `Order: ${state.order}`, removable: true });
+        const orderLabel = state.order === ORDER_NONE ? "None" : state.order;
+        chips.push({ key: "order", label: `Order: ${orderLabel}`, removable: true });
       }
       state.reel_codes.forEach((code) => {
         chips.push({ key: "reel_code", label: `Reel: ${code}`, removable: true, value: code });
@@ -819,6 +1295,9 @@
           break;
         case "order":
           state.order = value || "";
+          if (state.order === ORDER_NONE) {
+            ensureOrderOption(ORDER_NONE, "None");
+          }
           if (elements.order) elements.order.value = state.order;
           break;
         case "start":
@@ -861,6 +1340,37 @@
       }
     }
 
+    function setMany(updates = {}, options = {}) {
+      const { emit: shouldEmit = true, updateUrl = true } = options;
+      const entries = Object.entries(updates || {});
+      if (!entries.length) {
+        if (shouldEmit) emit(false);
+        return;
+      }
+      updating = true;
+      entries.forEach(([field, value]) => {
+        switch (field) {
+          case "job":
+          case "order":
+          case "start":
+          case "end":
+          case "machine_id":
+            if (field === "order" && value === ORDER_NONE) {
+              ensureOrderOption(ORDER_NONE, "None");
+            }
+            set(field, value, { emit: false, updateUrl: false });
+            break;
+          default:
+            break;
+        }
+      });
+      updating = false;
+      if (shouldEmit) emit(false);
+      if (updateUrl) {
+        Utils.updateUrlQuery(getState());
+      }
+    }
+
     function removeReel(code, { emit: shouldEmit = false } = {}) {
       const value = (code || "").trim();
       if (!value) return;
@@ -872,7 +1382,18 @@
       else renderChips();
     }
 
-    return { init, getState, onChange, set, addReel, removeReel, getReelCodes };
+    function ensureOrderOption(value, label) {
+      if (!elements.order) return;
+      const exists = Array.from(elements.order.options).some((opt) => opt.value === value);
+      if (!exists) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        elements.order.appendChild(option);
+      }
+    }
+
+    return { init, getState, onChange, set, setMany, addReel, removeReel, getReelCodes };
   })();
 
   const RLM_METRIC_LABELS = {
@@ -953,7 +1474,11 @@
       if (!tabs[name]) name = "overview";
       if (active === name) return;
 
+      const previous = active;
       active = name;
+      if (tabs[previous] && typeof tabs[previous].deactivate === "function") {
+        tabs[previous].deactivate();
+      }
       Utils.qsa(".tab").forEach((button) => {
         button.classList.toggle("tab-active", button.dataset.tab === active);
       });
@@ -2062,7 +2587,7 @@
         .slice(0, 5)
         .map(
           (img) =>
-            `<img src="${urlForStatic(img.image_src)}" alt="${img.filename || ""}" onclick="showImageModal('${urlForStatic(
+            `<img src="${urlForStatic(img.image_src)}" alt="${img.filename || ""}" loading="lazy" decoding="async" onclick="showImageModal('${urlForStatic(
               img.image_src
             )}')">`
         )
@@ -2117,6 +2642,7 @@
         attachGalleryListeners(detailEl);
         attachSummaryActions(detailEl);
         JobHeatmap.attach(detailEl, cached);
+        MaskHeatmap.attach(detailEl, cached);
         if (immediate) {
           return;
         }
@@ -2133,6 +2659,7 @@
         attachGalleryListeners(detailEl);
         attachSummaryActions(detailEl);
         JobHeatmap.attach(detailEl, summary);
+        MaskHeatmap.attach(detailEl, summary);
       } catch (err) {
         console.error("Failed to load reel summary", err);
         if (!cached) {
@@ -2256,6 +2783,16 @@
           ${heatmapInner}
         </div>
       `;
+      const maskHeatmapId = MaskHeatmap.domId(reel);
+      const maskPlaceholder = hasDimensions ? "Loading mask footprints…" : "Format dimensions unavailable";
+      const maskSection = `
+        <div class="summary-section">
+          <h4>Mask Footprints</h4>
+          <div class="heatmap-wrapper heatmap-empty" id="${maskHeatmapId}">
+            <span class='badge'>${maskPlaceholder}</span>
+          </div>
+        </div>
+      `;
 
       return `
         <div class="summary-header">
@@ -2285,7 +2822,7 @@
                       (img) =>
                         `<img src="${urlForStatic(img.image_src)}" alt="${img.filename || ""}" data-img="${urlForStatic(
                           img.image_src
-                        )}">`
+                        )}" loading="lazy" decoding="async">`
                     )
                     .join("")
                 : "<span class='badge'>No reference images</span>"
@@ -2309,6 +2846,7 @@
           <h4>Masks</h4>
           ${masksTable}
         </div>
+        ${maskSection}
 
         <div class="summary-section">
           <h4>RLM</h4>
@@ -2499,6 +3037,27 @@ function extractRlmMetrics(config) {
       }
       button.addEventListener("click", () => {
         if (!reelCode) return;
+        const summary = summaryCache.get(state.selectedReelId) || null;
+        if (summary && summary.reel) {
+          const { job_name: jobName, order_number: orderNumber } = summary.reel;
+          const { job: currentJob, order: currentOrder } = Filters.getState();
+          const updates = {};
+          if (!currentOrder || currentOrder === ORDER_NONE) {
+            if (orderNumber) {
+              updates.order = orderNumber;
+            } else if (!currentOrder) {
+              updates.order = ORDER_NONE;
+            }
+            if (!currentJob && jobName) {
+              updates.job = jobName;
+            }
+          } else if (!currentJob && jobName && orderNumber) {
+            updates.job = jobName;
+          }
+          if (Object.keys(updates).length) {
+            Filters.setMany(updates, { emit: true });
+          }
+        }
         Filters.addReel(reelCode);
         button.disabled = true;
         button.textContent = "In review";
@@ -2535,10 +3094,14 @@ function extractRlmMetrics(config) {
     let paginationEl;
     let summaryTotalEl;
     let summaryTypesEl;
+    let tabScope;
+    let chipsEl;
+    let updating = false;
+    let typeOptionCache = new Set();
 
     const state = {
       page: 1,
-      class_name: "",
+      class_names: [],
       phase: "",
       magnitude_min: "",
       magnitude_max: "",
@@ -2555,7 +3118,7 @@ function extractRlmMetrics(config) {
         const params = {
           page: state.page,
         };
-        if (state.class_name) params.class_name = state.class_name;
+        if (state.class_names && state.class_names.length) params.class_name = [...state.class_names];
         if (state.phase) params.phase = state.phase;
         if (state.magnitude_min) params.magnitude_min = state.magnitude_min;
         if (state.magnitude_max) params.magnitude_max = state.magnitude_max;
@@ -2570,6 +3133,7 @@ function extractRlmMetrics(config) {
         updateTypeOptions(byType);
         renderSummary(data.page_info, byType);
         renderCharts(data, byType);
+        renderFootprints(data);
         renderTable(data.rows || []);
         renderPagination();
       } catch (err) {
@@ -2595,9 +3159,19 @@ function extractRlmMetrics(config) {
       paginationEl = Utils.qs("#defectPagination");
       summaryTotalEl = Utils.qs("[data-defect-total]");
       summaryTypesEl = Utils.qs("#defectSummaryTypes");
+      tabScope = Utils.qs("#tab-defects");
+      chipsEl = Utils.qs("#defectLocalChips");
+
+      if (typeSelect) {
+        typeSelect.addEventListener("change", () => {
+          const value = typeSelect.value;
+          if (!value) return;
+          addTypeFilter(value);
+          typeSelect.value = "";
+        });
+      }
 
       [
-        [typeSelect, "class_name"],
         [phaseSelect, "phase"],
         [magnitudeMin, "magnitude_min"],
         [magnitudeMax, "magnitude_max"],
@@ -2610,10 +3184,33 @@ function extractRlmMetrics(config) {
         el.addEventListener("input", () => handleLocalFilterChange(key, el.value));
         el.addEventListener("change", () => handleLocalFilterChange(key, el.value));
       });
+
+      if (chipsEl) {
+        chipsEl.addEventListener("click", (event) => {
+          const button = event.target.closest(".chip-remove");
+          if (!button) return;
+          const chipEl = button.closest(".filter-chip");
+          if (!chipEl) return;
+          const key = chipEl.dataset.key;
+          const value = chipEl.dataset.value || "";
+          clearLocalFilter(key, value);
+        });
+      }
     }
 
     function activate() {
+      if (chipsEl) {
+        chipsEl.classList.add("hidden");
+      }
       load.flush();
+    }
+
+    function deactivate() {
+      resetLocalFilters();
+      if (chipsEl) {
+        chipsEl.innerHTML = "";
+        chipsEl.classList.add("hidden");
+      }
     }
 
     function onFiltersUpdated() {
@@ -2622,24 +3219,178 @@ function extractRlmMetrics(config) {
     }
 
     function handleLocalFilterChange(key, value) {
+      if (updating) return;
       state[key] = value || "";
       state.page = 1;
+      renderDefectChips();
+      load();
+    }
+
+    function addTypeFilter(rawValue) {
+      const value = (rawValue || "").trim();
+      if (!value) return;
+      if (state.class_names.includes(value)) return;
+      state.class_names.push(value);
+      state.page = 1;
+      renderDefectChips();
+      load();
+    }
+
+    function clearLocalFilter(key, value) {
+      updating = true;
+      switch (key) {
+        case "class_name":
+          state.class_names = state.class_names.filter((item) => item !== value);
+          break;
+        case "phase":
+          state.phase = "";
+          if (phaseSelect) phaseSelect.value = "";
+          break;
+        case "magnitude":
+          state.magnitude_min = "";
+          state.magnitude_max = "";
+          if (magnitudeMin) magnitudeMin.value = "";
+          if (magnitudeMax) magnitudeMax.value = "";
+          break;
+        case "severity":
+          state.severity_min = "";
+          state.severity_max = "";
+          if (severityMin) severityMin.value = "";
+          if (severityMax) severityMax.value = "";
+          break;
+        case "position":
+          state.position_min = "";
+          state.position_max = "";
+          if (positionMin) positionMin.value = "";
+          if (positionMax) positionMax.value = "";
+          break;
+        default:
+          break;
+      }
+      updating = false;
+      state.page = 1;
+      renderDefectChips();
       load();
     }
 
     function updateTypeOptions(byType) {
       if (!typeSelect) return;
-      const current = state.class_name;
-      const options = ["<option value=''>All</option>"].concat(
-        byType.map((type) => `<option value="${type.class}">${type.class}</option>`)
-      );
-      typeSelect.innerHTML = options.join("");
-      if (current && byType.some((t) => t.class === current)) {
-        typeSelect.value = current;
+      const entries = Array.isArray(byType)
+        ? byType
+            .map((item) => (item && item.class ? String(item.class).trim() : ""))
+            .filter(Boolean)
+        : [];
+
+      if (!state.class_names.length) {
+        typeOptionCache = new Set(entries);
       } else {
-        typeSelect.value = "";
-        state.class_name = "";
+        entries.forEach((cls) => {
+          if (cls) typeOptionCache.add(cls);
+        });
       }
+
+      const sorted = Array.from(typeOptionCache).sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: "base" })
+      );
+      const frag = document.createDocumentFragment();
+      const defaultOption = document.createElement("option");
+      defaultOption.value = "";
+      defaultOption.textContent = "Add type filter";
+      frag.appendChild(defaultOption);
+      sorted.forEach((cls) => {
+        const option = document.createElement("option");
+        option.value = cls;
+        option.textContent = cls;
+        frag.appendChild(option);
+      });
+      typeSelect.innerHTML = "";
+      typeSelect.appendChild(frag);
+      typeSelect.value = "";
+    }
+
+    function resetLocalFilters() {
+      updating = true;
+      state.class_names = [];
+      typeOptionCache = new Set();
+      state.phase = "";
+      state.magnitude_min = "";
+      state.magnitude_max = "";
+      state.severity_min = "";
+      state.severity_max = "";
+      state.position_min = "";
+      state.position_max = "";
+      state.page = 1;
+      state.pageInfo = null;
+      if (typeSelect) typeSelect.value = "";
+      if (phaseSelect) phaseSelect.value = "";
+      if (magnitudeMin) magnitudeMin.value = "";
+      if (magnitudeMax) magnitudeMax.value = "";
+      if (severityMin) severityMin.value = "";
+      if (severityMax) severityMax.value = "";
+      if (positionMin) positionMin.value = "";
+      if (positionMax) positionMax.value = "";
+      updating = false;
+      renderDefectChips();
+    }
+
+    function renderDefectChips() {
+      if (!chipsEl) return;
+      const isActive = Router.current && Router.current() === "defects";
+      const chips = [];
+
+      state.class_names.forEach((name) => {
+        chips.push({ key: "class_name", value: name, label: `Type: ${name}` });
+      });
+
+      if (state.phase) {
+        chips.push({ key: "phase", label: `Phase: ${state.phase}` });
+      }
+
+      const magnitudeLabel = buildRangeLabel("Magnitude", state.magnitude_min, state.magnitude_max);
+      if (magnitudeLabel) {
+        chips.push({ key: "magnitude", label: magnitudeLabel });
+      }
+
+      const severityLabel = buildRangeLabel("Severity", state.severity_min, state.severity_max);
+      if (severityLabel) {
+        chips.push({ key: "severity", label: severityLabel });
+      }
+
+      const positionLabel = buildRangeLabel("Position", state.position_min, state.position_max);
+      if (positionLabel) {
+        chips.push({ key: "position", label: positionLabel });
+      }
+
+      if (!chips.length || !isActive) {
+        chipsEl.innerHTML = "";
+        chipsEl.classList.add("hidden");
+        return;
+      }
+
+      const html = chips
+        .map((chip) => {
+          const attrs = [`data-key=\"${chip.key}\"`];
+          if (chip.value) attrs.push(`data-value=\"${chip.value}\"`);
+          return `
+            <span class="filter-chip" ${attrs.join(" ")}>
+              <span>${chip.label}</span>
+              <button type="button" class="chip-remove" aria-label="Clear ${chip.label}">&times;</button>
+            </span>
+          `;
+        })
+        .join("");
+
+      chipsEl.innerHTML = html;
+      chipsEl.classList.remove("hidden");
+    }
+
+    function buildRangeLabel(prefix, minValue, maxValue) {
+      const hasMin = minValue !== undefined && minValue !== null && `${minValue}`.trim() !== "";
+      const hasMax = maxValue !== undefined && maxValue !== null && `${maxValue}`.trim() !== "";
+      if (!hasMin && !hasMax) return "";
+      if (hasMin && hasMax) return `${prefix}: ${minValue} – ${maxValue}`;
+      if (hasMin) return `${prefix} ≥ ${minValue}`;
+      return `${prefix} ≤ ${maxValue}`;
     }
 
     function renderCharts(data, byTypeOverride) {
@@ -2748,8 +3499,8 @@ function extractRlmMetrics(config) {
                 ${
                   row.image_src
                     ? `<img src="${urlForStatic(row.image_src)}" alt="defect" onclick="showImageModal('${urlForStatic(
-                        row.image_src
-                      )}')">`
+                  row.image_src
+                )}')" loading="lazy" decoding="async">`
                     : ""
                 }
               </td>
@@ -2767,13 +3518,121 @@ function extractRlmMetrics(config) {
       });
     }
 
+    function renderFootprints(data) {
+      if (!tabScope) return;
+      const heatmapEl = Utils.qs("#heatmap-defect-explorer");
+      const maskEl = Utils.qs("#mask-heatmap-defect-explorer");
+      const coordsEl = Utils.qs("#mask-heatmap-defect-explorer-coords");
+      if (!heatmapEl || !maskEl) return;
+
+      const reel = buildFootprintReel(data);
+      const defects = extractDefectFootprints(data.rows || []);
+      const masks = Array.isArray(data.masks) ? data.masks : [];
+      const referenceImages = Array.isArray(data.reference_images) ? data.reference_images : [];
+      const latestReference = referenceImages.length ? referenceImages[0] : null;
+      const referenceBackground =
+        latestReference && latestReference.image_src ? urlForStatic(latestReference.image_src) : null;
+
+      JobHeatmap.attach(tabScope, { reel, defects, referenceBackground });
+      MaskHeatmap.attach(tabScope, { reel, masks, referenceBackground });
+
+      renderMaskCoords(coordsEl, masks);
+    }
+
+    function buildFootprintReel(data) {
+      const lengths = [];
+      const widths = [];
+      const rows = Array.isArray(data.rows) ? data.rows : [];
+
+      const lengthHint = Number(data.format_length);
+      if (Number.isFinite(lengthHint)) lengths.push(lengthHint);
+      const widthHint = Number(data.format_width);
+      if (Number.isFinite(widthHint)) widths.push(widthHint);
+
+      rows.forEach((row) => {
+        const rowLength = Number(row.format_length);
+        const rowWidth = Number(row.format_width);
+        if (Number.isFinite(rowLength)) lengths.push(rowLength);
+        if (Number.isFinite(rowWidth)) widths.push(rowWidth);
+      });
+
+      const reelLength = lengths.find((val) => Number.isFinite(val));
+      const reelWidth = widths.find((val) => Number.isFinite(val));
+
+      return {
+        reel_id: "defect-explorer",
+        format_length: Number.isFinite(reelLength) ? reelLength : null,
+        format_width: Number.isFinite(reelWidth) ? reelWidth : null,
+      };
+    }
+
+    function extractDefectFootprints(rows) {
+      return rows
+        .filter((row) => Array.isArray(row.coords) && row.coords.length)
+        .map((row) => ({
+          magnitude_value: row.magnitude_value,
+          severity_value: row.severity_value,
+          coords: row.coords,
+        }));
+    }
+
+    function renderMaskCoords(container, masks) {
+      if (!container) return;
+      if (!masks.length) {
+        container.innerHTML = "<span class='badge'>No mask coordinates yet.</span>";
+        return;
+      }
+      const sorted = [...masks].sort((a, b) => {
+        const at = a && a.timestamp ? new Date(a.timestamp).getTime() : 0;
+        const bt = b && b.timestamp ? new Date(b.timestamp).getTime() : 0;
+        return bt - at;
+      });
+      const html = sorted
+        .map((mask, index) => {
+          const labelParts = [];
+          if (mask.xml_id) labelParts.push(mask.xml_id);
+          if (mask.sensitivitysetid) labelParts.push(mask.sensitivitysetid);
+          if (mask.timestamp) labelParts.push(formatTime(mask.timestamp));
+          const label = labelParts.length ? labelParts.join(" · ") : `Mask ${index + 1}`;
+          const coordsText = formatMaskCoords(mask.coords);
+          const display = coordsText ? escapeHtml(coordsText) : "—";
+          return `
+            <div class="mask-coords-row">
+              <span class="mask-coords-label">${escapeHtml(label)}</span>
+              <code>${display}</code>
+            </div>
+          `;
+        })
+        .join("");
+      container.innerHTML = html;
+    }
+
+    function formatMaskCoords(raw) {
+      if (raw === null || raw === undefined) return "";
+      if (typeof raw === "string") return raw.trim();
+      try {
+        return JSON.stringify(raw);
+      } catch (err) {
+        return String(raw);
+      }
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
     function formatTime(value) {
       if (!value) return "";
       const date = new Date(value);
       return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
     }
 
-    return { init, activate, onFiltersUpdated };
+    return { init, activate, deactivate, onFiltersUpdated };
   })();
 
   function urlForStatic(path) {

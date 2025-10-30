@@ -4,7 +4,7 @@ import copy
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from flask import Blueprint, jsonify, render_template, request
 from sqlalchemy import and_, case, exists, func, or_, text
@@ -94,12 +94,20 @@ def _validate_filters(session: Session) -> Dict[str, Optional[str]]:
     if not (start and end and start < end):
         start, end = _default_window()
 
+    order_arg = args.get("order")
+    if order_arg == SENTINEL_NONE:
+        order_value = SENTINEL_NONE
+    elif order_arg:
+        order_value = order_arg
+    else:
+        order_value = None
+
     filters = {
         "machine_id": machine_id,
         "start": start,
         "end": end,
         "job": args.get("job") or None,
-        "order": args.get("order") or None,
+        "order": order_value,
         "reel_code": args.get("reel_code") or None,
     }
     reel_codes = args.getlist("reel_code")
@@ -131,9 +139,16 @@ def _apply_reel_filters(query, filters: Dict[str, Optional[str]], include_reel_c
         if reel_codes:
             query = query.filter(Reel.reel_code.in_(reel_codes))
     if filters.get("job"):
-        query = query.filter(Reel.job_name == filters["job"])
-    if filters.get("order"):
-        query = query.filter(Reel.order_number == filters["order"])
+        if filters["job"] == SENTINEL_NONE:
+            query = query.filter(or_(Reel.job_name.is_(None), Reel.job_name == ""))
+        else:
+            query = query.filter(Reel.job_name == filters["job"])
+    order_filter = filters.get("order")
+    if order_filter:
+        if order_filter == SENTINEL_NONE:
+            query = query.filter(or_(Reel.order_number.is_(None), Reel.order_number == ""))
+        else:
+            query = query.filter(Reel.order_number == order_filter)
     return query
 
 
@@ -574,20 +589,33 @@ def api_filters():
         order_query = base_query
         if filters.get("job"):
             order_query = order_query.filter(Reel.job_name == filters["job"])
-        orders = (
+        order_rows = (
             order_query.with_entities(
                 Reel.order_number,
                 func.max(Reel.time_end).label("latest"),
             )
-            .filter(Reel.order_number.isnot(None))
             .group_by(Reel.order_number)
             .order_by(func.max(Reel.time_end).desc())
             .all()
         )
 
+        order_values: List[str] = []
+        has_null_order = False
+        for order_value, _ in order_rows:
+            if order_value is None or (isinstance(order_value, str) and not order_value.strip()):
+                has_null_order = True
+            else:
+                order_values.append(order_value)
+        if has_null_order:
+            order_values.insert(0, SENTINEL_NONE)
+
         reel_query = order_query
-        if filters.get("order"):
-            reel_query = reel_query.filter(Reel.order_number == filters["order"])
+        order_filter = filters.get("order")
+        if order_filter:
+            if order_filter == SENTINEL_NONE:
+                reel_query = reel_query.filter(or_(Reel.order_number.is_(None), Reel.order_number == ""))
+            else:
+                reel_query = reel_query.filter(Reel.order_number == order_filter)
         reels = (
             reel_query.with_entities(
                 Reel.reel_code,
@@ -602,7 +630,7 @@ def api_filters():
         return jsonify(
             {
                 "jobs": [job for job, _ in jobs],
-                "orders": [order for order, _ in orders],
+                "orders": order_values,
                 "reel_codes": [code for code, _ in reels],
             }
         )
@@ -1276,7 +1304,9 @@ def _baseline_for_job_order(
         query = query.filter(Reel.job_name == job)
     else:
         query = query.filter(Reel.job_name.is_(None))
-    if order:
+    if order == SENTINEL_NONE:
+        query = query.filter(or_(Reel.order_number.is_(None), Reel.order_number == ""))
+    elif order:
         query = query.filter(Reel.order_number == order)
     else:
         query = query.filter(Reel.order_number.is_(None))
@@ -1681,7 +1711,10 @@ def api_defects():
         )
 
         page, page_size = _paginate()
-        rows_query = base_query.options(selectinload(Defect.reel))
+        rows_query = base_query.options(
+            selectinload(Defect.reel).selectinload(Reel.masks),
+            selectinload(Defect.reel).selectinload(Reel.reference_images),
+        )
         total = rows_query.count()
         rows = (
             rows_query.order_by(Defect.defect_time.desc())
@@ -1691,6 +1724,12 @@ def api_defects():
         )
 
         result_rows = []
+        mask_entries: List[Dict[str, Optional[str]]] = []
+        seen_mask_ids: Set[int] = set()
+        reference_images: List[Dict[str, Optional[str]]] = []
+        seen_reference_ids: Set[int] = set()
+        format_lengths: List[float] = []
+        format_widths: List[float] = []
         if rows:
             reel_ids = {row.reel_id for row in rows}
             phase_map: Dict[int, List[InspectionPhase]] = defaultdict(list)
@@ -1707,6 +1746,49 @@ def api_defects():
                 phase_name = None
                 if defect.defect_time:
                     phase_name = _phase_for_timestamp(phase_map.get(defect.reel_id, []), defect.defect_time)
+                format_length = _to_float(reel.format_length) if reel else None
+                format_width = _to_float(reel.format_width) if reel else None
+                if format_length is not None:
+                    format_lengths.append(format_length)
+                if format_width is not None:
+                    format_widths.append(format_width)
+                if reel and reel.masks:
+                    for mask in reel.masks:
+                        mask_id = getattr(mask, "mask_id", None)
+                        if mask_id is not None and mask_id in seen_mask_ids:
+                            continue
+                        if mask_id is not None:
+                            seen_mask_ids.add(mask_id)
+                        mask_entries.append(
+                            {
+                                "timestamp": _iso(mask.timestamp),
+                                "coords": mask.coords,
+                                "format_value": _to_float(mask.format_value),
+                                "xml_id": mask.xml_id,
+                                "sensitivitysetid": mask.sensitivitysetid,
+                            }
+                        )
+                if reel and reel.reference_images and len(reference_images) < 4:
+                    ordered_refs = sorted(
+                        reel.reference_images,
+                        key=lambda img: getattr(img, "ref_image_id", 0) or 0,
+                        reverse=True,
+                    )
+                    for ref in ordered_refs:
+                        if len(reference_images) >= 4:
+                            break
+                        ref_id = getattr(ref, "ref_image_id", None)
+                        if ref_id is not None and ref_id in seen_reference_ids:
+                            continue
+                        if ref_id is not None:
+                            seen_reference_ids.add(ref_id)
+                        reference_images.append(
+                            {
+                                "ref_image_id": ref_id,
+                                "filename": ref.filename,
+                                "image_src": (ref.image_src or "").replace("\\", "/"),
+                            }
+                        )
                 result_rows.append(
                     {
                         "reel_id": reel.reel_id if reel else defect.reel_id,
@@ -1721,6 +1803,8 @@ def api_defects():
                         "phase": phase_name,
                         "image_src": (defect.image_src or "").replace("\\", "/"),
                         "coords": defect.coords_json or [],
+                        "format_length": format_length,
+                        "format_width": format_width,
                     }
                 )
 
@@ -1813,6 +1897,10 @@ def api_defects():
                 "magnitude_hist": magnitude_hist,
                 "severity_hist": severity_hist,
                 "position_hist": position_hist,
+                "masks": mask_entries,
+                "reference_images": reference_images,
+                "format_length": format_lengths[0] if format_lengths else None,
+                "format_width": format_widths[0] if format_widths else None,
                 "page_info": {
                     "page": page,
                     "page_size": page_size,
