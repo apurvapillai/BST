@@ -770,8 +770,8 @@ def api_overview():
         jobs_defects = defaultdict(int)
         state_buckets: Dict[datetime, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
         job_reference_latest: Dict[str, Dict[str, Any]] = {}
-        job_heatmap_records: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        job_heatmap_dims: Dict[str, Dict[str, Optional[float]]] = {}
+        job_heatmap_records: Dict[Tuple[str, str], List[Dict[str, Any]]] = defaultdict(list)
+        job_heatmap_dims: Dict[Tuple[str, str], Dict[str, Optional[float]]] = {}
 
         totals = {
             "length": 0.0,
@@ -792,6 +792,7 @@ def api_overview():
 
             job_order_key = (job_name or SENTINEL_NONE, reel.order_number or SENTINEL_NONE)
             order_display = reel.order_number if reel.order_number else None
+            heatmap_key = (job_display, order_display or SENTINEL_NONE)
             job_order_entry = job_order_metrics.setdefault(
                 job_order_key,
                 {
@@ -842,12 +843,13 @@ def api_overview():
 
             width_val = _to_float(reel.format_width)
             length_val = _to_float(reel.format_length)
+            heatmap_key = (job_display, order_display or SENTINEL_NONE)
             if (
-                job_display not in job_heatmap_dims
+                heatmap_key not in job_heatmap_dims
                 and width_val is not None
                 and length_val is not None
             ):
-                job_heatmap_dims[job_display] = {
+                job_heatmap_dims[heatmap_key] = {
                     "format_width": width_val,
                     "format_length": length_val,
                 }
@@ -869,11 +871,12 @@ def api_overview():
                     if job_name:
                         jobs_defects[job_name] += 1
                     if defect.coords_json:
-                        job_heatmap_records[job_display].append(
+                        job_heatmap_records[heatmap_key].append(
                             {
                                 "coords": defect.coords_json,
                                 "magnitude_value": _to_float(defect.magnitude_value),
                                 "severity_value": _to_float(defect.severity_value),
+                                "order": order_display,
                             }
                         )
                     record_event(
@@ -1197,8 +1200,6 @@ def api_overview():
 
         for job_name in job_set:
             display = job_label(job_name)
-            job_heatmap_records.setdefault(display, [])
-            job_heatmap_dims.setdefault(display, {"format_width": None, "format_length": None})
             job_reference_latest.setdefault(display, {"time": None, "images": []})
 
         job_metrics_payload: List[Dict[str, object]] = []
@@ -1228,24 +1229,25 @@ def api_overview():
             )
 
         job_heatmap_payload: List[Dict[str, Any]] = []
-        for job, entries in sorted(job_heatmap_records.items()):
-            dims = job_heatmap_dims.get(job) or {}
-        refs = (job_reference_latest.get(job) or {}).get("images", [])
-        first_ref = None
-        for ref in refs:
-            if ref.get("image_src"):
-                first_ref = ref["image_src"]
-                break
-        job_heatmap_payload.append(
-            {
-                "job": job,
-                "format_width": dims.get("format_width"),
-                "format_length": dims.get("format_length"),
-                "defects": entries,
-                "reference_images": refs,
-                "reference_background": first_ref,
-            }
-        )
+        for (job_display, order_key), entries in sorted(job_heatmap_records.items()):
+            dims = job_heatmap_dims.get((job_display, order_key)) or {}
+            refs = (job_reference_latest.get(job_display) or {}).get("images", [])
+            first_ref = None
+            for ref in refs:
+                if ref.get("image_src"):
+                    first_ref = ref["image_src"]
+                    break
+            job_heatmap_payload.append(
+                {
+                    "job": job_display,
+                    "order": None if order_key == SENTINEL_NONE else order_key,
+                    "format_width": dims.get("format_width"),
+                    "format_length": dims.get("format_length"),
+                    "defects": entries,
+                    "reference_images": refs,
+                    "reference_background": first_ref,
+                }
+            )
 
         response = {
             "kpis": {

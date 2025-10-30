@@ -923,6 +923,7 @@
     let refreshOptionsQueued = false;
 
     const scheduleEmit = Utils.debounce(() => emit(false), FETCH_DEBOUNCE_MS);
+    let firstEmit = true;
     const scheduleOptionsRefresh = Utils.debounce(() => refreshOptions(), 200);
 
     function init() {
@@ -1067,7 +1068,12 @@
         default:
           break;
       }
-      scheduleEmit();
+      if (firstEmit) {
+        firstEmit = false;
+        emit(false);
+      } else {
+        scheduleEmit();
+      }
     }
 
     async function refreshOptions(initial = false) {
@@ -1971,17 +1977,22 @@
 
       const filters = Filters.getState();
       const activeJobRaw = (filters.job || "").trim();
-      if (!activeJobRaw) {
+      const activeOrderRaw = (filters.order || "").trim();
+      if (!activeJobRaw && !activeOrderRaw) {
         heatmapState.jobs = [];
         heatmapState.selectedJob = "";
         heatmapContainer.innerHTML =
-          "<div class=\"heatmap-wrapper heatmap-empty heatmap-notice\"><span class='badge'>Select a job to view the heatmap.</span></div>";
+          `<div class="heatmap-wrapper heatmap-empty heatmap-notice"><span class='badge'>Select a job or order to view the heatmap.</span></div>`;
         return;
+
+
       }
 
-      const activeDisplay = activeJobRaw || "Unassigned";
+      const activeDisplayJob = activeJobRaw || "Unassigned";
+      const activeDisplayOrder = activeOrderRaw || null;
       const normalized = (jobHeatmaps || []).map((job) => ({
         job: job.job || "Unassigned",
+        order: job.order || ORDER_NONE,
         format_width: job.format_width,
         format_length: job.format_length,
         defects: job.defects || [],
@@ -1989,19 +2000,27 @@
         reference_background: job.reference_background || null,
       }));
 
-      const selectedEntry =
-        normalized.find((job) => job.job === activeDisplay) ||
-        normalized.find((job) => job.job.toLowerCase() === activeDisplay.toLowerCase());
+      const matches = normalized.filter((job) => {
+        const jobMatch = job.job === activeDisplayJob || job.job.toLowerCase() === activeDisplayJob.toLowerCase();
+        const orderMatch = activeDisplayOrder
+          ? activeDisplayOrder === ORDER_NONE
+            ? job.order === ORDER_NONE
+            : (job.order || ORDER_NONE) === activeDisplayOrder
+          : true;
+        return jobMatch && orderMatch;
+      });
 
-      if (!selectedEntry) {
+      if (!matches.length) {
         heatmapState.jobs = [];
-        heatmapState.selectedJob = activeDisplay;
+        heatmapState.selectedJob = activeDisplayJob;
         heatmapContainer.innerHTML =
-          `<div class=\"heatmap-wrapper heatmap-empty heatmap-notice\"><span class='badge'>No defect coordinates for ${activeDisplay} in this window.</span></div>`;
+          `<div class="heatmap-wrapper heatmap-empty heatmap-notice"><span class='badge'>No defect coordinates for ${activeDisplayJob}${activeDisplayOrder ? ` / ${activeDisplayOrder}` : ""} in this window.</span></div>`;
         return;
       }
 
-      heatmapState.jobs = [selectedEntry];
+      const selectedEntry = matches[0];
+
+      heatmapState.jobs = matches;
       heatmapState.selectedJob = selectedEntry.job;
 
       const slug = slugifyJob(selectedEntry.job);
@@ -3700,48 +3719,71 @@ function extractRlmMetrics(config) {
 
   document.addEventListener("DOMContentLoaded", init);
 
+  function updateModalMetaDisplay(sourceElement, index, total) {
+    const meta = document.getElementById("modalMeta");
+    if (!meta) return;
+    const label =
+      (sourceElement && (sourceElement.dataset.label || sourceElement.getAttribute("alt"))) || "";
+    const hasTotal = Number.isFinite(total) && total > 0;
+    const hasIndex = Number.isFinite(index) && index >= 0;
+    const counter = hasTotal && hasIndex ? `${index + 1} / ${total}` : "";
+    const displayParts = [];
+    if (counter) displayParts.push(counter);
+    if (label) displayParts.push(label);
+    const display = displayParts.join(" · ");
+    meta.textContent = display || label || counter || "";
+  }
+
   window.showImageModal = function showImageModal(src, element) {
     const modal = document.getElementById("imageModal");
     const img = document.getElementById("modalImage");
-    const meta = document.getElementById("modalMeta");
     if (!modal || !img) return;
     img.src = src;
     const cells = Array.from(document.querySelectorAll("#defectTable tbody td img"));
-    const index = cells.findIndex((cell) => cell === element);
-    img.dataset.index = index >= 0 ? String(index) : "";
-    if (meta) {
-      const label = element && element.dataset.label ? element.dataset.label : element?.alt || "";
-      const counter = index >= 0 ? `${index + 1} / ${cells.length}` : "";
-      const display = [counter, label].filter(Boolean).join(" · ") || element?.alt || "Image";
-      meta.textContent = display;
+    let index = element ? cells.findIndex((cell) => cell === element) : -1;
+    if (index < 0) {
+      index = cells.findIndex((cell) => cell && cell.src === img.src);
     }
-    modal.style.display = "block";
+    img.dataset.index = index >= 0 ? String(index) : "";
+    updateModalMetaDisplay(
+      element || (index >= 0 ? cells[index] : null),
+      index,
+      cells.length
+    );
+    modal.classList.add("show");
   };
 
   window.closeModal = function closeModal() {
     const modal = document.getElementById("imageModal");
     const img = document.getElementById("modalImage");
-    if (modal) modal.style.display = "none";
+    const meta = document.getElementById("modalMeta");
+    if (modal) modal.classList.remove("show");
     if (img) {
       img.src = "";
       img.dataset.index = "";
+    }
+    if (meta) {
+      meta.textContent = "";
     }
   };
 
   document.addEventListener("keydown", (event) => {
     const modal = document.getElementById("imageModal");
     const img = document.getElementById("modalImage");
-    if (!modal || !img || modal.style.display !== "block") return;
-    const currentIndex = Number(img.dataset.index);
-    if (Number.isNaN(currentIndex) || currentIndex < 0) return;
+    if (!modal || !img || !modal.classList.contains("show")) return;
+    let currentIndex = Number(img.dataset.index);
     const cells = Array.from(document.querySelectorAll("#defectTable tbody td img"));
     if (!cells.length) return;
+    if (Number.isNaN(currentIndex) || currentIndex < 0) {
+      currentIndex = 0;
+    }
     if (event.key === "ArrowRight") {
       const nextIndex = (currentIndex + 1) % cells.length;
       const nextImg = cells[nextIndex];
       if (nextImg) {
         img.src = nextImg.src;
         img.dataset.index = String(nextIndex);
+        updateModalMetaDisplay(nextImg, nextIndex, cells.length);
       }
     } else if (event.key === "ArrowLeft") {
       const prevIndex = (currentIndex - 1 + cells.length) % cells.length;
@@ -3749,6 +3791,7 @@ function extractRlmMetrics(config) {
       if (prevImg) {
         img.src = prevImg.src;
         img.dataset.index = String(prevIndex);
+        updateModalMetaDisplay(prevImg, prevIndex, cells.length);
       }
     }
   });
