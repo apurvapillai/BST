@@ -3518,9 +3518,11 @@ function extractRlmMetrics(config) {
               <td>
                 ${
                   row.image_src
-                    ? `<img src="${urlForStatic(row.image_src)}" alt="defect" onclick="showImageModal('${urlForStatic(
-                  row.image_src
-                )}')" loading="lazy" decoding="async">`
+                    ? `<img src="${urlForStatic(row.image_src)}" alt="defect" data-label="${[row.job_name, row.order_number, row.defect_time]
+                        .filter(Boolean)
+                        .join(" · ")}" data-index="${row.defect_id || ""}" onclick="showImageModal('${urlForStatic(
+                        row.image_src
+                      )}', this)" loading="lazy" decoding="async">`
                     : ""
                 }
               </td>
@@ -3698,9 +3700,10 @@ function extractRlmMetrics(config) {
 
   document.addEventListener("DOMContentLoaded", init);
 
-  window.showImageModal = function showImageModal(src) {
+  window.showImageModal = function showImageModal(src, element) {
     const modal = document.getElementById("imageModal");
     const img = document.getElementById("modalImage");
+    const meta = document.getElementById("modalMeta");
     if (!modal || !img) return;
     img.src = src;
     const cells = Array.from(document.querySelectorAll("#defectTable tbody td img"));
