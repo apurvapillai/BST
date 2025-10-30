@@ -2638,6 +2638,7 @@
       if (!detailEl) return;
       const cached = summaryCache.get(reelId);
       if (cached) {
+        ensureReferenceBackground(cached);
         detailEl.innerHTML = buildSummary(cached);
         attachGalleryListeners(detailEl);
         attachSummaryActions(detailEl);
@@ -2653,6 +2654,7 @@
       LoadingOverlay.show();
       try {
         const summary = await Api.get(`reel/${reelId}/summary`);
+        ensureReferenceBackground(summary);
         summaryCache.set(reelId, summary);
         if (state.selectedReelId !== reelId) return;
         detailEl.innerHTML = buildSummary(summary);
@@ -2668,6 +2670,16 @@
       } finally {
         LoadingOverlay.hide();
       }
+    }
+
+    function ensureReferenceBackground(summary) {
+      if (!summary || summary.reference_background || summary.referenceBackground) return;
+      const images = Array.isArray(summary.reference_images) ? summary.reference_images : [];
+      const first = images.find((img) => img && img.image_src);
+      if (!first) return;
+      const url = urlForStatic(first.image_src);
+      summary.reference_background = url;
+      summary.referenceBackground = url;
     }
 
     function buildSummary(data) {
