@@ -3703,6 +3703,9 @@ function extractRlmMetrics(config) {
     const img = document.getElementById("modalImage");
     if (!modal || !img) return;
     img.src = src;
+    const cells = Array.from(document.querySelectorAll("#defectTable tbody td img"));
+    const index = cells.findIndex((cell) => cell.src === img.src);
+    img.dataset.index = index >= 0 ? String(index) : "";
     modal.style.display = "block";
   };
 
@@ -3710,6 +3713,34 @@ function extractRlmMetrics(config) {
     const modal = document.getElementById("imageModal");
     const img = document.getElementById("modalImage");
     if (modal) modal.style.display = "none";
-    if (img) img.src = "";
+    if (img) {
+      img.src = "";
+      img.dataset.index = "";
+    }
   };
+
+  document.addEventListener("keydown", (event) => {
+    const modal = document.getElementById("imageModal");
+    const img = document.getElementById("modalImage");
+    if (!modal || !img || modal.style.display !== "block") return;
+    const currentIndex = Number(img.dataset.index);
+    if (Number.isNaN(currentIndex) || currentIndex < 0) return;
+    const cells = Array.from(document.querySelectorAll("#defectTable tbody td img"));
+    if (!cells.length) return;
+    if (event.key === "ArrowRight") {
+      const nextIndex = (currentIndex + 1) % cells.length;
+      const nextImg = cells[nextIndex];
+      if (nextImg) {
+        img.src = nextImg.src;
+        img.dataset.index = String(nextIndex);
+      }
+    } else if (event.key === "ArrowLeft") {
+      const prevIndex = (currentIndex - 1 + cells.length) % cells.length;
+      const prevImg = cells[prevIndex];
+      if (prevImg) {
+        img.src = prevImg.src;
+        img.dataset.index = String(prevIndex);
+      }
+    }
+  });
 })();
