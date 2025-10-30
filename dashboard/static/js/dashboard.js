@@ -3707,8 +3707,14 @@ function extractRlmMetrics(config) {
     if (!modal || !img) return;
     img.src = src;
     const cells = Array.from(document.querySelectorAll("#defectTable tbody td img"));
-    const index = cells.findIndex((cell) => cell.src === img.src);
+    const index = cells.findIndex((cell) => cell === element);
     img.dataset.index = index >= 0 ? String(index) : "";
+    if (meta) {
+      const label = element && element.dataset.label ? element.dataset.label : element?.alt || "";
+      const counter = index >= 0 ? `${index + 1} / ${cells.length}` : "";
+      const display = [counter, label].filter(Boolean).join(" · ") || element?.alt || "Image";
+      meta.textContent = display;
+    }
     modal.style.display = "block";
   };
 
