@@ -1123,3 +1123,10 @@ body {
 #defectTable thead th:last-child {
   text-align: center;
 }
+
+
+#modalMeta {
+  margin-bottom: 12px;
+  font-size: 14px;
+  color: #0f172a;
+}
