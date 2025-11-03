@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from flask import Blueprint, jsonify, render_template, request
-from sqlalchemy import and_, case, exists, false, func, or_, text
+from sqlalchemy import and_, case, exists, false, func, literal, or_, text
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from db.connection import SessionLocal
@@ -1490,6 +1490,50 @@ def api_job_explorer():
         page, page_size = _paginate()
         base_query = _apply_reel_filters(session.query(Reel), filters, include_reel_code=False)
 
+        raw_status_filters = request.args.getlist("review_status")
+        valid_statuses = {"pass", "fail", "uninspected"}
+        status_filter = None
+        for raw_value in raw_status_filters:
+            normalized = (raw_value or "").strip().lower()
+            if normalized in valid_statuses:
+                status_filter = normalized
+                break
+
+        REVIEW_DECISION_COLLATION = "utf8mb4_unicode_ci"
+        review_code_expr = ReelReview.reel_code.collate(REVIEW_DECISION_COLLATION)
+        latest_review_subq = (
+            session.query(
+                review_code_expr.label("lrr_code"),
+                func.max(ReelReview.review_id).label("lrr_review_id"),
+            )
+            .group_by(review_code_expr)
+            .subquery()
+        )
+
+        base_query = (
+            base_query.outerjoin(
+                latest_review_subq,
+                Reel.reel_code.collate(REVIEW_DECISION_COLLATION) == latest_review_subq.c.lrr_code,
+            )
+            .outerjoin(
+                ReelReview,
+                ReelReview.review_id == latest_review_subq.c.lrr_review_id,
+            )
+        )
+
+        if status_filter == "pass":
+            base_query = base_query.filter(
+                ReelReview.decision.collate(REVIEW_DECISION_COLLATION)
+                == literal("pass").collate(REVIEW_DECISION_COLLATION)
+            )
+        elif status_filter == "fail":
+            base_query = base_query.filter(
+                ReelReview.decision.collate(REVIEW_DECISION_COLLATION)
+                == literal("fail").collate(REVIEW_DECISION_COLLATION)
+            )
+        elif status_filter == "uninspected":
+            base_query = base_query.filter(latest_review_subq.c.lrr_review_id.is_(None))
+
         total = base_query.count()
         reels = (
             base_query.order_by(Reel.time_start.desc())
@@ -1621,6 +1665,14 @@ def api_job_explorer():
                 if _defect_within_window(d, filters["start"], filters["end"])
             ]
 
+            latest_review_obj = reel_code_to_review.get(reel.reel_code or "")
+            serialized_review = _serialize_review(latest_review_obj)
+            if serialized_review:
+                decision_value = (serialized_review.get("decision") or "").lower()
+                review_status = "pass" if decision_value == "pass" else "fail"
+            else:
+                review_status = "uninspected"
+
             item = {
                 "reel_id": reel.reel_id,
                 "reel_code": reel.reel_code,
@@ -1645,7 +1697,8 @@ def api_job_explorer():
                 "defect_types": len({d.class_name for d in defects_visible if d.class_name}),
                 "phase_mix_pct": phase_mix_pct,
                 "active_inspection_pct": active_inspection_pct,
-                "review": _serialize_review(reel_code_to_review.get(reel.reel_code or "")),
+                "review": serialized_review,
+                "review_status": review_status,
             }
             items.append(item)
 

@@ -318,6 +318,7 @@ body {
   border-radius: 10px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .job-list-toolbar label {
@@ -330,6 +331,38 @@ body {
   padding: 6px 10px;
   border-radius: 6px;
   border: 1px solid #cbd5e1;
+}
+
+.job-review-filters {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.job-review-filters label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  font-size: 13px;
+  color: #475569;
+  cursor: pointer;
+}
+
+.job-review-filters input[type="checkbox"] {
+  accent-color: #1f7aec;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.job-review-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #64748b;
 }
 
 .reel-list {

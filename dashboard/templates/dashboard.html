@@ -180,6 +180,25 @@
                 <option value="active_pct_asc">Lowest active inspection %</option>
               </select>
             </div>
+            <div class="job-review-filters" id="jobReviewFilters">
+              <span class="job-review-label">Review</span>
+              <label>
+                <input type="checkbox" id="jobStatusAll" checked>
+                <span>All</span>
+              </label>
+              <label>
+                <input type="checkbox" id="jobStatusPass" data-status="pass">
+                <span>Pass</span>
+              </label>
+              <label>
+                <input type="checkbox" id="jobStatusFail" data-status="fail">
+                <span>Fail</span>
+              </label>
+              <label>
+                <input type="checkbox" id="jobStatusUninspected" data-status="uninspected">
+                <span>Uninspected</span>
+              </label>
+            </div>
             <div class="pagination" id="jobPagination"></div>
           </div>
           <div id="jobReelList" class="reel-list"></div>
