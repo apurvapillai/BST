@@ -2566,19 +2566,28 @@
     let detailEl;
     let paginationEl;
     let sortSelect;
+    let statusFilterRoot;
+    const statusCheckboxes = {};
+    let statusUpdating = false;
+    const REVIEW_STATUS_VALUES = ["pass", "fail", "uninspected"];
     let state = {
       page: 1,
       selectedReelId: null,
       sort: "time",
       cachedItems: [],
       pageInfo: null,
+      reviewStatus: null,
     };
     const summaryCache = new Map();
 
     const load = Utils.debounce(async () => {
       LoadingOverlay.show();
       try {
-        const data = await Api.get("job-explorer", { page: state.page });
+        const params = { page: state.page };
+        if (state.reviewStatus) {
+          params.review_status = state.reviewStatus;
+        }
+        const data = await Api.get("job-explorer", params);
         state.cachedItems = applySort(data.items || []);
         state.pageInfo = data.page_info || null;
         renderList();
@@ -2596,6 +2605,7 @@
       detailEl = Utils.qs("#jobDetail");
       paginationEl = Utils.qs("#jobPagination");
       sortSelect = Utils.qs("#jobSort");
+      statusFilterRoot = Utils.qs("#jobReviewFilters");
 
       if (sortSelect) {
         sortSelect.addEventListener("change", () => {
@@ -2603,6 +2613,22 @@
           state.page = 1;
           load.flush();
         });
+      }
+
+      if (statusFilterRoot) {
+        statusCheckboxes.all = Utils.qs("#jobStatusAll");
+        statusCheckboxes.pass = Utils.qs("#jobStatusPass");
+        statusCheckboxes.fail = Utils.qs("#jobStatusFail");
+        statusCheckboxes.uninspected = Utils.qs("#jobStatusUninspected");
+
+        Object.entries(statusCheckboxes).forEach(([key, input]) => {
+          if (!input) return;
+          input.addEventListener("change", () => {
+            if (statusUpdating) return;
+            handleStatusChange(key);
+          });
+        });
+        updateStatusFilterUI();
       }
     }
 
@@ -2613,6 +2639,33 @@
     function onFiltersUpdated() {
       state.page = 1;
       load();
+    }
+
+    function handleStatusChange(key) {
+      if (key === "all") {
+        state.reviewStatus = null;
+      } else {
+        const input = statusCheckboxes[key];
+        if (!input) return;
+        state.reviewStatus = input.checked ? key : null;
+      }
+      updateStatusFilterUI();
+      state.page = 1;
+      load.flush();
+    }
+
+    function updateStatusFilterUI() {
+      statusUpdating = true;
+      const active = state.reviewStatus;
+      if (statusCheckboxes.all) {
+        statusCheckboxes.all.checked = !active;
+      }
+      REVIEW_STATUS_VALUES.forEach((value) => {
+        const input = statusCheckboxes[value];
+        if (!input) return;
+        input.checked = active === value;
+      });
+      statusUpdating = false;
     }
 
     function applySort(items) {
@@ -2910,6 +2963,7 @@
         const decision = String(review.decision).toLowerCase();
         const decisionLabel = decision === "pass" ? "Passed" : "Failed";
         const metaPieces = [];
+        const reviewerLabel = review.reviewer_name || review.reviewer_id;
         if (reviewerLabel) {
           metaPieces.push(`by ${Utils.escapeHtml(reviewerLabel)}`);
         }
@@ -3482,9 +3536,13 @@ function extractRlmMetrics(config) {
           }
           const index = state.cachedItems.findIndex((item) => item.reel_id === state.selectedReelId);
           if (index !== -1) {
+            const reviewStatusValue = latestReview && latestReview.decision
+              ? (String(latestReview.decision).toLowerCase() === "pass" ? "pass" : "fail")
+              : "uninspected";
             state.cachedItems[index] = {
               ...state.cachedItems[index],
               review: latestReview,
+              review_status: reviewStatusValue,
             };
           }
         }
@@ -3497,6 +3555,7 @@ function extractRlmMetrics(config) {
         if (shouldClose) {
           closeReviewForm(host);
           renderList();
+          load.flush();
         }
       }
     }
