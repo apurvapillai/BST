@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from sqlalchemy import (
     Column,
     Integer,
@@ -64,6 +66,7 @@ class Reel(Base):
     rlm_config = relationship("RLMConfig", back_populates="reel", uselist=False, cascade="all, delete-orphan")
     rlm_phases = relationship("RLMPhase", back_populates="reel", cascade="all, delete-orphan")
     rlm_monitoring = relationship("RLMMonitoring", back_populates="reel", cascade="all, delete-orphan")
+    reviews = relationship("ReelReview", back_populates="reel", cascade="all, delete-orphan")
 
 
 # -----------------------
@@ -203,3 +206,22 @@ class RLMMonitoring(Base):
     webspeed = Column(DECIMAL(10, 3))
 
     reel = relationship("Reel", back_populates="rlm_monitoring")
+
+
+# -----------------------
+# ReelReview
+# -----------------------
+class ReelReview(Base):
+    __tablename__ = "reel_reviews"
+
+    review_id = Column(Integer, primary_key=True, autoincrement=True)
+    reel_id = Column(Integer, ForeignKey("reels.reel_id", ondelete="CASCADE"), index=True, nullable=True)
+    reel_code = Column(String(50), index=True, nullable=False)
+    decision = Column(String(16), nullable=False)
+    reviewer_id = Column(String(100), nullable=False)
+    comments = Column(Text)
+    extra_data = Column(JSON)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    reel = relationship("Reel", back_populates="reviews")

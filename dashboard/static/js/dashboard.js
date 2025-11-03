@@ -83,6 +83,15 @@
       total.textContent = `${pageInfo.total} results`;
       container.appendChild(total);
     },
+    escapeHtml(value) {
+      if (value === null || value === undefined) return "";
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    },
   };
 
   const ORDER_NONE = "__NONE__";
@@ -1513,6 +1522,34 @@
       }
       return data;
     },
+    async post(endpoint, body = {}) {
+      const url = new URL(`/dashboard/api/${endpoint}`, window.location.origin);
+      const response = await fetch(url.toString(), {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body || {}),
+      });
+      let data = null;
+      try {
+        data = await response.json();
+      } catch (err) {
+        // ignore parse error for empty responses
+      }
+      if (!response.ok) {
+        let message = response.statusText || `Request failed (${response.status})`;
+        if (data && typeof data.error === "string") {
+          message = data.error;
+        }
+        throw new Error(message);
+      }
+      if (data && typeof data.error === "string") {
+        throw new Error(data.error);
+      }
+      return data;
+    },
   };
 
   const Router = (() => {
@@ -2590,15 +2627,20 @@
         case "defects":
           sorted.sort((a, b) => (b.defect_count || 0) - (a.defect_count || 0));
           break;
-        case "drift":
-          sorted.sort((a, b) => (b.rlm_config_drift?.length || 0) - (a.rlm_config_drift?.length || 0));
+        case "defects_least":
+          sorted.sort((a, b) => (a.defect_count || 0) - (b.defect_count || 0));
           break;
-        case "rlm_off":
-          sorted.sort((a, b) => {
-            const aEnabled = a.rlm_enabled ? 1 : 0;
-            const bEnabled = b.rlm_enabled ? 1 : 0;
-            return aEnabled - bEnabled || ((b.defect_count || 0) - (a.defect_count || 0));
-          });
+        case "rlm_points_desc":
+          sorted.sort((a, b) => (b.rlm_monitor_count || 0) - (a.rlm_monitor_count || 0));
+          break;
+        case "rlm_points_asc":
+          sorted.sort((a, b) => (a.rlm_monitor_count || 0) - (b.rlm_monitor_count || 0));
+          break;
+        case "active_pct_desc":
+          sorted.sort((a, b) => (b.active_inspection_pct || 0) - (a.active_inspection_pct || 0));
+          break;
+        case "active_pct_asc":
+          sorted.sort((a, b) => (a.active_inspection_pct || 0) - (b.active_inspection_pct || 0));
           break;
         default:
           sorted.sort((a, b) => {
@@ -2653,9 +2695,16 @@
         if (item.reel_code && selectedSet.has(item.reel_code)) {
           card.classList.add("reviewed");
         }
-        if ((item.ref_change_count || 0) > 1) {
+        const reviewDecision =
+          item.review && item.review.decision
+            ? String(item.review.decision).toLowerCase()
+            : "";
+        if (reviewDecision === "pass") {
+          card.classList.add("pass");
+        } else if (reviewDecision === "fail") {
           card.classList.add("alert");
         }
+        const reviewBadge = renderReviewBadge(item.review);
 
         card.innerHTML = `
           <div class="reel-header">
@@ -2680,6 +2729,7 @@
             ${item.sens_standard_changed ? '<span class="badge warn">Sensitivity drift</span>' : ""}
             ${item.rlm_enabled ? '<span class="badge success">RLM enabled</span>' : '<span class="badge danger">RLM disabled</span>'}
             ${item.reel_code && selectedSet.has(item.reel_code) ? '<span class="badge review">In review</span>' : ""}
+            ${reviewBadge}
           </div>
         `;
 
@@ -2702,6 +2752,24 @@
             `<span class="phase-chip ${phase}">${phase}: ${Utils.formatNumber(pct || 0, 1)}%</span>`
         )
         .join("");
+    }
+
+    function renderReviewBadge(review) {
+      if (!review || !review.decision) return "";
+      const decision = String(review.decision).toLowerCase();
+      const isPass = decision === "pass";
+      const label = isPass ? "Passed" : "Failed";
+      const badgeClass = isPass ? "success" : "danger";
+      const details = [];
+      const reviewerLabel = review.reviewer_name || review.reviewer_id;
+      if (reviewerLabel) {
+        details.push(`Reviewer: ${reviewerLabel}`);
+      }
+      if (review.created_at) {
+        details.push(`At: ${formatTime(review.created_at)}`);
+      }
+      const title = details.length ? ` title="${Utils.escapeHtml(details.join(" | "))}"` : "";
+      return `<span class="badge ${badgeClass} review-pill"${title}>${label}</span>`;
     }
 
     function renderThumbs(images) {
@@ -2815,6 +2883,7 @@
       const defects = data.defects || [];
       const defectsWithCoords = defects.filter((defect) => Array.isArray(defect.coords) && defect.coords.length);
       const defectsSummary = data.defects_summary || { total: 0, types: 0 };
+      const review = data.review || null;
       const reelMeters =
         typeof reel.reel_start === "number" && typeof reel.reel_end === "number"
           ? reel.reel_end - reel.reel_start
@@ -2825,6 +2894,44 @@
             inReview ? "In review" : "Add to review"
           }</button>`
         : "";
+      const reviewBadge = renderReviewBadge(review);
+      const isPassActive = review && String(review.decision).toLowerCase() === "pass";
+      const isFailActive = review && String(review.decision).toLowerCase() === "fail";
+      const reviewControls = inReview
+        ? `<div class="review-controls" data-review-controls>
+             <button class="review-action review-action--pass${isPassActive ? " is-active" : ""}" data-review-action="pass">Pass</button>
+             <button class="review-action review-action--fail${isFailActive ? " is-active" : ""}" data-review-action="fail">Fail</button>
+           </div>`
+        : "";
+      const reviewSummaryBlock = (() => {
+        if (!review) {
+          return "<span class='badge'>No review decision recorded.</span>";
+        }
+        const decision = String(review.decision).toLowerCase();
+        const decisionLabel = decision === "pass" ? "Passed" : "Failed";
+        const metaPieces = [];
+        if (reviewerLabel) {
+          metaPieces.push(`by ${Utils.escapeHtml(reviewerLabel)}`);
+        }
+        if (review.created_at) {
+          metaPieces.push(`on ${Utils.escapeHtml(formatTime(review.created_at))}`);
+        }
+        const metaHtml = metaPieces.length ? `<span class="review-summary-meta">${metaPieces.join(" &middot; ")}</span>` : "";
+        const commentsHtml = review.comments
+          ? `<div class="review-summary-comments">"${Utils.escapeHtml(review.comments)}"</div>`
+          : "";
+        const lineClass = decision === "pass" ? "review-summary-line pass" : "review-summary-line fail";
+        return `
+          <div class="review-summary">
+            <div class="${lineClass}">
+              <span class="review-summary-decision">${decisionLabel}</span>
+              ${metaHtml}
+            </div>
+            ${commentsHtml}
+          </div>
+        `;
+      })();
+      const reviewFormHost = `<div class="review-form-host" data-review-form-host></div>`;
 
       const phaseTimeline = renderTimeline(phases, "Inspection timeline");
       const rlmPhaseTimeline =
@@ -2949,7 +3056,13 @@
       return `
         <div class="summary-header">
           <div>
-            <div class="summary-title">${reel.reel_code || "Reel"}</div>
+            <div class="summary-title-row">
+              <div class="summary-title">
+                ${reel.reel_code || "Reel"}
+                ${reviewBadge || ""}
+              </div>
+              ${reviewControls || ""}
+            </div>
             <div class="summary-metadata">
               <span>${reel.job_name || "No Job"}</span>
               <span>${reel.order_number || "No Order"}</span>
@@ -2962,6 +3075,12 @@
             <span>Format: ${Utils.formatNumber(reel.format_length, 2)} × ${Utils.formatNumber(reel.format_width, 2)}</span>
             ${addButton}
           </div>
+        </div>
+
+        ${reviewFormHost}
+        <div class="summary-section summary-section--review">
+          <h4>Review</h4>
+          ${reviewSummaryBlock}
         </div>
 
         <div class="summary-section summary-section--defects">
@@ -3191,41 +3310,195 @@ function extractRlmMetrics(config) {
 
     function attachSummaryActions(scope) {
       if (!scope) return;
-      const button = scope.querySelector("[data-add-reel]");
-      if (!button) return;
-      const reelCode = button.dataset.addReel || "";
-      const isAlreadySelected = reelCode && Filters.getReelCodes().includes(reelCode);
-      if (isAlreadySelected) {
-        button.disabled = true;
-        button.textContent = "In review";
-      }
-      button.addEventListener("click", () => {
-        if (!reelCode) return;
-        const summary = summaryCache.get(state.selectedReelId) || null;
-        if (summary && summary.reel) {
-          const { job_name: jobName, order_number: orderNumber } = summary.reel;
-          const { job: currentJob, order: currentOrder } = Filters.getState();
-          const updates = {};
-          if (!currentOrder || currentOrder === ORDER_NONE) {
-            if (orderNumber) {
-              updates.order = orderNumber;
-            } else if (!currentOrder) {
-              updates.order = ORDER_NONE;
-            }
-            if (!currentJob && jobName) {
+      const addButton = scope.querySelector("[data-add-reel]");
+      if (addButton) {
+        const reelCode = addButton.dataset.addReel || "";
+        const isAlreadySelected = reelCode && Filters.getReelCodes().includes(reelCode);
+        if (isAlreadySelected) {
+          addButton.disabled = true;
+          addButton.textContent = "In review";
+        }
+        addButton.addEventListener("click", () => {
+          if (!reelCode) return;
+          const summary = summaryCache.get(state.selectedReelId) || null;
+          if (summary && summary.reel) {
+            const { job_name: jobName, order_number: orderNumber } = summary.reel;
+            const { job: currentJob, order: currentOrder } = Filters.getState();
+            const updates = {};
+            if (!currentOrder || currentOrder === ORDER_NONE) {
+              if (orderNumber) {
+                updates.order = orderNumber;
+              } else if (!currentOrder) {
+                updates.order = ORDER_NONE;
+              }
+              if (!currentJob && jobName) {
+                updates.job = jobName;
+              }
+            } else if (!currentJob && jobName && orderNumber) {
               updates.job = jobName;
             }
-          } else if (!currentJob && jobName && orderNumber) {
-            updates.job = jobName;
+            if (Object.keys(updates).length) {
+              Filters.setMany(updates, { emit: true });
+            }
           }
-          if (Object.keys(updates).length) {
-            Filters.setMany(updates, { emit: true });
+          Filters.addReel(reelCode);
+          addButton.disabled = true;
+          addButton.textContent = "In review";
+        });
+      }
+
+      scope.querySelectorAll("[data-review-action]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const decision = (button.dataset.reviewAction || "").toLowerCase();
+          if (!decision) return;
+          openReviewForm(decision, scope);
+        });
+      });
+    }
+
+    function openReviewForm(decision, scope) {
+      if (!scope) return;
+      const host = scope.querySelector("[data-review-form-host]");
+      if (!host) return;
+      const normalizedDecision = decision === "fail" ? "fail" : "pass";
+      const decisionLabel = normalizedDecision === "pass" ? "Pass" : "Fail";
+      const summary = summaryCache.get(state.selectedReelId) || {};
+      const existingReview = summary.review || null;
+      const reviewerPrefill =
+        existingReview && (existingReview.reviewer_name || existingReview.reviewer_id)
+          ? Utils.escapeHtml(existingReview.reviewer_name || existingReview.reviewer_id)
+          : "";
+      const suffix = state.selectedReelId || "reel";
+      host.innerHTML = `
+        <div class="review-form">
+          <div class="review-form-header">
+            <h5>${decisionLabel} Roll</h5>
+            <button type="button" class="review-form-close" data-review-cancel aria-label="Close review form">&times;</button>
+          </div>
+          <form data-review-form>
+            <div class="form-field">
+              <label for="reviewer-${suffix}">Reviewer Name</label>
+              <input type="text" id="reviewer-${suffix}" name="reviewer_name" value="${reviewerPrefill}" required>
+            </div>
+            <div class="form-field">
+              <label for="comments-${suffix}">Comments</label>
+              <textarea id="comments-${suffix}" name="comments" rows="3" placeholder="Optional"></textarea>
+            </div>
+            <div class="review-form-extra" data-review-extra></div>
+            <div class="review-form-error" data-review-error></div>
+            <div class="review-form-actions">
+              <button type="button" class="review-form-secondary" data-review-cancel>Cancel</button>
+              <button type="submit" class="review-form-primary">Submit ${decisionLabel}</button>
+            </div>
+          </form>
+        </div>
+      `;
+      const form = host.querySelector("[data-review-form]");
+      if (!form) return;
+      const cancelButtons = host.querySelectorAll("[data-review-cancel]");
+      cancelButtons.forEach((btn) =>
+        btn.addEventListener("click", () => {
+          closeReviewForm(host);
+        })
+      );
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        submitReviewDecision(normalizedDecision, form, host);
+      });
+      const reviewerInput = form.querySelector("[name='reviewer_name']");
+      if (reviewerInput) {
+        reviewerInput.focus();
+        reviewerInput.setSelectionRange(reviewerInput.value.length, reviewerInput.value.length);
+      }
+      host.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    function closeReviewForm(host) {
+      if (!host) return;
+      host.innerHTML = "";
+    }
+
+    function setReviewError(host, message) {
+      if (!host) return;
+      const errorEl = host.querySelector("[data-review-error]");
+      if (!errorEl) return;
+      errorEl.textContent = message || "";
+      errorEl.classList.toggle("visible", Boolean(message));
+    }
+
+    function setReviewFormLoading(form, isLoading) {
+      if (!form) return;
+      const wrapper = form.closest(".review-form");
+      if (wrapper) {
+        wrapper.classList.toggle("is-submitting", Boolean(isLoading));
+      }
+      const elements = form.querySelectorAll("input, textarea, button");
+      elements.forEach((el) => {
+        if (isLoading) {
+          el.setAttribute("disabled", "disabled");
+        } else {
+          el.removeAttribute("disabled");
+        }
+      });
+    }
+
+    async function submitReviewDecision(decision, form, host) {
+      if (!state.selectedReelId) {
+        setReviewError(host, "No reel selected.");
+        return;
+      }
+      const normalizedDecision = decision === "fail" ? "fail" : decision === "pass" ? "pass" : "";
+      if (!normalizedDecision) {
+        setReviewError(host, "Unsupported decision.");
+        return;
+      }
+      const reviewerField = form.querySelector("[name='reviewer_name']");
+      const commentsField = form.querySelector("[name='comments']");
+      const reviewer = reviewerField ? reviewerField.value.trim() : "";
+      if (!reviewer) {
+        setReviewError(host, "Reviewer name is required.");
+        if (reviewerField) {
+          reviewerField.focus();
+        }
+        return;
+      }
+      const comments = commentsField ? commentsField.value.trim() : "";
+      setReviewError(host, "");
+      setReviewFormLoading(form, true);
+      let shouldClose = false;
+      try {
+        const payload = {
+          decision: normalizedDecision,
+          reviewer_name: reviewer,
+          comments,
+        };
+        const response = await Api.post(`reel/${state.selectedReelId}/review`, payload);
+        const latestReview = response && response.review ? response.review : null;
+        if (latestReview) {
+          const summary = summaryCache.get(state.selectedReelId);
+          if (summary) {
+            summary.review = latestReview;
+            summaryCache.set(state.selectedReelId, summary);
+          }
+          const index = state.cachedItems.findIndex((item) => item.reel_id === state.selectedReelId);
+          if (index !== -1) {
+            state.cachedItems[index] = {
+              ...state.cachedItems[index],
+              review: latestReview,
+            };
           }
         }
-        Filters.addReel(reelCode);
-        button.disabled = true;
-        button.textContent = "In review";
-      });
+        shouldClose = true;
+      } catch (err) {
+        console.error("Failed to submit review decision", err);
+        setReviewError(host, err && err.message ? err.message : "Failed to save review decision.");
+      } finally {
+        setReviewFormLoading(form, false);
+        if (shouldClose) {
+          closeReviewForm(host);
+          renderList();
+        }
+      }
     }
 
     function formatRange(start, end) {
@@ -3970,10 +4243,10 @@ function extractRlmMetrics(config) {
           if (mask.timestamp) labelParts.push(formatTime(mask.timestamp));
           const label = labelParts.length ? labelParts.join(" · ") : `Mask ${index + 1}`;
           const coordsText = formatMaskCoords(mask.coords);
-          const display = coordsText ? escapeHtml(coordsText) : "—";
+          const display = coordsText ? Utils.escapeHtml(coordsText) : "—";
           return `
             <div class="mask-coords-row">
-              <span class="mask-coords-label">${escapeHtml(label)}</span>
+              <span class="mask-coords-label">${Utils.escapeHtml(label)}</span>
               <code>${display}</code>
             </div>
           `;
@@ -3990,15 +4263,6 @@ function extractRlmMetrics(config) {
       } catch (err) {
         return String(raw);
       }
-    }
-
-    function escapeHtml(value) {
-      return String(value)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
     }
 
     function formatTime(value) {

@@ -24,6 +24,7 @@ from db.models import (
     RLMMonitoring,
     RLMPhase,
     SensitivitySet,
+    ReelReview,
 )
 
 
@@ -68,6 +69,24 @@ def _to_float(value: Optional[Decimal]) -> Optional[float]:
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:
     return dt.isoformat() if dt else None
+
+
+def _serialize_review(review: Optional[ReelReview]) -> Optional[Dict[str, object]]:
+    if not review:
+        return None
+    extra = review.extra_data if isinstance(review.extra_data, dict) else review.extra_data
+    reviewer_value = review.reviewer_id
+    return {
+        "review_id": review.review_id,
+        "reel_code": review.reel_code,
+        "decision": review.decision,
+        "reviewer_id": reviewer_value,
+        "reviewer_name": reviewer_value,
+        "comments": review.comments or "",
+        "extra_data": extra or {},
+        "created_at": _iso(review.created_at),
+        "updated_at": _iso(review.updated_at),
+    }
 
 
 def _parse_datetime(raw: Optional[str]) -> Optional[datetime]:
@@ -183,6 +202,21 @@ def _matches_size_ranges(coords_data, ranges: List[Tuple[float, float]]) -> bool
             if math.isinf(upper) or area <= upper:
                 return True
     return False
+
+
+def _defect_within_window(
+    defect: Defect,
+    window_start: Optional[datetime],
+    window_end: Optional[datetime],
+) -> bool:
+    timestamp = getattr(defect, "defect_time", None)
+    if timestamp is None:
+        return True
+    if window_start and timestamp < window_start:
+        return False
+    if window_end and timestamp > window_end:
+        return False
+    return True
 
 
 def _validate_filters(session: Session) -> Dict[str, Optional[str]]:
@@ -388,16 +422,15 @@ def _defect_buckets(
     total = 0
 
     for defect in defects:
-        if not defect.defect_time:
-            continue
-        if defect.defect_time < window_start or defect.defect_time > window_end:
+        if not _defect_within_window(defect, window_start, window_end):
             continue
         total += 1
         if defect.class_name:
             by_type[defect.class_name] += 1
             unique_classes.add(defect.class_name)
-        bucket = defect.defect_time.replace(minute=0, second=0, microsecond=0)
-        trend[bucket] += 1
+        if defect.defect_time:
+            bucket = defect.defect_time.replace(minute=0, second=0, microsecond=0)
+            trend[bucket] += 1
 
     defects_by_type = [
         {"class": cls, "count": count}
@@ -982,18 +1015,27 @@ def api_overview():
 
             for defect in reel.defects or []:
                 defects.append(defect)
-                if defect.defect_time and window_start <= defect.defect_time <= window_end:
-                    if job_name:
-                        jobs_defects[job_name] += 1
-                    if defect.coords_json:
-                        job_heatmap_records[heatmap_key].append(
-                            {
-                                "coords": defect.coords_json,
-                                "magnitude_value": _to_float(defect.magnitude_value),
-                                "severity_value": _to_float(defect.severity_value),
-                                "order": order_display,
-                            }
-                        )
+                if not _defect_within_window(defect, window_start, window_end):
+                    continue
+                if job_name:
+                    jobs_defects[job_name] += 1
+                if defect.coords_json:
+                    job_heatmap_records[heatmap_key].append(
+                        {
+                            "coords": defect.coords_json,
+                            "magnitude_value": _to_float(defect.magnitude_value),
+                            "severity_value": _to_float(defect.severity_value),
+                            "order": order_display,
+                        }
+                    )
+                job_order_entry["defect_count"] += 1
+                job_summary_entry["defect_count"] += 1
+                if defect.class_name:
+                    cls_name = defect.class_name.strip()
+                    if cls_name:
+                        job_order_entry["defect_classes"][cls_name] += 1
+                        job_summary_entry["defect_classes"][cls_name] += 1
+                if defect.defect_time:
                     record_event(
                         job_name,
                         defect.defect_time,
@@ -1001,13 +1043,6 @@ def api_overview():
                         class_name=(defect.class_name or "").strip() or None,
                         reel_code=reel.reel_code,
                     )
-                    job_order_entry["defect_count"] += 1
-                    job_summary_entry["defect_count"] += 1
-                    if defect.class_name:
-                        cls_name = defect.class_name.strip()
-                        if cls_name:
-                            job_order_entry["defect_classes"][cls_name] += 1
-                            job_summary_entry["defect_classes"][cls_name] += 1
 
             _accumulate_phase_buckets(
                 state_buckets,
@@ -1474,6 +1509,19 @@ def api_job_explorer():
         )
 
         baseline_cache: Dict[Tuple[str, str], Optional[Reel]] = {}
+        reel_code_to_review: Dict[str, ReelReview] = {}
+        reel_codes = [reel.reel_code for reel in reels if reel and reel.reel_code]
+        if reel_codes:
+            review_rows = (
+                session.query(ReelReview)
+                .filter(ReelReview.reel_code.in_(reel_codes))
+                .order_by(ReelReview.reel_code.asc(), ReelReview.created_at.desc(), ReelReview.review_id.desc())
+                .all()
+            )
+            for review in review_rows:
+                code = review.reel_code
+                if code and code not in reel_code_to_review:
+                    reel_code_to_review[code] = review
         items: List[Dict[str, object]] = []
 
         for reel in reels:
@@ -1565,10 +1613,12 @@ def api_job_explorer():
                 for key, entry in phase_mix.items()
                 if total_phase_seconds
             }
+            active_inspection_pct = phase_mix_pct.get("active", 0.0) if phase_mix_pct else 0.0
 
-            defect_within_window = [
-                d for d in reel.defects or []
-                if d.defect_time and filters["start"] <= d.defect_time <= filters["end"]
+            defects_visible = [
+                d
+                for d in reel.defects or []
+                if _defect_within_window(d, filters["start"], filters["end"])
             ]
 
             item = {
@@ -1591,9 +1641,11 @@ def api_job_explorer():
                 "rlm_active_pct": rlm_active_pct,
                 "rlm_monitor_count": rlm_monitor_count,
                 "rlm_config_drift": rlm_drift,
-                "defect_count": len(defect_within_window),
-                "defect_types": len({d.class_name for d in defect_within_window if d.class_name}),
+                "defect_count": len(defects_visible),
+                "defect_types": len({d.class_name for d in defects_visible if d.class_name}),
                 "phase_mix_pct": phase_mix_pct,
+                "active_inspection_pct": active_inspection_pct,
+                "review": _serialize_review(reel_code_to_review.get(reel.reel_code or "")),
             }
             items.append(item)
 
@@ -1737,7 +1789,67 @@ def api_reel_summary(reel_id: int):
             "defects_summary": defects_summary,
             "defects": defects_payload,
         }
+        if reel.reel_code:
+            latest_review = (
+                session.query(ReelReview)
+                .filter(ReelReview.reel_code == reel.reel_code)
+                .order_by(ReelReview.created_at.desc(), ReelReview.review_id.desc())
+                .first()
+            )
+        else:
+            latest_review = None
+        response["review"] = _serialize_review(latest_review)
         return jsonify(response)
+
+
+@dashboard_bp.route("/api/reel/<int:reel_id>/review", methods=["GET", "POST"])
+def api_reel_review(reel_id: int):
+    with SessionLocal() as session:
+        reel = session.query(Reel).filter(Reel.reel_id == reel_id).first()
+        if not reel:
+            return jsonify({"error": "Reel not found"}), 404
+        if not reel.reel_code:
+            return jsonify({"error": "Reel has no reel_code"}), 400
+
+        if request.method == "GET":
+            reviews = (
+                session.query(ReelReview)
+                .filter(ReelReview.reel_code == reel.reel_code)
+                .order_by(ReelReview.created_at.desc(), ReelReview.review_id.desc())
+                .all()
+            )
+            serialized = [_serialize_review(review) for review in reviews if review]
+            latest = serialized[0] if serialized else None
+            return jsonify({"latest": latest, "history": serialized})
+
+        payload = request.get_json(silent=True) or {}
+        decision = (payload.get("decision") or "").strip().lower()
+        reviewer_name = (
+            payload.get("reviewer_name")
+            or payload.get("reviewer_id")
+            or ""
+        ).strip()
+        if decision not in {"pass", "fail"}:
+            return jsonify({"error": "Decision must be 'pass' or 'fail'."}), 400
+        if not reviewer_name:
+            return jsonify({"error": "Reviewer name is required."}), 400
+        comments = (payload.get("comments") or "").strip()
+        extra_data = payload.get("extra_data")
+        if extra_data is not None and not isinstance(extra_data, dict):
+            return jsonify({"error": "extra_data must be an object if provided."}), 400
+
+        review = ReelReview(
+            reel_id=reel.reel_id,
+            reel_code=reel.reel_code,
+            decision=decision,
+            reviewer_id=reviewer_name,
+            comments=comments or None,
+            extra_data=extra_data or None,
+        )
+        session.add(review)
+        session.commit()
+        session.refresh(review)
+        return jsonify({"review": _serialize_review(review)})
 
 
 def _build_defect_query(
@@ -1749,8 +1861,12 @@ def _build_defect_query(
 ):
     query = session.query(Defect).join(Reel, Defect.reel_id == Reel.reel_id)
     query = _apply_reel_filters(query, filters)
-    query = query.filter(Defect.defect_time >= filters["start"])
-    query = query.filter(Defect.defect_time <= filters["end"])
+    start = filters.get("start")
+    end = filters.get("end")
+    if start:
+        query = query.filter(or_(Defect.defect_time.is_(None), Defect.defect_time >= start))
+    if end:
+        query = query.filter(or_(Defect.defect_time.is_(None), Defect.defect_time <= end))
 
     if class_names:
         query = query.filter(Defect.class_name.in_(class_names))
@@ -1995,8 +2111,9 @@ def api_defects():
             .order_by(func.count().desc())
             .all()
         )
+        trend_query = base_query.filter(Defect.defect_time.isnot(None))
         trend = (
-            base_query.with_entities(
+            trend_query.with_entities(
                 func.date_format(Defect.defect_time, "%Y-%m-%d %H:00:00").label("bucket"),
                 func.count(),
             )
