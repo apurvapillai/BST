@@ -1465,7 +1465,48 @@
       }
     }
 
-    return { init, getState, onChange, set, setMany, addReel, removeReel, getReelCodes };
+    function promptJobSelection(targetTab) {
+      const jobCard = elements.job ? elements.job.closest(".filter-card") : null;
+      if (!jobCard) {
+        window.alert("Select a job before opening the Job Explorer or Defect Explorer.");
+        return;
+      }
+      const message =
+        targetTab === "defects"
+          ? "Select a job to access the Defect Explorer."
+          : "Select a job to access the Job Explorer.";
+      let hint = jobCard.querySelector(".job-required-hint");
+      if (!hint) {
+        hint = document.createElement("div");
+        hint.className = "job-required-hint";
+        jobCard.appendChild(hint);
+      }
+      hint.textContent = message;
+      hint.classList.add("visible");
+      jobCard.classList.add("filter-card--attention");
+      if (elements.job) {
+        elements.job.focus();
+      }
+      window.requestAnimationFrame(() => {
+        setTimeout(() => {
+          hint.classList.remove("visible");
+          jobCard.classList.remove("filter-card--attention");
+        }, 2600);
+      });
+    }
+
+    return {
+      init,
+      getState,
+      onChange,
+      set,
+      setMany,
+      addReel,
+      removeReel,
+      getReelCodes,
+      hasJobSelection: () => hasJobSelection(),
+      promptJobSelection,
+    };
   })();
 
   const RLM_METRIC_LABELS = {
@@ -1572,6 +1613,17 @@
 
     function setActive(name) {
       if (!tabs[name]) name = "overview";
+      const requiresJob = name === "job" || name === "defects";
+      if (
+        requiresJob &&
+        (!Filters.hasJobSelection || !Filters.hasJobSelection())
+      ) {
+        if (typeof Filters.promptJobSelection === "function") {
+          Filters.promptJobSelection(name);
+        }
+        revertHash();
+        return;
+      }
       if (active === name) return;
 
       const previous = active;
@@ -1588,6 +1640,14 @@
       if (tabs[active] && typeof tabs[active].activate === "function") {
         tabs[active].activate();
       }
+      const url = new URL(window.location.href);
+      if (url.hash !== `#${active}`) {
+        url.hash = `#${active}`;
+        history.replaceState({}, "", url.toString());
+      }
+    }
+
+    function revertHash() {
       const url = new URL(window.location.href);
       if (url.hash !== `#${active}`) {
         url.hash = `#${active}`;

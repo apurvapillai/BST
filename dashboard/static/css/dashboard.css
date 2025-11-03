@@ -133,6 +133,23 @@ body {
   pointer-events: none;
 }
 
+.filter-card--attention {
+  border-color: #f97316;
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.35);
+}
+
+.job-required-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #b45309;
+  font-weight: 600;
+  display: none;
+}
+
+.job-required-hint.visible {
+  display: block;
+}
+
 .filters select[multiple] {
   height: auto;
   min-height: 120px;
