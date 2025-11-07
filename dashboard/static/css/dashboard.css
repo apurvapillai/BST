@@ -1021,6 +1021,8 @@ body {
 .heatmap-legend-item input {
   margin-right: 8px;
   cursor: pointer;
+  min-width: 16px;
+  min-height: 16px;
 }
 
 .gallery {

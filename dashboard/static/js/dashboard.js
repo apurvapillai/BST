@@ -109,6 +109,27 @@
     stage: null,
   };
 
+  function isMobileViewport() {
+    return window.matchMedia("(max-width: 768px)").matches;
+  }
+
+  function withResponsiveLayout(layout) {
+    if (isMobileViewport()) {
+      return { ...layout, dragmode: "pan" };
+    }
+    return layout;
+  }
+
+  function plotlyConfig(overrides = {}) {
+    const mobile = isMobileViewport();
+    return {
+      responsive: true,
+      scrollZoom: !mobile,
+      doubleClick: mobile ? "reset" : "reset+autosize",
+      ...overrides,
+    };
+  }
+
   function buildDecisionBadge(decision) {
     const normalized = (decision || "").toLowerCase();
     if (normalized !== "pass" && normalized !== "fail") return "";
@@ -522,7 +543,7 @@
           : "no-data disabled";
         const avgMag = hasData && stats ? stats.magnitudeSum / defectTotal : 0;
         const avgSev = hasData && stats ? stats.severitySum / defectTotal : 0;
-        const countLabel = hasData ? `${defectTotal} defect${defectTotal === 1 ? "" : "s"}` : "0 defects";
+        const countLabel = `${defectTotal} defect${defectTotal === 1 ? "" : "s"}`;
         return `
           <label class="heatmap-legend-item ${itemClass}">
             <input type="checkbox" data-bucket="${bucket.key}" ${checkedAttr} ${checkboxDisabled}>
@@ -1880,11 +1901,11 @@
             hoverinfo: "label+percent+value",
           },
         ],
-        {
+        withResponsiveLayout({
           title: "Defects by Type",
           margin: { t: 50, l: 20, r: 20, b: 20 },
-        },
-        { responsive: true }
+        }),
+        plotlyConfig()
       );
 
       Plotly.react(
@@ -1898,12 +1919,12 @@
             line: { color: "#0f172a" },
           },
         ],
-        {
+        withResponsiveLayout({
           title: "Defects Trend",
           xaxis: { type: "date" },
           margin: { t: 40, l: 40, r: 20, b: 60 },
-        },
-        { responsive: true }
+        }),
+        plotlyConfig()
       );
 
       Plotly.react(
@@ -1989,7 +2010,7 @@
               yaxis: { visible: false },
               margin: { t: 60, l: 40, r: 20, b: 40 },
             },
-            { responsive: true, displayModeBar: false }
+            plotlyConfig({ displayModeBar: false })
           );
         } else {
           Plotly.react(
@@ -2006,7 +2027,7 @@
               title: "Defects per Job",
               margin: { t: 60, l: 50, r: 20, b: 80 },
             },
-            { responsive: true }
+            plotlyConfig()
           );
         }
         return;
@@ -2045,15 +2066,15 @@
         };
       });
 
-      const layout = {
+      const layout = withResponsiveLayout({
         title: "Defects per Job (Trend)",
         xaxis: { type: "date", title: "Time" },
         yaxis: { title: "Defects" },
         legend: { orientation: "h", x: 0, y: 1.1 },
         margin: { t: 70, l: 60, r: 20, b: 90 },
-      };
+      });
 
-      Plotly.react(containerId, traces, layout, { responsive: true });
+      Plotly.react(containerId, traces, layout, plotlyConfig());
     }
 
     function renderOperationsTimeline(events) {
@@ -2172,7 +2193,7 @@
         ],
       };
 
-      Plotly.react(containerId, traces, layout, { responsive: true, displayModeBar: false });
+      Plotly.react(containerId, traces, withResponsiveLayout(layout), plotlyConfig({ displayModeBar: false }));
     }
 
     function renderJobMetricCards(jobMetrics) {
