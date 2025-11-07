@@ -509,9 +509,17 @@
         const defectTotal = stats ? stats.defectTotal : 0;
         const hasData = defectTotal > 0;
         const toggledOff = state.disabledBuckets.has(bucket.key);
-        const checkboxDisabled = "";
-        const checkedAttr = !toggledOff ? "checked" : "";
-        const itemClass = toggledOff ? "disabled" : hasData ? "" : "no-data";
+        const checkboxDisabled = hasData ? "" : "disabled";
+        const checkedAttr = !hasData
+          ? ""
+          : !toggledOff
+          ? "checked"
+          : "";
+        const itemClass = hasData
+          ? toggledOff
+            ? "disabled"
+            : ""
+          : "no-data disabled";
         const avgMag = hasData && stats ? stats.magnitudeSum / defectTotal : 0;
         const avgSev = hasData && stats ? stats.severitySum / defectTotal : 0;
         const countLabel = hasData ? `${defectTotal} defect${defectTotal === 1 ? "" : "s"}` : "0 defects";
@@ -528,7 +536,6 @@
 
       legendEl.innerHTML = html;
       legendEl.querySelectorAll('input[type="checkbox"]').forEach((input) => {
-        if (input.disabled) return;
         input.addEventListener("change", (event) => {
           const bucketKey = event.target.dataset.bucket;
           if (!bucketKey) return;

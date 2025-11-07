@@ -1014,6 +1014,10 @@ body {
   opacity: 0.45;
 }
 
+.heatmap-legend-item.no-data {
+  opacity: 0.3;
+}
+
 .heatmap-legend-item input {
   margin-right: 8px;
   cursor: pointer;
