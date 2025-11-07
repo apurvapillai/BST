@@ -508,13 +508,10 @@
         const stats = statsMap.get(bucket.key);
         const defectTotal = stats ? stats.defectTotal : 0;
         const hasData = defectTotal > 0;
-        if (!hasData) {
-          state.disabledBuckets.delete(bucket.key);
-        }
         const toggledOff = state.disabledBuckets.has(bucket.key);
-        const checkboxDisabled = hasData ? "" : "disabled";
-        const checkedAttr = hasData && !toggledOff ? "checked" : "";
-        const itemClass = !hasData || toggledOff ? "disabled" : "";
+        const checkboxDisabled = "";
+        const checkedAttr = !toggledOff ? "checked" : "";
+        const itemClass = toggledOff ? "disabled" : hasData ? "" : "no-data";
         const avgMag = hasData && stats ? stats.magnitudeSum / defectTotal : 0;
         const avgSev = hasData && stats ? stats.severitySum / defectTotal : 0;
         const countLabel = hasData ? `${defectTotal} defect${defectTotal === 1 ? "" : "s"}` : "0 defects";

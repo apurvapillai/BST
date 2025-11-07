@@ -1641,8 +1641,8 @@ body {
 
 #footprintModal .closeBtn {
   position: absolute;
-  top: -14px;
-  right: -14px;
+  top: -18px;
+  right: 12px;
   color: #fff;
   font-size: 34px;
   font-weight: bold;
