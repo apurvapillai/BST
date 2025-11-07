@@ -10,11 +10,37 @@
   <!-- Image Modal -->
   <div id="imageModal">
     <span class="closeBtn" onclick="closeModal()">&times;</span>
+    <div id="modalDecisionBar" class="hidden">
+      <div class="modal-decision-actions">
+        <button type="button" class="defect-decision-btn defect-decision-btn-pass" id="modalDecisionPass">Pass</button>
+        <button type="button" class="defect-decision-btn defect-decision-btn-fail" id="modalDecisionFail">Fail</button>
+      </div>
+      <div id="modalDecisionStatus"></div>
+    </div>
     <img id="modalImage" alt="Defect preview">
-    <div id="modalMetaBar">
+    <div id="modalMetaBar" class="hidden">
       <button type="button" class="modal-nav-btn" id="modalPrevButton" aria-label="Previous image">&#10094;</button>
       <div id="modalMeta"></div>
       <button type="button" class="modal-nav-btn" id="modalNextButton" aria-label="Next image">&#10095;</button>
+    </div>
+  </div>
+
+  <div id="footprintModal">
+    <div class="footprint-modal-content">
+      <span class="closeBtn" onclick="closeFootprintModal()">&times;</span>
+      <div class="footprint-modal-header">
+        <h3 id="footprintModalTitle">Footprint Preview</h3>
+      </div>
+      <div class="footprint-modal-body" id="footprintModalBody">
+        <div id="footprintModalCanvas"></div>
+      </div>
+      <div class="footprint-modal-footer">
+        <div class="footprint-modal-actions">
+          <button type="button" class="footprint-zoom-btn" id="footprintZoomOut" aria-label="Zoom out">−</button>
+          <button type="button" class="footprint-zoom-btn" id="footprintZoomReset" aria-label="Reset zoom">100%</button>
+          <button type="button" class="footprint-zoom-btn" id="footprintZoomIn" aria-label="Zoom in">+</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -276,13 +302,23 @@
 
       <div class="defect-footprints-grid">
         <div class="defect-footprint">
-          <h4>Defect Heatmap</h4>
+          <div class="defect-footprint-header">
+            <h4>Defect Heatmap</h4>
+            <button type="button" class="footprint-expand-btn" data-footprint-target="heatmap-defect-explorer" data-footprint-title="Defect Heatmap" aria-label="Open full screen">
+              ⤢
+            </button>
+          </div>
           <div class="heatmap-wrapper heatmap-empty" id="heatmap-defect-explorer">
             <span class="badge">Load defects to view footprints.</span>
           </div>
         </div>
         <div class="defect-footprint">
-          <h4>Mask Footprints</h4>
+          <div class="defect-footprint-header">
+            <h4>Mask Footprints</h4>
+            <button type="button" class="footprint-expand-btn" data-footprint-target="mask-heatmap-defect-explorer" data-footprint-title="Mask Footprints" aria-label="Open full screen">
+              ⤢
+            </button>
+          </div>
           <div class="heatmap-wrapper heatmap-empty" id="mask-heatmap-defect-explorer">
             <span class="badge">No mask data for current filters.</span>
           </div>
@@ -292,25 +328,46 @@
         <div class="heatmap-legend heatmap-legend-job" id="heatmap-defect-explorer-legend"></div>
       </div>
 
+      <div class="defect-decision-summary" id="defectDecisionSummary">
+        <div class="defect-decision-card total">
+          <span>Total Defects</span>
+          <strong data-decision-total>--</strong>
+        </div>
+        <div class="defect-decision-card pass">
+          <span>Total Pass</span>
+          <strong data-decision-pass>--</strong>
+        </div>
+        <div class="defect-decision-card fail">
+          <span>Total Fail</span>
+          <strong data-decision-fail>--</strong>
+        </div>
+        <div class="defect-decision-card pending">
+          <span>Unidentified</span>
+          <strong data-decision-unidentified>--</strong>
+        </div>
+      </div>
+
       <div class="table-wrapper defect-table-section">
         <h4 class="defect-table-title">Defect Records</h4>
-        <table id="defectTable">
-          <thead>
-            <tr>
-              <th>Reel Code</th>
-              <th>Time</th>
-              <th>Order</th>
-              <th>Job</th>
-              <th>Type</th>
-              <th>Magnitude</th>
-              <th>Severity</th>
-              <th>Position</th>
-              <th>Image</th>
-              <th>Pass/Fail</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+        <div class="defect-table-scroll">
+          <table id="defectTable">
+            <thead>
+              <tr>
+                <th>Reel Code</th>
+                <th>Time</th>
+                <th>Order</th>
+                <th>Job</th>
+                <th>Type</th>
+                <th>Magnitude</th>
+                <th>Severity</th>
+                <th>Position</th>
+                <th>Image</th>
+                <th>Pass/Fail</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
       <div class="pagination" id="defectPagination"></div>
     </section>

@@ -1250,8 +1250,13 @@ body {
   background: #fff;
   border-radius: 10px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-  overflow-x: auto;
   margin-bottom: 16px;
+}
+
+.defect-table-scroll {
+  max-height: 600px;
+  overflow-y: auto;
+  overflow-x: auto;
 }
 
 .table-wrapper h4{
@@ -1334,6 +1339,8 @@ body {
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
+  background: rgba(148, 163, 184, 0.2);
+  color: #475569;
 }
 
 .defect-decision-badge-pass {
@@ -1403,6 +1410,8 @@ body {
   border: 4px solid #fff;
   border-radius: 10px;
   box-shadow: 0 0 16px rgba(0, 0, 0, 0.6);
+  transform-origin: center;
+  transition: transform 0.12s ease;
 }
 
 #imageModal .closeBtn {
@@ -1483,6 +1492,20 @@ body {
 .defect-footprints-inline .defect-footprint {
   flex: 1 1 0;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.defect-footprints-inline .defect-footprint .heatmap-wrapper,
+.defect-footprints-grid .defect-footprint .heatmap-wrapper {
+  align-self: center;
+}
+
+.defect-footprints-grid .defect-footprint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .defect-footprint-legends {
@@ -1500,6 +1523,34 @@ body {
   gap: 18px;
 }
 
+.defect-footprint-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.footprint-expand-btn {
+  border: none;
+  background: #1d4ed8;
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.footprint-expand-btn:hover {
+  background: #1e40af;
+}
+
+.footprint-expand-btn:active {
+  transform: scale(0.96);
+}
+
 .defect-footprints-grid .legend-span {
   grid-column: 1 / -1;
 }
@@ -1515,6 +1566,164 @@ body {
 .defect-footprints-legend-grid .heatmap-legend {
   grid-column: 1 / -1;
   margin-top: 0;
+}
+
+.defect-decision-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin: 20px 0;
+}
+
+.defect-decision-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px 20px;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+  border: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.defect-decision-card span {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #64748b;
+}
+
+.defect-decision-card strong {
+  font-size: 24px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.defect-decision-card.pass strong {
+  color: #16a34a;
+}
+
+.defect-decision-card.fail strong {
+  color: #dc2626;
+}
+
+.defect-decision-card.pending strong {
+  color: #f59e0b;
+}
+
+.footprint-placeholder {
+  border-radius: 12px;
+  background: #e2e8f0;
+  min-height: 200px;
+}
+
+#footprintModal {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.8);
+  z-index: 1100;
+  padding: 32px;
+}
+
+#footprintModal.show {
+  display: flex;
+}
+
+.footprint-modal-content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+#footprintModal .closeBtn {
+  position: absolute;
+  top: -14px;
+  right: -14px;
+  color: #fff;
+  font-size: 34px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.footprint-modal-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+  color: #f8fafc;
+  text-align: center;
+  padding: 0 8px;
+}
+
+.footprint-modal-header h3 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.footprint-modal-footer {
+  margin-top: 16px;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.footprint-modal-actions {
+  display: inline-flex;
+  flex-direction: row;
+  gap: 10px;
+  background: rgba(15, 23, 42, 0.45);
+  padding: 10px 16px;
+  border-radius: 999px;
+  box-shadow: 0 12px 25px rgba(15, 23, 42, 0.35);
+}
+
+.footprint-zoom-btn {
+  border: none;
+  background: rgba(255, 255, 255, 0.9);
+  color: #0f172a;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-weight: 600;
+  cursor: pointer;
+  min-width: 48px;
+}
+
+.footprint-modal-body {
+  background: #fff;
+  border-radius: 16px;
+  padding: 16px;
+  width: min(1200px, 95vw);
+  height: min(820px, 85vh);
+  overflow: auto;
+  box-shadow: 0 25px 60px rgba(15, 23, 42, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#footprintModalCanvas {
+  min-width: 600px;
+  min-height: 400px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.footprint-modal-stage {
+  transform-origin: center;
+  transition: transform 0.12s ease;
+}
+
+#footprintModalCanvas .heatmap-wrapper,
+#footprintModalCanvas .heatmap-gallery,
+#footprintModalCanvas .heatmap-stack {
+  max-width: none;
 }
 
 
@@ -1550,6 +1759,10 @@ body {
   padding: 10px 12px;
   text-align: center;
   letter-spacing: 0.4px;
+  position: sticky;
+  top: 0;
+  background: #e7f0ff;
+  z-index: 1;
 }
 
 #defectTable tbody tr:nth-child(even) {
@@ -1610,6 +1823,29 @@ body {
   max-height: 80vh;
   border-radius: 12px;
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.35);
+}
+
+#modalDecisionBar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  background: rgba(15, 23, 42, 0.4);
+  padding: 10px 16px;
+  border-radius: 999px;
+  backdrop-filter: blur(4px);
+}
+
+#modalDecisionBar .defect-decision-btn {
+  box-shadow: none;
+}
+
+#modalDecisionStatus {
+  min-width: 80px;
+  text-align: center;
+  color: #f8fafc;
+  font-weight: 600;
+  font-size: 14px;
 }
 
 #modalMetaBar {

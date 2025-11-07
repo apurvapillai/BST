@@ -95,6 +95,48 @@
   };
 
   const ORDER_NONE = "__NONE__";
+  const MODAL_SCALE_STEP = 0.12;
+  const MODAL_MIN_SCALE = 0.5;
+  const MODAL_MAX_SCALE = 4;
+  const FOOTPRINT_SCALE_STEP = 0.12;
+  const FOOTPRINT_MIN_SCALE = 0.4;
+  const FOOTPRINT_MAX_SCALE = 3;
+  let modalImageScale = 1;
+  let footprintModalScale = 1;
+  const footprintModalState = {
+    source: null,
+    placeholder: null,
+    stage: null,
+  };
+
+  function buildDecisionBadge(decision) {
+    const normalized = (decision || "").toLowerCase();
+    if (normalized !== "pass" && normalized !== "fail") return "";
+    const label = normalized === "pass" ? "Pass" : "Fail";
+    return `<span class="defect-decision-badge defect-decision-badge-${normalized}">${label}</span>`;
+  }
+
+  function buildDecisionButtons(decision) {
+    const normalized = (decision || "").toLowerCase();
+    return `
+      <div class="defect-decision-actions">
+        <button type="button" class="defect-decision-btn defect-decision-btn-pass${
+          normalized === "pass" ? " is-selected" : ""
+        }" data-defect-decision="pass">Pass</button>
+        <button type="button" class="defect-decision-btn defect-decision-btn-fail${
+          normalized === "fail" ? " is-selected" : ""
+        }" data-defect-decision="fail">Fail</button>
+      </div>
+    `;
+  }
+
+  function buildDecisionCellContent(decision, editing) {
+    const normalized = (decision || "").toLowerCase();
+    if (editing || !normalized) {
+      return buildDecisionButtons(normalized);
+    }
+    return buildDecisionBadge(normalized);
+  }
 
   const backgroundImageCache = new Map();
 
@@ -1640,6 +1682,7 @@
       if (tabs[active] && typeof tabs[active].activate === "function") {
         tabs[active].activate();
       }
+      syncModalMetaBarVisibility();
       const url = new URL(window.location.href);
       if (url.hash !== `#${active}`) {
         url.hash = `#${active}`;
@@ -3652,6 +3695,10 @@ function extractRlmMetrics(config) {
     let paginationEl;
     let summaryTotalEl;
     let summaryTypesEl;
+    let decisionTotalEl;
+    let decisionPassEl;
+    let decisionFailEl;
+    let decisionUnidentifiedEl;
     let tabScope;
     let chipsEl;
     let updating = false;
@@ -3826,6 +3873,7 @@ function extractRlmMetrics(config) {
         renderSummary(data.page_info, byType);
         renderCharts(data, byType);
         renderFootprints(data);
+        renderDecisionSummary(data.decision_summary);
         renderTable(data.rows || []);
         renderPagination();
       } catch (err) {
@@ -3857,6 +3905,10 @@ function extractRlmMetrics(config) {
       paginationEl = Utils.qs("#defectPagination");
       summaryTotalEl = Utils.qs("[data-defect-total]");
       summaryTypesEl = Utils.qs("#defectSummaryTypes");
+      decisionTotalEl = Utils.qs("[data-decision-total]");
+      decisionPassEl = Utils.qs("[data-decision-pass]");
+      decisionFailEl = Utils.qs("[data-decision-fail]");
+      decisionUnidentifiedEl = Utils.qs("[data-decision-unidentified]");
       tabScope = Utils.qs("#tab-defects");
       chipsEl = Utils.qs("#defectLocalChips");
 
@@ -4235,33 +4287,18 @@ function extractRlmMetrics(config) {
       }
     }
 
-    function renderDecisionBadge(decision) {
-      const normalized = (decision || "").toLowerCase();
-      if (normalized !== "pass" && normalized !== "fail") return "";
-      const label = normalized === "pass" ? "Pass" : "Fail";
-      return `<span class="defect-decision-badge defect-decision-badge-${normalized}">${label}</span>`;
-    }
-
-    function renderDecisionButtons(decision) {
-      const normalized = (decision || "").toLowerCase();
-      return `
-        <div class="defect-decision-actions">
-          <button type="button" class="defect-decision-btn defect-decision-btn-pass${
-            normalized === "pass" ? " is-selected" : ""
-          }" data-defect-decision="pass">Pass</button>
-          <button type="button" class="defect-decision-btn defect-decision-btn-fail${
-            normalized === "fail" ? " is-selected" : ""
-          }" data-defect-decision="fail">Fail</button>
-        </div>
-      `;
-    }
-
-    function renderDecisionCellContent(decision, editing) {
-      const normalized = (decision || "").toLowerCase();
-      if (editing || !normalized) {
-        return renderDecisionButtons(normalized);
+    function renderDecisionSummary(summary) {
+      const data = summary || {};
+      const total = Number.isFinite(data.total) ? data.total : null;
+      const pass = Number.isFinite(data.pass) ? data.pass : null;
+      const fail = Number.isFinite(data.fail) ? data.fail : null;
+      const unidentified = Number.isFinite(data.unidentified) ? data.unidentified : null;
+      if (decisionTotalEl) decisionTotalEl.textContent = total === null ? "--" : Utils.formatNumber(total);
+      if (decisionPassEl) decisionPassEl.textContent = pass === null ? "--" : Utils.formatNumber(pass);
+      if (decisionFailEl) decisionFailEl.textContent = fail === null ? "--" : Utils.formatNumber(fail);
+      if (decisionUnidentifiedEl) {
+        decisionUnidentifiedEl.textContent = unidentified === null ? "--" : Utils.formatNumber(unidentified);
       }
-      return renderDecisionBadge(normalized);
     }
 
     function renderTable(rows) {
@@ -4287,14 +4324,15 @@ function extractRlmMetrics(config) {
                   row.image_src
                     ? `<img src="${urlForStatic(row.image_src)}" alt="defect" data-label="${[row.job_name, row.order_number, row.defect_time]
                         .filter(Boolean)
-                        .join(" · ")}" data-index="${row.defect_id || ""}" onclick="showImageModal('${urlForStatic(
+                        .join(" · ")}" data-index="${row.defect_id || ""}" data-defect-id="${row.defect_id || ""}" data-decision="${(row.qc_decision || "").toLowerCase()}"
+                        onclick="showImageModal('${urlForStatic(
                         row.image_src
                       )}', this)" loading="lazy" decoding="async">`
                     : ""
                 }
               </td>
               <td class="defect-decision-cell" data-defect-id="${row.defect_id || ""}" data-decision="${(row.qc_decision || "").toLowerCase()}">
-                ${renderDecisionCellContent(row.qc_decision, !row.qc_decision)}
+                ${buildDecisionCellContent(row.qc_decision, !row.qc_decision)}
               </td>
             </tr>
           `
@@ -4308,10 +4346,12 @@ function extractRlmMetrics(config) {
       cell.dataset.loading = "true";
       cell.classList.add("defect-decision-saving");
       try {
-        await Api.post(`defects/${defectId}/decision`, { decision: normalized });
-        cell.dataset.decision = normalized;
+        const persisted = await persistDefectDecision(defectId, normalized);
+        cell.dataset.decision = persisted;
         cell.dataset.editing = "false";
-        cell.innerHTML = renderDecisionBadge(normalized);
+        cell.innerHTML = buildDecisionBadge(persisted);
+        updateDefectImageDecision(defectId, persisted);
+        syncModalAfterDecision(defectId, persisted);
       } catch (error) {
         console.error("Failed to update defect decision", error);
         window.alert(
@@ -4320,7 +4360,7 @@ function extractRlmMetrics(config) {
           }`
         );
         cell.dataset.editing = "true";
-        cell.innerHTML = renderDecisionButtons(cell.dataset.decision || normalized);
+        cell.innerHTML = buildDecisionButtons(cell.dataset.decision || normalized);
       } finally {
         cell.dataset.loading = "false";
         cell.classList.remove("defect-decision-saving");
@@ -4343,7 +4383,7 @@ function extractRlmMetrics(config) {
       const current = (cell.dataset.decision || "").toLowerCase();
       if (!current) return;
       cell.dataset.editing = "true";
-      cell.innerHTML = renderDecisionButtons(current);
+      cell.innerHTML = buildDecisionButtons(current);
     }
 
     function renderPagination() {
@@ -4512,20 +4552,33 @@ function extractRlmMetrics(config) {
     Router.reloadActive();
   }
 
-  function bindModalNavButtons() {
+  function bindModalControls() {
     const prev = document.getElementById("modalPrevButton");
     const next = document.getElementById("modalNextButton");
+    const passBtn = document.getElementById("modalDecisionPass");
+    const failBtn = document.getElementById("modalDecisionFail");
     if (prev) {
       prev.addEventListener("click", () => cycleModalImage(-1));
     }
     if (next) {
       next.addEventListener("click", () => cycleModalImage(1));
     }
+    if (passBtn) {
+      passBtn.addEventListener("click", () => handleModalDecisionClick("pass"));
+    }
+    if (failBtn) {
+      failBtn.addEventListener("click", () => handleModalDecisionClick("fail"));
+    }
+    syncModalDecisionUI(null);
+    syncModalMetaBarVisibility();
   }
 
   function initializeApp() {
     init();
-    bindModalNavButtons();
+    bindModalControls();
+    bindModalZoom();
+    bindFootprintExpandButtons();
+    bindFootprintModalZoom();
   }
 
   document.addEventListener("DOMContentLoaded", initializeApp);
@@ -4545,6 +4598,265 @@ function extractRlmMetrics(config) {
     meta.textContent = display || label || counter || "";
   }
 
+  function isDefectTabActive() {
+    const tab = document.getElementById("tab-defects");
+    return Boolean(tab && !tab.classList.contains("hidden"));
+  }
+
+  function syncModalMetaBarVisibility() {
+    const modal = document.getElementById("imageModal");
+    const shouldShow =
+      Boolean(modal && modal.classList.contains("show")) && isDefectTabActive();
+    ["modalMetaBar", "modalDecisionBar"].forEach((id) => {
+      const bar = document.getElementById(id);
+      if (bar) {
+        bar.classList.toggle("hidden", !shouldShow);
+      }
+    });
+  }
+
+  function setModalImageScale(scale) {
+    modalImageScale = Math.min(MODAL_MAX_SCALE, Math.max(MODAL_MIN_SCALE, scale));
+    const img = document.getElementById("modalImage");
+    if (img) {
+      img.style.transform = `scale(${modalImageScale})`;
+    }
+  }
+
+  function resetModalImageScale() {
+    modalImageScale = 1;
+    const img = document.getElementById("modalImage");
+    if (img) {
+      img.style.transform = "scale(1)";
+    }
+  }
+
+  function bindModalZoom() {
+    const img = document.getElementById("modalImage");
+    if (!img) return;
+    img.addEventListener(
+      "wheel",
+      (event) => {
+        const modal = document.getElementById("imageModal");
+        if (!modal || !modal.classList.contains("show")) return;
+        event.preventDefault();
+        const delta = event.deltaY > 0 ? -MODAL_SCALE_STEP : MODAL_SCALE_STEP;
+        setModalImageScale(modalImageScale + delta);
+      },
+      { passive: false }
+    );
+  }
+
+  function setFootprintModalScale(scale) {
+    footprintModalScale = Math.min(FOOTPRINT_MAX_SCALE, Math.max(FOOTPRINT_MIN_SCALE, scale));
+    updateFootprintModalScale();
+  }
+
+  function updateFootprintModalScale() {
+    const stage = document.querySelector("#footprintModalCanvas .footprint-modal-stage");
+    if (stage) {
+      stage.style.transform = `scale(${footprintModalScale})`;
+    }
+  }
+
+  function resetFootprintModalScale() {
+    footprintModalScale = 1;
+    updateFootprintModalScale();
+  }
+
+  function bindFootprintModalZoom() {
+    const canvas = document.getElementById("footprintModalCanvas");
+    if (canvas) {
+      canvas.addEventListener(
+        "wheel",
+        (event) => {
+          const modal = document.getElementById("footprintModal");
+          if (!modal || !modal.classList.contains("show")) return;
+          event.preventDefault();
+          const delta = event.deltaY > 0 ? -FOOTPRINT_SCALE_STEP : FOOTPRINT_SCALE_STEP;
+          setFootprintModalScale(footprintModalScale + delta);
+        },
+        { passive: false }
+      );
+    }
+    const zoomIn = document.getElementById("footprintZoomIn");
+    const zoomOut = document.getElementById("footprintZoomOut");
+    const zoomReset = document.getElementById("footprintZoomReset");
+    if (zoomIn) {
+      zoomIn.addEventListener("click", () => setFootprintModalScale(footprintModalScale + FOOTPRINT_SCALE_STEP));
+    }
+    if (zoomOut) {
+      zoomOut.addEventListener("click", () => setFootprintModalScale(footprintModalScale - FOOTPRINT_SCALE_STEP));
+    }
+    if (zoomReset) {
+      zoomReset.addEventListener("click", () => resetFootprintModalScale());
+    }
+  }
+
+  function bindFootprintExpandButtons() {
+    Utils.qsa(".footprint-expand-btn").forEach((button) => {
+      button.addEventListener("click", () => {
+        const targetId = button.dataset.footprintTarget;
+        const title = button.dataset.footprintTitle || button.textContent || "Footprint Preview";
+        const target = targetId ? document.getElementById(targetId) : null;
+        if (!target) return;
+        openFootprintModal(target, title);
+      });
+    });
+  }
+
+  function openFootprintModal(sourceElement, title) {
+    if (!sourceElement) return;
+    closeFootprintModal();
+    const modal = document.getElementById("footprintModal");
+    const canvas = document.getElementById("footprintModalCanvas");
+    const titleEl = document.getElementById("footprintModalTitle");
+    if (!modal || !canvas) return;
+
+    const placeholder = document.createElement("div");
+    placeholder.className = "footprint-placeholder";
+    placeholder.style.minHeight = `${sourceElement.offsetHeight || 200}px`;
+    placeholder.style.minWidth = `${sourceElement.offsetWidth || sourceElement.clientWidth || 200}px`;
+    sourceElement.parentNode.insertBefore(placeholder, sourceElement);
+
+    const stage = document.createElement("div");
+    stage.className = "footprint-modal-stage";
+    stage.appendChild(sourceElement);
+
+    canvas.innerHTML = "";
+    canvas.appendChild(stage);
+
+    footprintModalState.source = sourceElement;
+    footprintModalState.placeholder = placeholder;
+    footprintModalState.stage = stage;
+    resetFootprintModalScale();
+
+    if (titleEl) {
+      titleEl.textContent = title || "Footprint Preview";
+    }
+    modal.classList.add("show");
+  }
+
+  function closeFootprintModal() {
+    const modal = document.getElementById("footprintModal");
+    if (modal) {
+      modal.classList.remove("show");
+    }
+    if (footprintModalState.source && footprintModalState.placeholder) {
+      footprintModalState.placeholder.parentNode.insertBefore(
+        footprintModalState.source,
+        footprintModalState.placeholder
+      );
+      footprintModalState.placeholder.remove();
+    }
+    if (footprintModalState.stage) {
+      footprintModalState.stage.remove();
+    }
+    const canvas = document.getElementById("footprintModalCanvas");
+    if (canvas) {
+      canvas.innerHTML = "";
+    }
+    footprintModalState.source = null;
+    footprintModalState.placeholder = null;
+    footprintModalState.stage = null;
+    footprintModalScale = 1;
+  }
+
+  window.closeFootprintModal = closeFootprintModal;
+
+  function syncModalDecisionUI(decision) {
+    const normalized = (decision || "").toLowerCase();
+    const passBtn = document.getElementById("modalDecisionPass");
+    const failBtn = document.getElementById("modalDecisionFail");
+    const status = document.getElementById("modalDecisionStatus");
+    if (passBtn) {
+      passBtn.classList.toggle("is-selected", normalized === "pass");
+    }
+    if (failBtn) {
+      failBtn.classList.toggle("is-selected", normalized === "fail");
+    }
+    if (status) {
+      if (normalized === "pass" || normalized === "fail") {
+        status.innerHTML = buildDecisionBadge(normalized);
+      } else {
+        status.innerHTML = "<span class=\"defect-decision-badge\">Pending</span>";
+      }
+    }
+  }
+
+  function updateTableDecisionCell(defectId, decision) {
+    const cell = document.querySelector(`.defect-decision-cell[data-defect-id="${defectId}"]`);
+    if (!cell) return;
+    const normalized = (decision || "").toLowerCase();
+    cell.dataset.decision = normalized;
+    cell.dataset.editing = "false";
+    cell.innerHTML = normalized ? buildDecisionBadge(normalized) : buildDecisionButtons("");
+  }
+
+  function updateDefectImageDecision(defectId, decision) {
+    const img = document.querySelector(
+      `#defectTable tbody td img[data-defect-id="${defectId}"]`
+    );
+    if (!img) return;
+    img.dataset.decision = (decision || "").toLowerCase();
+  }
+
+  function syncModalAfterDecision(defectId, decision) {
+    const modal = document.getElementById("imageModal");
+    if (!modal || !modal.classList.contains("show")) return;
+    if (String(modal.dataset.defectId || "") !== String(defectId)) return;
+    modal.dataset.decision = (decision || "").toLowerCase();
+    syncModalDecisionUI(decision);
+  }
+
+  async function persistDefectDecision(defectId, decision) {
+    const normalized = (decision || "").toLowerCase();
+    if (!defectId || (normalized !== "pass" && normalized !== "fail")) {
+      throw new Error("Decision must be 'pass' or 'fail'.");
+    }
+    await Api.post(`defects/${defectId}/decision`, { decision: normalized });
+    return normalized;
+  }
+
+  function applyModalSelection(element, index, total) {
+    updateModalMetaDisplay(element, index, total);
+    const modal = document.getElementById("imageModal");
+    if (!modal) return;
+    const defectId = element ? element.dataset.defectId || "" : "";
+    const decision = element ? element.dataset.decision || "" : "";
+    modal.dataset.defectId = defectId;
+    modal.dataset.decision = decision;
+    syncModalDecisionUI(decision);
+    syncModalMetaBarVisibility();
+  }
+
+  async function handleModalDecisionClick(decision) {
+    const modal = document.getElementById("imageModal");
+    if (!modal || !modal.classList.contains("show")) return;
+    const defectId = Number(modal.dataset.defectId);
+    if (!defectId) return;
+    const bar = document.getElementById("modalDecisionBar");
+    if (bar) {
+      bar.classList.add("defect-decision-saving");
+    }
+    try {
+      const persisted = await persistDefectDecision(defectId, decision);
+      modal.dataset.decision = persisted;
+      syncModalDecisionUI(persisted);
+      updateTableDecisionCell(defectId, persisted);
+      updateDefectImageDecision(defectId, persisted);
+    } catch (error) {
+      console.error("Failed to update defect decision", error);
+      window.alert(
+        `Failed to update decision: ${error && error.message ? error.message : "Unknown error"}`
+      );
+    } finally {
+      if (bar) {
+        bar.classList.remove("defect-decision-saving");
+      }
+    }
+  }
+
   function cycleModalImage(offset) {
     const modal = document.getElementById("imageModal");
     const img = document.getElementById("modalImage");
@@ -4560,13 +4872,15 @@ function extractRlmMetrics(config) {
     if (!nextImg) return;
     img.src = nextImg.src;
     img.dataset.index = String(nextIndex);
-    updateModalMetaDisplay(nextImg, nextIndex, cells.length);
+    resetModalImageScale();
+    applyModalSelection(nextImg, nextIndex, cells.length);
   }
 
   window.showImageModal = function showImageModal(src, element) {
     const modal = document.getElementById("imageModal");
     const img = document.getElementById("modalImage");
     if (!modal || !img) return;
+    resetModalImageScale();
     img.src = src;
     const cells = Array.from(document.querySelectorAll("#defectTable tbody td img"));
     let index = element ? cells.findIndex((cell) => cell === element) : -1;
@@ -4574,12 +4888,9 @@ function extractRlmMetrics(config) {
       index = cells.findIndex((cell) => cell && cell.src === img.src);
     }
     img.dataset.index = index >= 0 ? String(index) : "";
-    updateModalMetaDisplay(
-      element || (index >= 0 ? cells[index] : null),
-      index,
-      cells.length
-    );
+    applyModalSelection(element || (index >= 0 ? cells[index] : null), index, cells.length);
     modal.classList.add("show");
+    syncModalMetaBarVisibility();
   };
 
   window.closeModal = function closeModal() {
@@ -4594,9 +4905,30 @@ function extractRlmMetrics(config) {
     if (meta) {
       meta.textContent = "";
     }
+    resetModalImageScale();
+    syncModalDecisionUI(null);
+    if (modal) {
+      modal.dataset.defectId = "";
+      modal.dataset.decision = "";
+    }
+    syncModalMetaBarVisibility();
   };
 
   document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      const footprintModal = document.getElementById("footprintModal");
+      if (footprintModal && footprintModal.classList.contains("show")) {
+        closeFootprintModal();
+        event.preventDefault();
+        return;
+      }
+      const imageModal = document.getElementById("imageModal");
+      if (imageModal && imageModal.classList.contains("show")) {
+        closeModal();
+        event.preventDefault();
+        return;
+      }
+    }
     const modal = document.getElementById("imageModal");
     const img = document.getElementById("modalImage");
     if (!modal || !img || !modal.classList.contains("show")) return;

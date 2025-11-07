@@ -2234,6 +2234,25 @@ def api_defects():
             for bucket, count in position_rows
         ]
 
+        decision_rows = (
+            base_query.with_entities(Defect.qc_decision, func.count())
+            .group_by(Defect.qc_decision)
+            .all()
+        )
+        pass_count = 0
+        fail_count = 0
+        for decision_value, decision_total in decision_rows:
+            if not decision_value:
+                continue
+            normalized = str(decision_value).strip().lower()
+            if normalized == "pass":
+                pass_count += int(decision_total or 0)
+            elif normalized == "fail":
+                fail_count += int(decision_total or 0)
+        unidentified_count = int(total or 0) - pass_count - fail_count
+        if unidentified_count < 0:
+            unidentified_count = 0
+
         total_pages = (total + page_size - 1) // page_size if total else 1
         return jsonify(
             {
@@ -2253,6 +2272,12 @@ def api_defects():
                 "reference_images": reference_images,
                 "format_length": format_lengths[0] if format_lengths else None,
                 "format_width": format_widths[0] if format_widths else None,
+                "decision_summary": {
+                    "total": int(total or 0),
+                    "pass": pass_count,
+                    "fail": fail_count,
+                    "unidentified": unidentified_count,
+                },
                 "page_info": {
                     "page": page,
                     "page_size": page_size,
