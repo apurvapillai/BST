@@ -3831,7 +3831,7 @@ function extractRlmMetrics(config) {
       } catch (err) {
         console.error("Defect explorer load failed", err);
         if (tableBody) {
-          tableBody.innerHTML = `<tr><td colspan="12">Failed to load defects: ${err.message}</td></tr>`;
+          tableBody.innerHTML = `<tr><td colspan="10">Failed to load defects: ${err.message}</td></tr>`;
         }
       } finally {
         LoadingOverlay.hide();
@@ -4267,14 +4267,13 @@ function extractRlmMetrics(config) {
     function renderTable(rows) {
       if (!tableBody) return;
       if (!rows.length) {
-        tableBody.innerHTML = "<tr><td colspan='12'>No defects match the current filters.</td></tr>";
+        tableBody.innerHTML = "<tr><td colspan='10'>No defects match the current filters.</td></tr>";
         return;
       }
       tableBody.innerHTML = rows
         .map(
           (row) => `
             <tr>
-              <td>${row.reel_id || ""}</td>
               <td>${row.reel_code || ""}</td>
               <td>${formatTime(row.defect_time)}</td>
               <td>${row.order_number || ""}</td>
@@ -4283,7 +4282,6 @@ function extractRlmMetrics(config) {
               <td>${Utils.formatNumber(row.magnitude_value, 3)}</td>
               <td>${Utils.formatNumber(row.severity_value, 2)}</td>
               <td>${Utils.formatNumber(row.format_position, 1)}</td>
-              <td>${row.phase || ""}</td>
               <td>
                 ${
                   row.image_src
@@ -4514,7 +4512,23 @@ function extractRlmMetrics(config) {
     Router.reloadActive();
   }
 
-  document.addEventListener("DOMContentLoaded", init);
+  function bindModalNavButtons() {
+    const prev = document.getElementById("modalPrevButton");
+    const next = document.getElementById("modalNextButton");
+    if (prev) {
+      prev.addEventListener("click", () => cycleModalImage(-1));
+    }
+    if (next) {
+      next.addEventListener("click", () => cycleModalImage(1));
+    }
+  }
+
+  function initializeApp() {
+    init();
+    bindModalNavButtons();
+  }
+
+  document.addEventListener("DOMContentLoaded", initializeApp);
 
   function updateModalMetaDisplay(sourceElement, index, total) {
     const meta = document.getElementById("modalMeta");
@@ -4529,6 +4543,24 @@ function extractRlmMetrics(config) {
     if (label) displayParts.push(label);
     const display = displayParts.join(" · ");
     meta.textContent = display || label || counter || "";
+  }
+
+  function cycleModalImage(offset) {
+    const modal = document.getElementById("imageModal");
+    const img = document.getElementById("modalImage");
+    if (!modal || !img || !modal.classList.contains("show")) return;
+    const cells = Array.from(document.querySelectorAll("#defectTable tbody td img"));
+    if (!cells.length) return;
+    let currentIndex = Number(img.dataset.index);
+    if (Number.isNaN(currentIndex) || currentIndex < 0) {
+      currentIndex = 0;
+    }
+    const nextIndex = (currentIndex + offset + cells.length) % cells.length;
+    const nextImg = cells[nextIndex];
+    if (!nextImg) return;
+    img.src = nextImg.src;
+    img.dataset.index = String(nextIndex);
+    updateModalMetaDisplay(nextImg, nextIndex, cells.length);
   }
 
   window.showImageModal = function showImageModal(src, element) {
@@ -4568,28 +4600,12 @@ function extractRlmMetrics(config) {
     const modal = document.getElementById("imageModal");
     const img = document.getElementById("modalImage");
     if (!modal || !img || !modal.classList.contains("show")) return;
-    let currentIndex = Number(img.dataset.index);
-    const cells = Array.from(document.querySelectorAll("#defectTable tbody td img"));
-    if (!cells.length) return;
-    if (Number.isNaN(currentIndex) || currentIndex < 0) {
-      currentIndex = 0;
-    }
     if (event.key === "ArrowRight") {
-      const nextIndex = (currentIndex + 1) % cells.length;
-      const nextImg = cells[nextIndex];
-      if (nextImg) {
-        img.src = nextImg.src;
-        img.dataset.index = String(nextIndex);
-        updateModalMetaDisplay(nextImg, nextIndex, cells.length);
-      }
+      event.preventDefault();
+      cycleModalImage(1);
     } else if (event.key === "ArrowLeft") {
-      const prevIndex = (currentIndex - 1 + cells.length) % cells.length;
-      const prevImg = cells[prevIndex];
-      if (prevImg) {
-        img.src = prevImg.src;
-        img.dataset.index = String(prevIndex);
-        updateModalMetaDisplay(prevImg, prevIndex, cells.length);
-      }
+      event.preventDefault();
+      cycleModalImage(-1);
     }
   });
 })();

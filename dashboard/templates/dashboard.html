@@ -11,7 +11,11 @@
   <div id="imageModal">
     <span class="closeBtn" onclick="closeModal()">&times;</span>
     <img id="modalImage" alt="Defect preview">
-    <div id="modalMeta"></div>
+    <div id="modalMetaBar">
+      <button type="button" class="modal-nav-btn" id="modalPrevButton" aria-label="Previous image">&#10094;</button>
+      <div id="modalMeta"></div>
+      <button type="button" class="modal-nav-btn" id="modalNextButton" aria-label="Next image">&#10095;</button>
+    </div>
   </div>
 
   <div class="app-shell">
@@ -293,7 +297,6 @@
         <table id="defectTable">
           <thead>
             <tr>
-              <th>Reel ID</th>
               <th>Reel Code</th>
               <th>Time</th>
               <th>Order</th>
@@ -302,7 +305,6 @@
               <th>Magnitude</th>
               <th>Severity</th>
               <th>Position</th>
-              <th>Phase</th>
               <th>Image</th>
               <th>Pass/Fail</th>
             </tr>
