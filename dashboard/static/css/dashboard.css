@@ -111,6 +111,11 @@ body {
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+.filters input[type="datetime-local"] {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
 
 .filters select:disabled,
 .filters input:disabled {
