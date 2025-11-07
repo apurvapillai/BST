@@ -232,6 +232,20 @@
       return `heatmap-${id}`;
     }
 
+    function buildDefectKey(defect, fallbackIndex, reel) {
+      if (!defect) {
+        return `reel-${reel?.reel_id ?? "unknown"}-anon-${fallbackIndex}`;
+      }
+      if (defect.defect_key) {
+        return String(defect.defect_key);
+      }
+      const reelId = defect.reel_id ?? reel?.reel_id ?? "unknown";
+      if (defect.defect_id !== undefined && defect.defect_id !== null) {
+        return `reel-${reelId}-defect-${defect.defect_id}`;
+      }
+      return `reel-${reelId}-anon-${fallbackIndex}`;
+    }
+
     function attach(scope, summary) {
       if (!scope || !summary) return;
       const reel = summary.reel || {};
@@ -296,15 +310,17 @@
       }
 
       const aggregatesMap = new Map();
+      const defectBestBuckets = new Map();
       let globalMinX = Infinity;
       let globalMaxX = -Infinity;
       let globalMinY = Infinity;
       let globalMaxY = -Infinity;
 
-      defects.forEach((defect) => {
+      defects.forEach((defect, defectIndex) => {
         if (!Array.isArray(defect.coords)) return;
         const magnitude = Number(defect.magnitude_value) || 0;
         const severity = Number(defect.severity_value) || 0;
+        const defectKey = buildDefectKey(defect, defectIndex, reel);
         defect.coords.forEach((shape) => {
           const xs = Array.isArray(shape.x) ? shape.x.map(Number).filter((n) => Number.isFinite(n)) : [];
           const ys = Array.isArray(shape.y) ? shape.y.map(Number).filter((n) => Number.isFinite(n)) : [];
@@ -339,6 +355,10 @@
           entry.minY = Math.min(entry.minY, ...ys);
           entry.maxY = Math.max(entry.maxY, ...ys);
           entry.area = area;
+          const currentBest = defectBestBuckets.get(defectKey);
+          if (!currentBest || area > currentBest.area) {
+            defectBestBuckets.set(defectKey, { area, bucketKey: bucketForArea(area).key });
+          }
           globalMinX = Math.min(globalMinX, entry.minX);
           globalMaxX = Math.max(globalMaxX, entry.maxX);
           globalMinY = Math.min(globalMinY, entry.minY);
@@ -466,7 +486,6 @@
         agg.bucketKey = bucket.key;
         const stats = bucketStats.get(bucket.key);
         if (!stats) return;
-        stats.defectTotal += agg.count;
         stats.polygonCount += 1;
         stats.magnitudeSum += agg.magnitudeSum;
         stats.severitySum += agg.severitySum;
@@ -475,6 +494,19 @@
         stats.minY = Math.min(stats.minY, agg.minY);
         stats.maxY = Math.max(stats.maxY, agg.maxY);
         stats.areaSum += (agg.area || 0) * agg.count;
+      });
+
+      const bucketDefectSets = new Map(HEATMAP_BUCKETS.map((bucket) => [bucket.key, new Set()]));
+      defectBestBuckets.forEach((info, defectKey) => {
+        if (!info || !info.bucketKey) return;
+        const set = bucketDefectSets.get(info.bucketKey);
+        if (set) set.add(defectKey);
+      });
+      bucketDefectSets.forEach((set, key) => {
+        const stats = bucketStats.get(key);
+        if (stats) {
+          stats.defectTotal = set.size;
+        }
       });
 
       aggregates.forEach((agg) => {
@@ -527,7 +559,7 @@
       const statsMap = new Map((bucketStatsArray || []).map((entry) => [entry.bucket.key, entry]));
       const html = HEATMAP_BUCKETS.map((bucket) => {
         const stats = statsMap.get(bucket.key);
-        const defectTotal = stats ? stats.defectTotal : 0;
+        const defectTotal = stats ? stats.defectTotal || 0 : 0;
         const hasData = defectTotal > 0;
         const toggledOff = state.disabledBuckets.has(bucket.key);
         const checkboxDisabled = hasData ? "" : "disabled";
@@ -987,22 +1019,72 @@
       chips: Utils.qs("#activeFilterChips"),
     };
 
+    const reelOptionCache = new Map(); // reel_id -> { value, code, label }
+    const reelIdsByCode = new Map(); // reel_code -> [reel_id]
+    let pendingReelCodes = [];
+
+    function rememberReelOption(entry) {
+      if (!entry || !entry.value) return;
+      const id = String(entry.value);
+      const normalized = {
+        value: id,
+        code: entry.code || entry.reel_code || "",
+        label: entry.label || entry.reel_code || entry.code || `Reel ${id}`,
+      };
+      reelOptionCache.set(id, normalized);
+      if (normalized.code) {
+        const list = reelIdsByCode.get(normalized.code) || [];
+        if (!list.includes(id)) {
+          list.push(id);
+          reelIdsByCode.set(normalized.code, list);
+        }
+      }
+    }
+
+    function getSelectedReelEntries() {
+      return state.reel_ids.map((id) => {
+        const entry = reelOptionCache.get(id);
+        return {
+          id,
+          code: entry && entry.code ? entry.code : "",
+          label: entry && entry.label ? entry.label : entry && entry.code ? entry.code : `Reel ${id}`,
+        };
+      });
+    }
+
+    function hydratePendingReelIds() {
+      if (!pendingReelCodes.length || state.reel_ids.length) return;
+      const resolved = [];
+      pendingReelCodes.forEach((code) => {
+        const ids = reelIdsByCode.get(code) || [];
+        if (ids.length) {
+          resolved.push(ids[0]);
+        }
+      });
+      if (resolved.length) {
+        state.reel_ids = resolved;
+        pendingReelCodes = [];
+        syncReelSelect();
+        renderChips();
+      }
+    }
+
     const listeners = new Set();
     const defaults = {
       machine_id:
         (root && root.dataset.defaultMachine) ||
         (elements.machine ? elements.machine.value : ""),
       start:
-        (root && root.dataset.defaultStart) ||
+        (root && root.dataset.defaultStartDate) ||
         (elements.start ? elements.start.value : ""),
       end:
-        (root && root.dataset.defaultEnd) ||
+        (root && root.dataset.defaultEndDate) ||
         (elements.end ? elements.end.value : ""),
       job:
         (root && root.dataset.defaultJob) ||
         (elements.job ? elements.job.value : ""),
       order: "",
-      reel_codes: [],
+      reel_ids: [],
     };
     let state = {
       machine_id: defaults.machine_id,
@@ -1010,7 +1092,7 @@
       end: defaults.end,
       job: defaults.job,
       order: defaults.order,
-      reel_codes: [],
+      reel_ids: [],
     };
     let updating = false;
     let initialized = false;
@@ -1059,10 +1141,16 @@
       const params = new URLSearchParams(window.location.search);
       ["machine_id", "start", "end", "job", "order"].forEach((key) => {
         if (params.has(key)) {
-      state[key] = params.get(key) || "";
-    }
-  });
-  const reelParams = params.getAll("reel_code");
+          let value = params.get(key) || "";
+          if ((key === "start" || key === "end") && value.includes("T")) {
+            value = value.split("T")[0];
+          }
+          state[key] = value;
+        }
+      });
+      const reelIdParams = params.getAll("reel_id").map((value) => `${value}`.trim()).filter((value) => value);
+      state.reel_ids = reelIdParams;
+      const reelParams = params.getAll("reel_code");
       const normalized = Array.from(
         new Set(
           reelParams
@@ -1074,7 +1162,7 @@
             .filter((value) => value)
         )
       );
-  state.reel_codes = normalized;
+      pendingReelCodes = state.reel_ids.length ? [] : normalized;
 
   updating = true;
   if (elements.machine) elements.machine.value = state.machine_id || elements.machine.value;
@@ -1132,13 +1220,17 @@
 
     function syncReelSelect() {
       if (!elements.reel) return;
-      const selectedSet = new Set(state.reel_codes);
+      const selectedSet = new Set(state.reel_ids.map((id) => `${id}`));
       const options = Array.from(elements.reel.options);
-      selectedSet.forEach((code) => {
-        if (!options.some((option) => option.value === code)) {
+      selectedSet.forEach((id) => {
+        if (!options.some((option) => option.value === id)) {
+          const cached = reelOptionCache.get(id);
           const option = document.createElement("option");
-          option.value = code;
-          option.textContent = code;
+          option.value = id;
+          option.textContent = cached && cached.label ? cached.label : cached && cached.code ? cached.code : `Reel ${id}`;
+          if (cached && cached.code) {
+            option.dataset.reelCode = cached.code;
+          }
           option.selected = true;
           elements.reel.appendChild(option);
         }
@@ -1161,7 +1253,8 @@
           if (elements.job) elements.job.value = "";
           state.order = "";
           if (elements.order) elements.order.value = "";
-          state.reel_codes = [];
+          state.reel_ids = [];
+          pendingReelCodes = [];
           syncReelSelect();
           scheduleOptionsRefresh();
           break;
@@ -1178,18 +1271,25 @@
           if (elements.job) elements.job.value = state.job;
           state.order = "";
           if (elements.order) elements.order.value = "";
-          state.reel_codes = [];
+          state.reel_ids = [];
+          pendingReelCodes = [];
           syncReelSelect();
           scheduleOptionsRefresh();
           break;
         case "order":
           state.order = value || "";
-          state.reel_codes = [];
+          state.reel_ids = [];
+          pendingReelCodes = [];
           syncReelSelect();
           scheduleOptionsRefresh();
           break;
         case "reel":
-          state.reel_codes = Array.isArray(value) ? value : [value].filter((entry) => entry);
+          if (Array.isArray(value)) {
+            state.reel_ids = value.map((entry) => `${entry}`.trim()).filter((entry) => entry);
+          } else {
+            state.reel_ids = value ? [`${value}`.trim()] : [];
+          }
+          syncReelSelect();
           break;
         default:
           break;
@@ -1212,7 +1312,8 @@
         updating = true;
         updateSelect(elements.job, data.jobs || [], state.job ? [state.job] : []);
         updateSelect(elements.order, data.orders || [], state.order ? [state.order] : []);
-        updateSelect(elements.reel, data.reel_codes || [], state.reel_codes);
+        updateSelect(elements.reel, data.reel_codes || [], state.reel_ids);
+        hydratePendingReelIds();
         updating = false;
         updateDependentFilters();
       } catch (err) {
@@ -1226,7 +1327,7 @@
     function updateSelect(selectEl, values, currentValues) {
       if (!selectEl) return;
       const isMultiple = !!selectEl.multiple;
-      const selectedSet = new Set(currentValues || []);
+      const selectedSet = new Set((currentValues || []).map((value) => `${value}`));
       const frag = document.createDocumentFragment();
 
       if (!isMultiple) {
@@ -1243,20 +1344,67 @@
         frag.appendChild(defaultOption);
       }
 
-      const mergedValues = Array.from(new Set([...(values || []), ...(currentValues || [])])).filter(
-        (value) => value
-      );
+      const entryMap = new Map();
 
-      mergedValues.forEach((value) => {
-        if (!value) return;
-        const option = document.createElement("option");
-        option.value = value;
-        if (selectEl === elements.order && value === ORDER_NONE) {
-          option.textContent = "None";
-        } else {
-          option.textContent = value;
+      (values || []).forEach((raw) => {
+        let entry = null;
+        if (raw && typeof raw === "object") {
+          const rawValue = raw.value ?? raw.reel_id ?? raw.id ?? raw.reel_code ?? raw.code;
+          if (rawValue) {
+            entry = {
+              value: String(rawValue),
+              label: raw.label || raw.reel_code || raw.code || String(rawValue),
+              code: raw.reel_code || raw.code || "",
+            };
+          }
+        } else if (raw !== undefined && raw !== null && raw !== "") {
+          const value = String(raw);
+          entry = {
+            value,
+            label: selectEl === elements.order && value === ORDER_NONE ? "None" : value,
+            code: "",
+          };
         }
-        option.selected = selectedSet.has(value);
+        if (entry && entry.value) {
+          if (selectEl === elements.reel) {
+            rememberReelOption(entry);
+          }
+          entryMap.set(entry.value, entry);
+        }
+      });
+
+      (currentValues || []).forEach((raw) => {
+        if (raw === undefined || raw === null || raw === "") return;
+        const value = String(raw);
+        if (entryMap.has(value)) return;
+        let entry = null;
+        if (selectEl === elements.reel) {
+          const cached = reelOptionCache.get(value);
+          if (cached) {
+            entry = cached;
+          } else {
+            entry = { value, label: `Reel ${value}`, code: "" };
+            rememberReelOption(entry);
+          }
+        } else {
+          entry = {
+            value,
+            label: selectEl === elements.order && value === ORDER_NONE ? "None" : value,
+            code: "",
+          };
+        }
+        entryMap.set(value, entry);
+      });
+
+      entryMap.forEach((entry) => {
+        if (!entry || !entry.value) return;
+        const option = document.createElement("option");
+        option.value = entry.value;
+        option.textContent = entry.label || entry.value;
+        if (entry.code) {
+          option.dataset.reelCode = entry.code;
+        }
+        option.selected = selectedSet.has(entry.value);
         frag.appendChild(option);
       });
 
@@ -1282,18 +1430,38 @@
     }
 
     function getState() {
+      const entries = getSelectedReelEntries();
       return {
         machine_id: state.machine_id,
         start: state.start,
         end: state.end,
         job: state.job,
         order: state.order,
-        reel_code: [...state.reel_codes],
+        reel_id: [...state.reel_ids],
+        reel_code: entries.map((entry) => entry.code).filter((code) => code),
       };
     }
 
     function getReelCodes() {
-      return [...state.reel_codes];
+      return getSelectedReelEntries()
+        .map((entry) => entry.code)
+        .filter((code) => code);
+    }
+
+    function getReelIds() {
+      return [...state.reel_ids];
+    }
+
+    function hasReelSelection(reelId, reelCode) {
+      const idValue = reelId !== undefined && reelId !== null ? String(reelId) : "";
+      if (idValue && state.reel_ids.includes(idValue)) {
+        return true;
+      }
+      if (reelCode) {
+        const ids = reelIdsByCode.get(reelCode) || [];
+        return ids.some((id) => state.reel_ids.includes(id));
+      }
+      return false;
     }
 
     function onChange(callback) {
@@ -1312,7 +1480,8 @@
           if (elements.job) elements.job.value = "";
           state.order = "";
           if (elements.order) elements.order.value = "";
-          state.reel_codes = [];
+          state.reel_ids = [];
+          pendingReelCodes = [];
           syncReelSelect();
           updateDependentFilters();
           await refreshOptions(true);
@@ -1335,7 +1504,8 @@
           if (elements.job) elements.job.value = "";
           state.order = "";
           if (elements.order) elements.order.value = "";
-          state.reel_codes = [];
+          state.reel_ids = [];
+          pendingReelCodes = [];
           syncReelSelect();
           updateDependentFilters();
           await refreshOptions(true);
@@ -1344,17 +1514,29 @@
         case "order":
           state.order = "";
           if (elements.order) elements.order.value = "";
-          state.reel_codes = [];
+          state.reel_ids = [];
+          pendingReelCodes = [];
           syncReelSelect();
           updateDependentFilters();
           await refreshOptions(true);
           emit(true);
           break;
+        case "reel_id":
+          if (value) {
+            removeReel(value, { emit: true });
+          } else {
+            state.reel_ids = [];
+            pendingReelCodes = [];
+            syncReelSelect();
+            emit(true);
+          }
+          break;
         case "reel_code":
           if (value) {
             removeReel(value, { emit: true });
           } else {
-            state.reel_codes = [];
+            state.reel_ids = [];
+            pendingReelCodes = [];
             syncReelSelect();
             emit(true);
           }
@@ -1372,9 +1554,9 @@
 
     function formatChipDate(value) {
       if (!value) return "";
-      const date = new Date(value);
+      const date = new Date(`${value}T00:00:00`);
       if (Number.isNaN(date.getTime())) return value;
-      return date.toLocaleString();
+      return date.toLocaleDateString();
     }
 
     function renderChips() {
@@ -1397,8 +1579,14 @@
         const orderLabel = state.order === ORDER_NONE ? "None" : state.order;
         chips.push({ key: "order", label: `Order: ${orderLabel}`, removable: true });
       }
-      state.reel_codes.forEach((code) => {
-        chips.push({ key: "reel_code", label: `Reel: ${code}`, removable: true, value: code });
+      getSelectedReelEntries().forEach((entry) => {
+        if (!entry.id) return;
+        chips.push({
+          key: "reel_id",
+          label: `Reel: ${entry.label}`,
+          removable: true,
+          value: entry.id,
+        });
       });
 
       if (!chips.length) {
@@ -1432,7 +1620,8 @@
           if (elements.job) elements.job.value = state.job;
           state.order = "";
           if (elements.order) elements.order.value = "";
-          state.reel_codes = [];
+          state.reel_ids = [];
+          pendingReelCodes = [];
           syncReelSelect();
           break;
         case "order":
@@ -1454,12 +1643,35 @@
           state.machine_id = value || "";
           if (elements.machine) elements.machine.value = state.machine_id || "";
           break;
-        case "reel_codes":
-          state.reel_codes = Array.isArray(value) ? value.filter((entry) => entry) : [];
+        case "reel_ids":
+          state.reel_ids = Array.isArray(value)
+            ? value.map((entry) => `${entry}`.trim()).filter((entry) => entry)
+            : [];
+          pendingReelCodes = [];
           syncReelSelect();
           break;
+        case "reel_id":
+          state.reel_ids = value ? [`${value}`.trim()] : [];
+          pendingReelCodes = [];
+          syncReelSelect();
+          break;
+        case "reel_codes": {
+          const codes = Array.isArray(value) ? value.filter((entry) => entry) : [];
+          pendingReelCodes = codes;
+          if (!codes.length) {
+            state.reel_ids = [];
+          }
+          syncReelSelect();
+          break;
+        }
         case "reel_code":
-          state.reel_codes = value ? [value] : [];
+          if (value) {
+            pendingReelCodes = [value];
+            state.reel_ids = [];
+          } else {
+            pendingReelCodes = [];
+            state.reel_ids = [];
+          }
           syncReelSelect();
           break;
         default:
@@ -1473,11 +1685,18 @@
       }
     }
 
-    function addReel(code) {
-      const value = (code || "").trim();
-      if (!value) return;
-      if (!state.reel_codes.includes(value)) {
-        state.reel_codes = [...state.reel_codes, value];
+    function addReel(code, reelId) {
+      const normalizedId =
+        reelId !== undefined && reelId !== null ? String(reelId).trim() : "";
+      let targetId = normalizedId;
+      if (!targetId && code) {
+        const ids = reelIdsByCode.get(code) || [];
+        targetId = ids[0] || "";
+      }
+      if (!targetId) return;
+      if (!state.reel_ids.includes(targetId)) {
+        state.reel_ids = [...state.reel_ids, targetId];
+        rememberReelOption({ value: targetId, code: code || "", label: code || `Reel ${targetId}` });
         syncReelSelect();
         emit(true);
       }
@@ -1515,12 +1734,20 @@
       }
     }
 
-    function removeReel(code, { emit: shouldEmit = false } = {}) {
-      const value = (code || "").trim();
-      if (!value) return;
-      const next = state.reel_codes.filter((entry) => entry !== value);
-      if (next.length === state.reel_codes.length) return;
-      state.reel_codes = next;
+    function removeReel(identifier, { emit: shouldEmit = false } = {}) {
+      const normalized = identifier !== undefined && identifier !== null ? String(identifier).trim() : "";
+      if (!normalized) return;
+      let targetId = "";
+      if (state.reel_ids.includes(normalized)) {
+        targetId = normalized;
+      } else {
+        const candidates = reelIdsByCode.get(normalized) || [];
+        targetId = candidates.find((id) => state.reel_ids.includes(id)) || "";
+      }
+      if (!targetId) return;
+      const next = state.reel_ids.filter((entry) => entry !== targetId);
+      if (next.length === state.reel_ids.length) return;
+      state.reel_ids = next;
       syncReelSelect();
       if (shouldEmit) emit(true);
       else renderChips();
@@ -1576,6 +1803,8 @@
       addReel,
       removeReel,
       getReelCodes,
+      getReelIds,
+      hasReelSelection,
       hasJobSelection: () => hasJobSelection(),
       promptJobSelection,
     };
@@ -1608,7 +1837,10 @@
             .filter((item) => item !== undefined && item !== null && item !== "")
             .forEach((item) => {
               if (key === "start" || key === "end") {
-                url.searchParams.append(key, Utils.normalizeDateInput(item));
+                const normalized = normalizeDateFilterValue(key, item);
+                if (normalized) {
+                  url.searchParams.append(key, normalized);
+                }
               } else {
                 url.searchParams.append(key, item);
               }
@@ -1616,7 +1848,10 @@
           return;
         }
         if (key === "start" || key === "end") {
-          url.searchParams.append(key, Utils.normalizeDateInput(value));
+          const normalized = normalizeDateFilterValue(key, value);
+          if (normalized) {
+            url.searchParams.append(key, normalized);
+          }
         } else {
           url.searchParams.append(key, value);
         }
@@ -1664,6 +1899,19 @@
       return data;
     },
   };
+
+  function normalizeDateFilterValue(key, rawValue) {
+    if (!rawValue) return "";
+    const datePart = String(rawValue).split("T")[0];
+    if (!datePart) return "";
+    if (key === "start") {
+      return `${datePart}T00:00:00`;
+    }
+    if (key === "end") {
+      return `${datePart}T23:59:59`;
+    }
+    return rawValue;
+  }
 
   const Router = (() => {
     const tabs = {};
@@ -2304,6 +2552,7 @@
       const localFirstRef = references.find((ref) => ref && ref.image_src);
       const backgroundSrc = selectedEntry.reference_background || (localFirstRef ? localFirstRef.image_src : null);
       const referenceBackground = backgroundSrc ? urlForStatic(backgroundSrc) : null;
+      const jobDefects = Array.isArray(selectedEntry.defects) ? selectedEntry.defects : [];
 
       JobHeatmap.attach(heatmapContainer, {
         reel: {
@@ -2311,10 +2560,13 @@
           format_width: selectedEntry.format_width,
           format_length: selectedEntry.format_length,
         },
-        defects: (selectedEntry.defects || []).map((defect) => ({
+        defects: jobDefects.map((defect, idx) => ({
+          defect_id: defect.defect_id ?? null,
+          reel_id: defect.reel_id ?? `overview-${slug}`,
           coords: defect.coords,
           magnitude_value: Number(defect.magnitude_value ?? 0),
           severity_value: Number(defect.severity_value ?? 0),
+          defect_key: defect.defect_key || `${defect.reel_id ?? "overview"}-${defect.defect_id ?? idx}`,
         })),
         referenceBackground,
       });
@@ -2841,21 +3093,35 @@
     function renderList() {
       if (!listEl) return;
       listEl.innerHTML = "";
+      const selectedIds = Filters.getReelIds().map((id) => `${id}`);
       const selectedCodes = Filters.getReelCodes();
-      const selectedSet = new Set(selectedCodes);
-      const orderMap = new Map(selectedCodes.map((code, index) => [code, index]));
+      const selectionOrder = selectedIds.map((id, index) => ({
+        id,
+        code: selectedCodes[index] || "",
+        index,
+      }));
+      const idOrderMap = new Map(selectionOrder.map((entry) => [entry.id, entry.index]));
+      const codeOrderMap = new Map(selectionOrder.filter((entry) => entry.code).map((entry) => [entry.code, entry.index]));
+      const selectedIdSet = new Set(selectedIds);
+      const selectedCodeSet = new Set(selectedCodes);
       const pinned = [];
       const others = [];
       state.cachedItems.forEach((item) => {
-        if (item.reel_code && selectedSet.has(item.reel_code)) {
+        const itemId = item.reel_id !== undefined && item.reel_id !== null ? String(item.reel_id) : "";
+        const itemCode = item.reel_code || "";
+        const isSelected =
+          (itemId && selectedIdSet.has(itemId)) || (!itemId && itemCode && selectedCodeSet.has(itemCode));
+        if (isSelected) {
           pinned.push(item);
         } else {
           others.push(item);
         }
       });
       pinned.sort((a, b) => {
-        const aIndex = orderMap.has(a.reel_code) ? orderMap.get(a.reel_code) : 0;
-        const bIndex = orderMap.has(b.reel_code) ? orderMap.get(b.reel_code) : 0;
+        const aId = a.reel_id !== undefined && a.reel_id !== null ? String(a.reel_id) : "";
+        const bId = b.reel_id !== undefined && b.reel_id !== null ? String(b.reel_id) : "";
+        const aIndex = aId && idOrderMap.has(aId) ? idOrderMap.get(aId) : codeOrderMap.get(a.reel_code) ?? Number.MAX_SAFE_INTEGER;
+        const bIndex = bId && idOrderMap.has(bId) ? idOrderMap.get(bId) : codeOrderMap.get(b.reel_code) ?? Number.MAX_SAFE_INTEGER;
         return (aIndex ?? 0) - (bIndex ?? 0);
       });
       const items = pinned.concat(others);
@@ -2878,7 +3144,10 @@
         if (state.selectedReelId === item.reel_id) {
           card.classList.add("active");
         }
-        if (item.reel_code && selectedSet.has(item.reel_code)) {
+        const isReviewSelected =
+          (item.reel_id !== undefined && item.reel_id !== null && selectedIdSet.has(String(item.reel_id))) ||
+          (!item.reel_id && item.reel_code && selectedCodeSet.has(item.reel_code));
+        if (isReviewSelected) {
           card.classList.add("reviewed");
         }
         const reviewDecision =
@@ -2914,7 +3183,7 @@
             ${renderPhaseChips(item.phase_mix_pct || {})}
             ${item.sens_standard_changed ? '<span class="badge warn">Sensitivity drift</span>' : ""}
             ${item.rlm_enabled ? '<span class="badge success">RLM enabled</span>' : '<span class="badge danger">RLM disabled</span>'}
-            ${item.reel_code && selectedSet.has(item.reel_code) ? '<span class="badge review">In review</span>' : ""}
+            ${isReviewSelected ? '<span class="badge review">In review</span>' : ""}
             ${reviewBadge}
           </div>
         `;
@@ -2990,9 +3259,17 @@
           return;
         }
       }
-      const selectedReels = Filters.getReelCodes();
-      if (selectedReels.length) {
-        const match = state.cachedItems.find((item) => item.reel_code && selectedReels.includes(item.reel_code));
+      const selectedIds = Filters.getReelIds();
+      if (selectedIds.length) {
+        const match = state.cachedItems.find((item) => item.reel_id && selectedIds.includes(String(item.reel_id)));
+        if (match) {
+          selectReel(match, { updateFilter: false, immediate: true });
+          return;
+        }
+      }
+      const selectedCodes = Filters.getReelCodes();
+      if (selectedCodes.length) {
+        const match = state.cachedItems.find((item) => item.reel_code && selectedCodes.includes(item.reel_code));
         if (match) {
           selectReel(match, { updateFilter: false, immediate: true });
           return;
@@ -3005,7 +3282,7 @@
     async function selectReel(item, { updateFilter = false, immediate = false } = {}) {
       state.selectedReelId = item.reel_id;
       if (updateFilter) {
-        Filters.addReel(item.reel_code || "");
+        Filters.addReel(item.reel_code || "", item.reel_id);
       }
       renderList();
       await renderDetail(item.reel_id, immediate);
@@ -3074,9 +3351,9 @@
         typeof reel.reel_start === "number" && typeof reel.reel_end === "number"
           ? reel.reel_end - reel.reel_start
           : null;
-      const inReview = reel.reel_code ? Filters.getReelCodes().includes(reel.reel_code) : false;
+      const inReview = Filters.hasReelSelection(reel.reel_id, reel.reel_code);
       const addButton = reel.reel_code
-        ? `<button class="add-reel-button" data-add-reel="${reel.reel_code}" ${inReview ? "disabled" : ""}>${
+        ? `<button class="add-reel-button" data-add-reel="${reel.reel_code}" data-add-reel-id="${reel.reel_id ?? ""}" ${inReview ? "disabled" : ""}>${
             inReview ? "In review" : "Add to review"
           }</button>`
         : "";
@@ -3500,7 +3777,8 @@ function extractRlmMetrics(config) {
       const addButton = scope.querySelector("[data-add-reel]");
       if (addButton) {
         const reelCode = addButton.dataset.addReel || "";
-        const isAlreadySelected = reelCode && Filters.getReelCodes().includes(reelCode);
+        const reelIdAttr = addButton.dataset.addReelId || "";
+        const isAlreadySelected = Filters.hasReelSelection(reelIdAttr, reelCode);
         if (isAlreadySelected) {
           addButton.disabled = true;
           addButton.textContent = "In review";
@@ -3528,7 +3806,7 @@ function extractRlmMetrics(config) {
               Filters.setMany(updates, { emit: true });
             }
           }
-          Filters.addReel(reelCode);
+          Filters.addReel(reelCode, reelIdAttr || (summary && summary.reel ? summary.reel.reel_id : ""));
           addButton.disabled = true;
           addButton.textContent = "In review";
         });
@@ -4440,7 +4718,10 @@ function extractRlmMetrics(config) {
       if (!heatmapEl || !maskEl) return;
 
       const reel = buildFootprintReel(data);
-      const defects = extractDefectFootprints(data.rows || []);
+      const heatmapRows = Array.isArray(data.heatmap_rows) && data.heatmap_rows.length
+        ? data.heatmap_rows
+        : data.rows || [];
+      const defects = extractDefectFootprints(heatmapRows);
       const masks = Array.isArray(data.masks) ? data.masks : [];
       const referenceImages = Array.isArray(data.reference_images) ? data.reference_images : [];
       const latestReference = referenceImages.length ? referenceImages[0] : null;
@@ -4493,6 +4774,8 @@ function extractRlmMetrics(config) {
       return rows
         .filter((row) => Array.isArray(row.coords) && row.coords.length)
         .map((row) => ({
+          defect_id: row.defect_id,
+          reel_id: row.reel_id,
           magnitude_value: row.magnitude_value,
           severity_value: row.severity_value,
           coords: row.coords,

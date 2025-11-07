@@ -6,7 +6,7 @@ import math
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from flask import Blueprint, jsonify, render_template, request
 from sqlalchemy import and_, case, exists, false, func, literal, or_, text
@@ -219,7 +219,7 @@ def _defect_within_window(
     return True
 
 
-def _validate_filters(session: Session) -> Dict[str, Optional[str]]:
+def _validate_filters(session: Session) -> Dict[str, Any]:
     args = request.args
 
     machine_id = args.get("machine_id", type=int)
@@ -251,7 +251,7 @@ def _validate_filters(session: Session) -> Dict[str, Optional[str]]:
     else:
         order_value = None
 
-    filters = {
+    filters: Dict[str, Any] = {
         "machine_id": machine_id,
         "start": start,
         "end": end,
@@ -270,17 +270,32 @@ def _validate_filters(session: Session) -> Dict[str, Optional[str]]:
         filters["reel_code"] = reel_codes[0]
     else:
         filters["reel_code"] = None
+
+    raw_reel_ids = args.getlist("reel_id")
+    reel_ids: List[int] = []
+    for raw in raw_reel_ids:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if value not in reel_ids:
+            reel_ids.append(value)
+    filters["reel_ids"] = reel_ids
+
     return filters
 
 
-def _apply_reel_filters(query, filters: Dict[str, Optional[str]], include_reel_code: bool = True):
+def _apply_reel_filters(query, filters: Dict[str, Any], include_reel_code: bool = True):
     start = filters["start"]
     end = filters["end"]
 
     query = query.filter(Reel.machine_id == filters["machine_id"])
     query = query.filter(Reel.time_start <= end).filter(Reel.time_end >= start)
 
-    if include_reel_code:
+    reel_ids: Iterable[int] = filters.get("reel_ids") or []
+    if reel_ids:
+        query = query.filter(Reel.reel_id.in_(reel_ids))
+    elif include_reel_code:
         reel_codes: Iterable[str] = filters.get("reel_codes") or []
         if not reel_codes and filters.get("reel_code"):
             reel_codes = [filters["reel_code"]]
@@ -697,6 +712,8 @@ def dashboard_home():
         if default_end is None:
             default_end = datetime.utcnow()
         default_start = default_end - timedelta(days=DAYS_DEFAULT_RANGE)
+        default_start_date = default_start.date().isoformat()
+        default_end_date = default_end.date().isoformat()
         default_machine = next((m for m in machines if (m.name or "").lower() == "press 5"), None)
         if not default_machine and machines:
             default_machine = machines[0]
@@ -714,6 +731,8 @@ def dashboard_home():
         default_machine_id=default_machine_id,
         default_start=default_start,
         default_end=default_end,
+        default_start_date=default_start_date,
+        default_end_date=default_end_date,
         default_job=default_job,
     )
 
@@ -730,8 +749,14 @@ def api_filters():
             session.query(Reel), filters, include_reel_code=False
         )
 
+        job_filters = dict(filters)
+        job_filters["job"] = None
+        jobs_query = _apply_reel_filters(
+            session.query(Reel), job_filters, include_reel_code=False
+        )
+
         jobs = (
-            base_query.with_entities(
+            jobs_query.with_entities(
                 Reel.job_name,
                 func.max(Reel.time_end).label("latest"),
             )
@@ -741,7 +766,14 @@ def api_filters():
             .all()
         )
 
-        order_query = base_query
+        order_filters = dict(filters)
+        order_filters["order"] = None
+        order_filters["reel_code"] = None
+        order_filters["reel_codes"] = []
+        order_filters["reel_ids"] = []
+        order_query = _apply_reel_filters(
+            session.query(Reel), order_filters, include_reel_code=False
+        )
         if filters.get("job"):
             order_query = order_query.filter(Reel.job_name == filters["job"])
         order_rows = (
@@ -771,22 +803,42 @@ def api_filters():
                 reel_query = reel_query.filter(or_(Reel.order_number.is_(None), Reel.order_number == ""))
             else:
                 reel_query = reel_query.filter(Reel.order_number == order_filter)
-        reels = (
+        reel_rows = (
             reel_query.with_entities(
+                Reel.reel_id,
                 Reel.reel_code,
-                func.max(Reel.time_end).label("latest"),
+                Reel.order_number,
+                Reel.time_end,
             )
-            .filter(Reel.reel_code.isnot(None))
-            .group_by(Reel.reel_code)
-            .order_by(func.max(Reel.time_end).desc())
+            .order_by(Reel.time_end.desc())
             .all()
         )
+
+        def _reel_label(code: Optional[str], order_value: Optional[str], time_end: Optional[datetime]) -> str:
+            label_parts: List[str] = []
+            if code:
+                label_parts.append(code)
+            if order_value:
+                label_parts.append(str(order_value))
+            if time_end:
+                label_parts.append(time_end.strftime("%Y-%m-%d %H:%M"))
+            return " · ".join(label_parts) or "Reel"
+
+        reel_options = [
+            {
+                "reel_id": reel_id,
+                "reel_code": reel_code,
+                "label": _reel_label(reel_code, order_number, time_end),
+            }
+            for reel_id, reel_code, order_number, time_end in reel_rows
+            if reel_id is not None
+        ]
 
         return jsonify(
             {
                 "jobs": [job for job, _ in jobs],
                 "orders": order_values,
-                "reel_codes": [code for code, _ in reels],
+                "reel_codes": reel_options,
             }
         )
 
@@ -1032,6 +1084,8 @@ def api_overview():
                             "coords": defect.coords_json,
                             "magnitude_value": _to_float(defect.magnitude_value),
                             "severity_value": _to_float(defect.severity_value),
+                            "defect_id": defect.defect_id,
+                            "reel_id": reel.reel_id,
                             "order": order_display,
                         }
                     )
@@ -1812,6 +1866,7 @@ def api_reel_summary(reel_id: int):
         defects_payload = [
             {
                 "defect_id": defect.defect_id,
+                "reel_id": reel.reel_id,
                 "class_name": defect.class_name,
                 "defect_time": _iso(defect.defect_time),
                 "format_position": _to_float(defect.format_position),
@@ -2166,6 +2221,37 @@ def api_defects():
                     }
                 )
 
+        heatmap_rows: List[Dict[str, Any]] = []
+        for (
+            defect_id,
+            reel_id,
+            magnitude_value,
+            severity_value,
+            coords_json,
+        ) in (
+            base_query.with_entities(
+                Defect.defect_id,
+                Defect.reel_id,
+                Defect.magnitude_value,
+                Defect.severity_value,
+                Defect.coords_json,
+            )
+            .filter(Defect.coords_json.isnot(None))
+            .order_by(Defect.defect_time.desc())
+            .all()
+        ):
+            if not coords_json:
+                continue
+            heatmap_rows.append(
+                {
+                    "defect_id": defect_id,
+                    "reel_id": reel_id,
+                    "magnitude_value": _to_float(magnitude_value),
+                    "severity_value": _to_float(severity_value),
+                    "coords": coords_json,
+                }
+            )
+
         # Aggregations
         by_type = (
             base_query.with_entities(Defect.class_name, func.count())
@@ -2279,6 +2365,7 @@ def api_defects():
                 "reference_images": reference_images,
                 "format_length": format_lengths[0] if format_lengths else None,
                 "format_width": format_widths[0] if format_widths else None,
+                "heatmap_rows": heatmap_rows,
                 "decision_summary": {
                     "total": int(total or 0),
                     "pass": pass_count,

@@ -52,8 +52,8 @@
     <!-- Global Filters -->
     <div class="filters" id="globalFilters"
          data-default-machine="{{ default_machine_id }}"
-         data-default-start="{{ default_start.strftime('%Y-%m-%dT%H:%M:%S') if default_start else '' }}"
-         data-default-end="{{ default_end.strftime('%Y-%m-%dT%H:%M:%S') if default_end else '' }}"
+         data-default-start-date="{{ default_start_date if default_start_date else '' }}"
+         data-default-end-date="{{ default_end_date if default_end_date else '' }}"
          data-default-job="{{ default_job or '' }}">
       <div class="filter-grid">
         <div class="filter-card">
@@ -68,27 +68,27 @@
         </div>
 
         <div class="filter-card">
-          <label for="filterStart">Start</label>
-          <input type="datetime-local" id="filterStart"
-                 value="{{ default_start.strftime('%Y-%m-%dT%H:%M:%S') if default_start else '' }}">
+          <label for="filterStart">Start Date</label>
+          <input type="date" id="filterStart"
+                 value="{{ default_start_date if default_start_date else '' }}">
         </div>
 
         <div class="filter-card">
-          <label for="filterEnd">End</label>
-          <input type="datetime-local" id="filterEnd"
-                 value="{{ default_end.strftime('%Y-%m-%dT%H:%M:%S') if default_end else '' }}">
+          <label for="filterEnd">End Date</label>
+          <input type="date" id="filterEnd"
+                 value="{{ default_end_date if default_end_date else '' }}">
         </div>
 
         <div class="filter-card">
           <label for="filterJob">Job</label>
-          <select id="filterJob">
+          <select id="filterJob" size="6" class="filter-select-list">
             <option value="">All</option>
           </select>
         </div>
 
         <div class="filter-card">
           <label for="filterOrder">Order</label>
-          <select id="filterOrder">
+          <select id="filterOrder" size="6" class="filter-select-list">
             <option value="">All</option>
           </select>
         </div>

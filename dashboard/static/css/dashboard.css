@@ -114,9 +114,11 @@ body {
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.filters input[type="datetime-local"] {
+.filters input[type="datetime-local"],
+.filters input[type="date"] {
   min-width: 0;
   box-sizing: border-box;
+  text-align: center;
 }
 
 .review-form input,
@@ -163,9 +165,14 @@ body {
   display: block;
 }
 
-.filters select[multiple] {
+.filters select[multiple],
+.filter-select-list {
   height: auto;
-  min-height: 120px;
+  min-height: 140px;
+}
+
+.filter-select-list {
+  overflow-y: auto;
 }
 
 .filters select:focus,
@@ -175,7 +182,8 @@ body {
   outline: none;
 }
 
-.filters input[type="datetime-local"] {
+.filters input[type="datetime-local"],
+.filters input[type="date"] {
   text-align: center;
   box-sizing: border-box;
 }
