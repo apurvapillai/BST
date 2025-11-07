@@ -1290,6 +1290,67 @@ body {
   border: 1px solid #cbd5e1;
 }
 
+.defect-decision-cell {
+  text-align: center;
+  min-width: 120px;
+}
+
+.defect-decision-actions {
+  display: inline-flex;
+  gap: 6px;
+  justify-content: center;
+}
+
+.defect-decision-btn {
+  border: none;
+  border-radius: 16px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #fff;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.defect-decision-btn-pass {
+  background-color: #16a34a;
+}
+
+.defect-decision-btn-fail {
+  background-color: #dc2626;
+}
+
+.defect-decision-btn.is-selected {
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.2);
+}
+
+.defect-decision-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 70px;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.defect-decision-badge-pass {
+  background-color: rgba(34, 197, 94, 0.15);
+  color: #15803d;
+}
+
+.defect-decision-badge-fail {
+  background-color: rgba(248, 113, 113, 0.15);
+  color: #b91c1c;
+}
+
+.defect-decision-saving {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
 .pagination {
   display: flex;
   gap: 8px;

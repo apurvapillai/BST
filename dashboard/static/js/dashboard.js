@@ -3831,7 +3831,7 @@ function extractRlmMetrics(config) {
       } catch (err) {
         console.error("Defect explorer load failed", err);
         if (tableBody) {
-          tableBody.innerHTML = `<tr><td colspan="11">Failed to load defects: ${err.message}</td></tr>`;
+          tableBody.innerHTML = `<tr><td colspan="12">Failed to load defects: ${err.message}</td></tr>`;
         }
       } finally {
         LoadingOverlay.hide();
@@ -3850,6 +3850,10 @@ function extractRlmMetrics(config) {
       sizeMinInput = Utils.qs("#sizeMin");
       sizeMaxInput = Utils.qs("#sizeMax");
       tableBody = Utils.qs("#defectTable tbody");
+      if (tableBody) {
+        tableBody.addEventListener("click", handleDecisionClick);
+        tableBody.addEventListener("dblclick", handleDecisionDoubleClick);
+      }
       paginationEl = Utils.qs("#defectPagination");
       summaryTotalEl = Utils.qs("[data-defect-total]");
       summaryTypesEl = Utils.qs("#defectSummaryTypes");
@@ -4231,10 +4235,39 @@ function extractRlmMetrics(config) {
       }
     }
 
+    function renderDecisionBadge(decision) {
+      const normalized = (decision || "").toLowerCase();
+      if (normalized !== "pass" && normalized !== "fail") return "";
+      const label = normalized === "pass" ? "Pass" : "Fail";
+      return `<span class="defect-decision-badge defect-decision-badge-${normalized}">${label}</span>`;
+    }
+
+    function renderDecisionButtons(decision) {
+      const normalized = (decision || "").toLowerCase();
+      return `
+        <div class="defect-decision-actions">
+          <button type="button" class="defect-decision-btn defect-decision-btn-pass${
+            normalized === "pass" ? " is-selected" : ""
+          }" data-defect-decision="pass">Pass</button>
+          <button type="button" class="defect-decision-btn defect-decision-btn-fail${
+            normalized === "fail" ? " is-selected" : ""
+          }" data-defect-decision="fail">Fail</button>
+        </div>
+      `;
+    }
+
+    function renderDecisionCellContent(decision, editing) {
+      const normalized = (decision || "").toLowerCase();
+      if (editing || !normalized) {
+        return renderDecisionButtons(normalized);
+      }
+      return renderDecisionBadge(normalized);
+    }
+
     function renderTable(rows) {
       if (!tableBody) return;
       if (!rows.length) {
-        tableBody.innerHTML = "<tr><td colspan='11'>No defects match the current filters.</td></tr>";
+        tableBody.innerHTML = "<tr><td colspan='12'>No defects match the current filters.</td></tr>";
         return;
       }
       tableBody.innerHTML = rows
@@ -4262,10 +4295,57 @@ function extractRlmMetrics(config) {
                     : ""
                 }
               </td>
+              <td class="defect-decision-cell" data-defect-id="${row.defect_id || ""}" data-decision="${(row.qc_decision || "").toLowerCase()}">
+                ${renderDecisionCellContent(row.qc_decision, !row.qc_decision)}
+              </td>
             </tr>
           `
         )
         .join("");
+    }
+
+    async function saveDefectDecision(cell, defectId, decision) {
+      const normalized = (decision || "").toLowerCase();
+      if (!normalized || (normalized !== "pass" && normalized !== "fail")) return;
+      cell.dataset.loading = "true";
+      cell.classList.add("defect-decision-saving");
+      try {
+        await Api.post(`defects/${defectId}/decision`, { decision: normalized });
+        cell.dataset.decision = normalized;
+        cell.dataset.editing = "false";
+        cell.innerHTML = renderDecisionBadge(normalized);
+      } catch (error) {
+        console.error("Failed to update defect decision", error);
+        window.alert(
+          `Failed to update decision: ${
+            error && error.message ? error.message : "Unknown error"
+          }`
+        );
+        cell.dataset.editing = "true";
+        cell.innerHTML = renderDecisionButtons(cell.dataset.decision || normalized);
+      } finally {
+        cell.dataset.loading = "false";
+        cell.classList.remove("defect-decision-saving");
+      }
+    }
+
+    function handleDecisionClick(event) {
+      const button = event.target.closest("button[data-defect-decision]");
+      if (!button) return;
+      const cell = button.closest(".defect-decision-cell");
+      if (!cell || cell.dataset.loading === "true") return;
+      const defectId = Number(cell.dataset.defectId);
+      if (!defectId) return;
+      saveDefectDecision(cell, defectId, button.dataset.defectDecision);
+    }
+
+    function handleDecisionDoubleClick(event) {
+      const cell = event.target.closest(".defect-decision-cell");
+      if (!cell || cell.dataset.loading === "true") return;
+      const current = (cell.dataset.decision || "").toLowerCase();
+      if (!current) return;
+      cell.dataset.editing = "true";
+      cell.innerHTML = renderDecisionButtons(current);
     }
 
     function renderPagination() {

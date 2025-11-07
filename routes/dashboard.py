@@ -2140,6 +2140,7 @@ def api_defects():
                         )
                 result_rows.append(
                     {
+                        "defect_id": defect.defect_id,
                         "reel_id": reel.reel_id if reel else defect.reel_id,
                         "reel_code": reel.reel_code if reel else None,
                         "defect_time": _iso(defect.defect_time),
@@ -2154,6 +2155,7 @@ def api_defects():
                         "coords": defect.coords_json or [],
                         "format_length": format_length,
                         "format_width": format_width,
+                        "qc_decision": (defect.qc_decision or "").lower() or None,
                     }
                 )
 
@@ -2257,5 +2259,30 @@ def api_defects():
                     "total": total,
                     "total_pages": total_pages or 1,
                 },
+            }
+        )
+
+
+@dashboard_bp.route("/api/defects/<int:defect_id>/decision", methods=["POST"])
+def api_defect_decision(defect_id: int):
+    payload = request.get_json(silent=True) or {}
+    raw_decision = payload.get("decision")
+    decision: Optional[str] = None
+    if raw_decision is not None:
+        decision = str(raw_decision).strip().lower()
+        if decision not in {"pass", "fail"}:
+            return jsonify({"error": "Decision must be 'pass' or 'fail'."}), 400
+
+    with SessionLocal() as session:
+        defect = session.query(Defect).filter(Defect.defect_id == defect_id).first()
+        if not defect:
+            return jsonify({"error": "Defect not found."}), 404
+
+        defect.qc_decision = decision
+        session.commit()
+        return jsonify(
+            {
+                "defect_id": defect.defect_id,
+                "decision": decision,
             }
         )

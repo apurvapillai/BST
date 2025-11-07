@@ -103,6 +103,7 @@ class Defect(Base):
     format_position = Column(DECIMAL(10, 2))
     image_src = Column(String(255))
     coords_json = Column(JSON)
+    qc_decision = Column(String(16), index=True)
 
     reel = relationship("Reel", back_populates="defects")
 
