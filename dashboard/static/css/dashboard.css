@@ -1453,7 +1453,7 @@ body {
     padding: 12px;
   }
 
-  .filters {
+  .filter-grid {
     grid-template-columns: 1fr;
   }
 

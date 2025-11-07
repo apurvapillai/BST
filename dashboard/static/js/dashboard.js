@@ -3564,7 +3564,10 @@ function extractRlmMetrics(config) {
         reviewerInput.focus();
         reviewerInput.setSelectionRange(reviewerInput.value.length, reviewerInput.value.length);
       }
-      host.scrollIntoView({ behavior: "smooth", block: "start" });
+      const container = host.closest(".job-layout");
+      if (container) {
+        container.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
     }
 
     function closeReviewForm(host) {
