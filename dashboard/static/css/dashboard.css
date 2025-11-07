@@ -73,6 +73,7 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 16px;
+  width: 100%;
 }
 
 .filter-card {
@@ -83,6 +84,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -114,6 +117,11 @@ body {
 .filters input[type="datetime-local"] {
   min-width: 0;
   box-sizing: border-box;
+}
+
+.review-form input,
+.review-form textarea {
+  font-size: 16px;
 }
 
 
@@ -1454,7 +1462,16 @@ body {
   }
 
   .filter-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filter-card {
+    justify-self: stretch;
+  }
+
+  .filters select,
+  .filters input {
+    font-size: 16px;
   }
 
   .tabs {

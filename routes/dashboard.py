@@ -702,12 +702,19 @@ def dashboard_home():
             default_machine = machines[0]
         default_machine_id = default_machine.machine_id if default_machine else None
 
+        job_query = session.query(Reel.job_name).filter(Reel.job_name.isnot(None))
+        if default_machine_id:
+            job_query = job_query.filter(Reel.machine_id == default_machine_id)
+        job_query = job_query.filter(Reel.job_name != "")
+        default_job = job_query.order_by(Reel.time_end.desc()).limit(1).scalar()
+
     return render_template(
         "dashboard.html",
         machines=machines,
         default_machine_id=default_machine_id,
         default_start=default_start,
         default_end=default_end,
+        default_job=default_job,
     )
 
 

@@ -970,7 +970,9 @@
       end:
         (root && root.dataset.defaultEnd) ||
         (elements.end ? elements.end.value : ""),
-      job: "",
+      job:
+        (root && root.dataset.defaultJob) ||
+        (elements.job ? elements.job.value : ""),
       order: "",
       reel_codes: [],
     };
@@ -1012,6 +1014,9 @@
     function init() {
       if (!elements.machine) return;
       applySearchParams();
+      if (elements.job && state.job) {
+        elements.job.value = state.job;
+      }
       updateDependentFilters();
       renderChips();
       attachListeners();
@@ -3561,8 +3566,13 @@ function extractRlmMetrics(config) {
       });
       const reviewerInput = form.querySelector("[name='reviewer_name']");
       if (reviewerInput) {
-        reviewerInput.focus();
-        reviewerInput.setSelectionRange(reviewerInput.value.length, reviewerInput.value.length);
+        try {
+          reviewerInput.focus({ preventScroll: true });
+        } catch (err) {
+          reviewerInput.focus();
+        }
+        const len = reviewerInput.value.length;
+        reviewerInput.setSelectionRange(len, len);
       }
       const container = host.closest(".job-layout");
       if (container) {

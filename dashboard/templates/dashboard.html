@@ -53,7 +53,8 @@
     <div class="filters" id="globalFilters"
          data-default-machine="{{ default_machine_id }}"
          data-default-start="{{ default_start.strftime('%Y-%m-%dT%H:%M:%S') if default_start else '' }}"
-         data-default-end="{{ default_end.strftime('%Y-%m-%dT%H:%M:%S') if default_end else '' }}">
+         data-default-end="{{ default_end.strftime('%Y-%m-%dT%H:%M:%S') if default_end else '' }}"
+         data-default-job="{{ default_job or '' }}">
       <div class="filter-grid">
         <div class="filter-card">
           <label for="filterMachine">Machine</label>
