@@ -110,7 +110,7 @@
   };
 
   function isMobileViewport() {
-    return window.matchMedia("(max-width: 768px)").matches;
+    return window.matchMedia("(max-width: 1024px)").matches;
   }
 
   function withResponsiveLayout(layout) {
@@ -125,7 +125,9 @@
     return {
       responsive: true,
       scrollZoom: !mobile,
-      doubleClick: mobile ? "reset" : "reset+autosize",
+      doubleClick: mobile ? false : "reset+autosize",
+      staticPlot: mobile,
+      displayModeBar: mobile ? false : undefined,
       ...overrides,
     };
   }
@@ -547,8 +549,10 @@
 
     function bucketForArea(area) {
       const areaValue = Number.isFinite(area) && area > 0 ? area : 0;
-      for (const bucket of HEATMAP_BUCKETS) {
-        if (areaValue <= bucket.max) return bucket;
+      for (let idx = 0; idx < HEATMAP_BUCKETS.length; idx += 1) {
+        const bucket = HEATMAP_BUCKETS[idx];
+        if (bucket.max === Infinity) return bucket;
+        if (areaValue < bucket.max) return bucket;
       }
       return HEATMAP_BUCKETS[HEATMAP_BUCKETS.length - 1];
     }
@@ -562,23 +566,18 @@
         const defectTotal = stats ? stats.defectTotal || 0 : 0;
         const hasData = defectTotal > 0;
         const toggledOff = state.disabledBuckets.has(bucket.key);
-        const checkboxDisabled = hasData ? "" : "disabled";
-        const checkedAttr = !hasData
-          ? ""
-          : !toggledOff
-          ? "checked"
-          : "";
+        const checkedAttr = toggledOff ? "" : "checked";
         const itemClass = hasData
           ? toggledOff
             ? "disabled"
             : ""
-          : "no-data disabled";
+          : "no-data";
         const avgMag = hasData && stats ? stats.magnitudeSum / defectTotal : 0;
         const avgSev = hasData && stats ? stats.severitySum / defectTotal : 0;
         const countLabel = `${defectTotal} defect${defectTotal === 1 ? "" : "s"}`;
         return `
           <label class="heatmap-legend-item ${itemClass}">
-            <input type="checkbox" data-bucket="${bucket.key}" ${checkedAttr} ${checkboxDisabled}>
+            <input type="checkbox" data-bucket="${bucket.key}" ${checkedAttr}>
             <span class="swatch" style="background:${bucket.legend}"></span>
             <span class="legend-label">${bucket.label}</span>
             <span class="legend-count">${countLabel}</span>
@@ -4127,7 +4126,7 @@ function extractRlmMetrics(config) {
       return ranges.some(([min, max]) => {
         if (area < min) return false;
         if (!Number.isFinite(max)) return true;
-        return area <= max;
+        return area < max;
       });
     }
 
@@ -4729,13 +4728,13 @@ function extractRlmMetrics(config) {
         latestReference && latestReference.image_src ? urlForStatic(latestReference.image_src) : null;
       const filteredDefects = filterFootprints(defects);
 
-      const bucketState =
+      const filterEnabled =
         state.size_buckets instanceof Set ? Array.from(state.size_buckets) : defaultBucketKeys.slice();
       JobHeatmap.attach(tabScope, {
         reel,
         defects: filteredDefects,
         referenceBackground,
-        bucketState: { enabledBuckets: bucketState },
+        bucketState: { enabledBuckets: filterEnabled },
         onLegendChange: handleLegendBucketChange,
       });
       MaskHeatmap.attach(tabScope, { reel, masks, referenceBackground });

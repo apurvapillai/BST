@@ -194,13 +194,14 @@ def _matches_size_ranges(coords_data, ranges: List[Tuple[float, float]]) -> bool
     if not ranges:
         return False
     areas = _defect_polygon_areas(coords_data)
-    candidate_areas = areas or [0.0]
-    for area in candidate_areas:
-        for lower, upper in ranges:
-            if area < lower:
-                continue
-            if math.isinf(upper) or area <= upper:
-                return True
+    target_area = max(areas) if areas else 0.0
+    for lower, upper in ranges:
+        if target_area < lower:
+            continue
+        if math.isinf(upper):
+            return True
+        if target_area < upper:
+            return True
     return False
 
 

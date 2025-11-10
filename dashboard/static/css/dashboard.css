@@ -188,16 +188,18 @@ body {
   box-sizing: border-box;
 }
 
-.filter-card input[type="datetime-local"] {
-  max-width: 100%;
-  align-self: stretch;
+.filter-card input[type="datetime-local"],
+.filter-card input[type="date"] {
+  max-width: 220px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .filter-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin: -6px 0 18px;
+  margin: -6px 0 23px;
 }
 
 .filter-chip {
