@@ -975,6 +975,7 @@ def api_overview():
         job_set = set()
         jobs_meters = defaultdict(float)
         jobs_time = defaultdict(lambda: {"active": 0.0, "inactive": 0.0, "learn": 0.0})
+        jobs_length = defaultdict(lambda: {"active": 0.0, "inactive": 0.0, "learn": 0.0})
         jobs_defects = defaultdict(int)
         state_buckets: Dict[datetime, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
         job_reference_latest: Dict[str, Dict[str, Any]] = {}
@@ -1069,6 +1070,7 @@ def api_overview():
                 totals[f"{key}_length"] += length
                 if job_name:
                     jobs_time[job_name][key] += seconds / 60.0  # minutes
+                    jobs_length[job_name][key] += length
                 if seconds > 0:
                     job_order_entry["phase_seconds"][key] += seconds
                     job_summary_entry["phase_seconds"][key] += seconds
@@ -1268,15 +1270,33 @@ def api_overview():
                 job_order_entry["rlm_monitor_count"] += monitor_count
                 job_summary_entry["rlm_monitor_count"] += monitor_count
 
+        phase_length_per_second = {}
+        for key in ("active", "inactive", "learn"):
+            seconds_total = totals.get(f"{key}_seconds", 0.0)
+            length_total = totals.get(f"{key}_length", 0.0)
+            phase_length_per_second[key] = (length_total / seconds_total) if seconds_total else 0.0
+
         state_trend = []
         for bucket_time in sorted(state_buckets.keys()):
             bucket_totals = state_buckets[bucket_time]
             bucket_seconds = sum(bucket_totals.values())
+            bucket_lengths = {
+                key: bucket_totals.get(key, 0.0) * phase_length_per_second.get(key, 0.0)
+                for key in ("active", "inactive", "learn")
+            }
+            bucket_total_length = sum(bucket_lengths.values())
+            if bucket_total_length <= 0 and bucket_seconds > 0:
+                bucket_total_length = bucket_seconds
+                bucket_lengths = {
+                    "active": bucket_totals.get("active", 0.0),
+                    "inactive": bucket_totals.get("inactive", 0.0),
+                    "learn": bucket_totals.get("learn", 0.0),
+                }
             entry = {
                 "time": _iso(bucket_time),
-                "active_pct": round((bucket_totals.get("active", 0.0) / bucket_seconds * 100) if bucket_seconds else 0.0, 1),
-                "inactive_pct": round((bucket_totals.get("inactive", 0.0) / bucket_seconds * 100) if bucket_seconds else 0.0, 1),
-                "learn_pct": round((bucket_totals.get("learn", 0.0) / bucket_seconds * 100) if bucket_seconds else 0.0, 1),
+                "active_pct": round((bucket_lengths["active"] / bucket_total_length * 100) if bucket_total_length else 0.0, 1),
+                "inactive_pct": round((bucket_lengths["inactive"] / bucket_total_length * 100) if bucket_total_length else 0.0, 1),
+                "learn_pct": round((bucket_lengths["learn"] / bucket_total_length * 100) if bucket_total_length else 0.0, 1),
             }
             state_trend.append(entry)
 
@@ -1284,9 +1304,6 @@ def api_overview():
             defects, window_start, window_end
         )
 
-        total_seconds = (
-            totals["active_seconds"] + totals["inactive_seconds"] + totals["learn_seconds"]
-        )
         total_length = (
             totals["active_length"] + totals["inactive_length"] + totals["learn_length"]
         )
@@ -1491,6 +1508,9 @@ def api_overview():
                     "minutes_active": round(mix["active"], 1),
                     "minutes_inactive": round(mix["inactive"], 1),
                     "minutes_learn": round(mix["learn"], 1),
+                    "length_active": round(jobs_length.get(job, {}).get("active", 0.0), 2),
+                    "length_inactive": round(jobs_length.get(job, {}).get("inactive", 0.0), 2),
+                    "length_learn": round(jobs_length.get(job, {}).get("learn", 0.0), 2),
                 }
                 for job, mix in jobs_time.items()
             ],

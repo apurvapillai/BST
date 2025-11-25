@@ -1813,26 +1813,214 @@ body {
 }
 
 
-.defect-table-section {
-  margin-top: 24px;
+.defect-review-panel {
+  margin-top: 32px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 24px 28px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
+  transition: background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
-.defect-table-title {
-  margin: 0 0 12px;
+.defect-review-panel.review-pass {
+  border-color: rgba(34, 197, 94, 0.4);
+  background: linear-gradient(145deg, rgba(228, 252, 237, 0.9), #fff);
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
+}
+
+.defect-review-panel.review-fail {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: linear-gradient(145deg, rgba(255, 239, 239, 0.95), #fff);
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
+}
+
+.defect-review-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.review-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.defect-review-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.defect-review-header h4 {
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: 0.02em;
+  color: #0f172a;
+}
+
+.defect-review-status {
+  margin: 4px 0 0;
+  color: #475569;
+  font-size: 14px;
+}
+
+.defect-review-meta {
+  margin: 0;
+  color: #0f172a;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.defect-review-meta:empty {
+  display: none;
+}
+
+.defect-review-panel.is-active .defect-review-status {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.defect-review-panel:not(.is-active) .review-action {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.defect-review-panel:not(.is-active) .defect-review-status {
+  color: #94a3b8;
+}
+
+.defect-review-panel .review-controls {
+  background: rgba(241, 245, 249, 0.9);
+  border-radius: 999px;
+  padding: 6px;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.35);
+  display: flex;
+  gap: 8px;
+}
+
+.defect-review-panel .review-controls.is-hidden {
+  display: none;
+}
+
+.defect-review-panel .review-action {
+  min-width: 110px;
   font-size: 15px;
+  font-weight: 600;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 18px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.1);
+}
+
+.review-action--pass {
+  background: linear-gradient(120deg, #22c55e, #16a34a);
+  color: #fff;
+}
+
+.review-action--fail {
+  background: linear-gradient(120deg, #fb7185, #ef4444);
+  color: #fff;
+}
+
+.defect-review-panel .review-action:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 20px rgba(15, 23, 42, 0.18);
+}
+
+.review-new-btn {
+  border: 1px solid rgba(15, 23, 42, 0.25);
+  border-radius: 999px;
+  padding: 9px 18px;
+  background: #fff;
+  font-weight: 600;
+  color: #0f172a;
+  transition: background 0.2s ease, color 0.2s ease;
+  cursor: pointer;
+}
+
+.review-new-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.review-new-btn:not(:disabled):hover {
+  background: #0f172a;
+  color: #fff;
+}
+
+.defect-review-panel .review-form {
+  margin-top: 18px;
+  background: rgba(248, 250, 252, 0.96);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 18px 35px rgba(15, 23, 42, 0.12);
+}
+
+.defect-review-panel .review-form-header h5 {
+  font-size: 17px;
+  letter-spacing: 0.03em;
+}
+
+.defect-review-panel .review-form .form-field label {
+  font-size: 13px;
   text-transform: uppercase;
-  color: #6b7280;
-  letter-spacing: 0.6px;
+  color: #475569;
+  letter-spacing: 0.08em;
+}
+
+.defect-review-panel .review-form .form-field input,
+.defect-review-panel .review-form .form-field textarea {
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 15px;
+}
+
+.defect-review-panel .review-form-actions {
+  gap: 10px;
+}
+
+.defect-review-panel .review-form-primary {
+  background: linear-gradient(120deg, #2563eb, #7c3aed);
+  border: none;
+  color: #fff;
+  padding: 11px 26px;
+  border-radius: 999px;
+  font-weight: 600;
+  box-shadow: 0 10px 24px rgba(99, 102, 241, 0.35);
+}
+
+.defect-review-panel .review-form-secondary {
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.2);
+  padding: 11px 24px;
 }
 
 
+.defect-table-section {
+  margin-top: 32px;
+  padding: 18px 16px 10px;
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
 .defect-table-title {
-  margin: 0 0 16px;
-  font-size: 16px;
+  margin: 0 0 18px;
+  font-size: 19px;
   text-transform: uppercase;
-  color: #1f2937;
-  letter-spacing: 0.8px;
+  color: #0f172a;
+  letter-spacing: 0.75px;
   text-align: center;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
 }
 
 #defectTable thead tr {

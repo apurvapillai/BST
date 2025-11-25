@@ -1442,10 +1442,10 @@
       };
     }
 
-    function getReelCodes() {
-      return getSelectedReelEntries()
-        .map((entry) => entry.code)
-        .filter((code) => code);
+  function getReelCodes() {
+    return getSelectedReelEntries()
+      .map((entry) => entry.code)
+      .filter((code) => code);
     }
 
     function getReelIds() {
@@ -1736,15 +1736,16 @@
 
     function removeReel(identifier, { emit: shouldEmit = false } = {}) {
       const normalized = identifier !== undefined && identifier !== null ? String(identifier).trim() : "";
-      if (!normalized) return;
-      let targetId = "";
-      if (state.reel_ids.includes(normalized)) {
-        targetId = normalized;
-      } else {
-        const candidates = reelIdsByCode.get(normalized) || [];
-        targetId = candidates.find((id) => state.reel_ids.includes(id)) || "";
+      let targetId = normalized;
+      if (!targetId) {
+        targetId = state.reel_ids[state.reel_ids.length - 1] || "";
       }
       if (!targetId) return;
+      if (!state.reel_ids.includes(targetId)) {
+        const candidates = reelIdsByCode.get(targetId) || [];
+        targetId = candidates.find((id) => state.reel_ids.includes(id)) || "";
+        if (!targetId) return;
+      }
       const next = state.reel_ids.filter((entry) => entry !== targetId);
       if (next.length === state.reel_ids.length) return;
       state.reel_ids = next;
@@ -2125,15 +2126,26 @@
       const jobHeatmaps = data.job_heatmaps || [];
 
       const jobsTimePct = jobsTime.map((job) => {
-        const total =
-          (job.minutes_active || 0) +
-          (job.minutes_inactive || 0) +
-          (job.minutes_learn || 0);
+        const lengthActive = Number.isFinite(job.length_active) ? job.length_active : 0;
+        const lengthInactive = Number.isFinite(job.length_inactive) ? job.length_inactive : 0;
+        const lengthLearn = Number.isFinite(job.length_learn) ? job.length_learn : 0;
+        const lengthTotal = lengthActive + lengthInactive + lengthLearn;
+
+        const minutesActive = Number.isFinite(job.minutes_active) ? job.minutes_active : 0;
+        const minutesInactive = Number.isFinite(job.minutes_inactive) ? job.minutes_inactive : 0;
+        const minutesLearn = Number.isFinite(job.minutes_learn) ? job.minutes_learn : 0;
+        const minutesTotal = minutesActive + minutesInactive + minutesLearn;
+
+        const divisor = lengthTotal || minutesTotal;
+        const activeValue = lengthTotal ? lengthActive : minutesActive;
+        const inactiveValue = lengthTotal ? lengthInactive : minutesInactive;
+        const learnValue = lengthTotal ? lengthLearn : minutesLearn;
+
         return {
-          job: job.job,
-          active_pct: total ? (job.minutes_active / total) * 100 : 0,
-          inactive_pct: total ? (job.minutes_inactive / total) * 100 : 0,
-          learn_pct: total ? (job.minutes_learn / total) * 100 : 0,
+          job: job.job || "Unassigned",
+          active_pct: divisor ? (activeValue / divisor) * 100 : 0,
+          inactive_pct: divisor ? (inactiveValue / divisor) * 100 : 0,
+          learn_pct: divisor ? (learnValue / divisor) * 100 : 0,
         };
       });
 
@@ -2964,6 +2976,19 @@
       reviewStatus: null,
     };
     const summaryCache = new Map();
+    const reviewPanel = Utils.qs("#defectReviewPanel");
+    const reviewPanelStatusEl = reviewPanel ? reviewPanel.querySelector("[data-review-status]") : null;
+    const reviewPanelMetaEl = reviewPanel ? reviewPanel.querySelector("[data-review-meta]") : null;
+    const reviewPanelHost = reviewPanel ? reviewPanel.querySelector("[data-review-form-host]") : null;
+    const reviewPanelControls = reviewPanel ? reviewPanel.querySelector("[data-review-controls]") : null;
+    const reviewPanelButtons = reviewPanelControls
+      ? Array.from(reviewPanelControls.querySelectorAll("[data-review-action]"))
+      : [];
+    const reviewPanelNewBtn = reviewPanel ? reviewPanel.querySelector("[data-review-new]") : null;
+    let reviewPanelReady = false;
+    let reviewPanelListenerAttached = false;
+    let reviewPanelActiveId = null;
+    const reviewSummaryFetches = new Map();
 
     const load = Utils.debounce(async () => {
       LoadingOverlay.show();
@@ -3015,6 +3040,8 @@
         });
         updateStatusFilterUI();
       }
+
+      setupReviewPanel();
     }
 
     function activate() {
@@ -3037,6 +3064,249 @@
       updateStatusFilterUI();
       state.page = 1;
       load.flush();
+    }
+
+    function setupReviewPanel() {
+      if (!reviewPanel || reviewPanelReady) return;
+      reviewPanelReady = true;
+      reviewPanelButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          if (button.disabled) return;
+          const decision = (button.dataset.reviewAction || "").toLowerCase();
+          if (!decision) return;
+          openReviewForm(decision);
+        });
+      });
+      if (reviewPanelNewBtn) {
+        reviewPanelNewBtn.addEventListener("click", () => {
+          if (reviewPanelNewBtn.disabled) return;
+          const ids = Filters.getReelIds();
+          if (ids.length) {
+            Filters.removeReel(ids[ids.length - 1], { emit: true });
+          } else {
+            Filters.removeReel("", { emit: true });
+          }
+          Router.setActive("job");
+          window.requestAnimationFrame(() => {
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          });
+        });
+      }
+      if (!reviewPanelListenerAttached) {
+        Filters.onChange(() => {
+          updateReviewPanel();
+        });
+        reviewPanelListenerAttached = true;
+      }
+      updateReviewPanel(summaryCache.get(state.selectedReelId) || null);
+    }
+
+    function getPrimaryFilterReelId() {
+      const ids = Filters.getReelIds();
+      if (!ids || !ids.length) return null;
+      const candidate = ids[ids.length - 1] || ids[0];
+      const numeric = Number(candidate);
+      return Number.isFinite(numeric) ? numeric : null;
+    }
+
+    function getPrimaryFilterCode() {
+      const codes = Filters.getReelCodes();
+      if (!codes || !codes.length) return "";
+      return codes[codes.length - 1] || codes[0] || "";
+    }
+
+    function setReviewButtonsDisabled(disabled) {
+      reviewPanelButtons.forEach((button) => {
+        if (disabled) {
+          button.setAttribute("disabled", "disabled");
+        } else {
+          button.removeAttribute("disabled");
+        }
+      });
+    }
+
+    function toggleReviewControlsVisible(visible) {
+      if (!reviewPanelControls) return;
+      reviewPanelControls.classList.toggle("is-hidden", !visible);
+    }
+
+    function syncReviewButtonState(summaryOrReview) {
+      let decision = "";
+      if (summaryOrReview) {
+        if (summaryOrReview.review && summaryOrReview.review.decision) {
+          decision = String(summaryOrReview.review.decision).toLowerCase();
+        } else if (summaryOrReview.decision) {
+          decision = String(summaryOrReview.decision).toLowerCase();
+        }
+      }
+      reviewPanelButtons.forEach((button) => {
+        const action = (button.dataset.reviewAction || "").toLowerCase();
+        button.classList.toggle("is-active", Boolean(decision) && action === decision);
+      });
+    }
+
+    function updateReviewPanel(summary) {
+      if (!reviewPanel) return;
+      const filterIds = Filters.getReelIds();
+      const filterCodes = Filters.getReelCodes();
+      const hasFilterSelection = (filterIds && filterIds.length) || (filterCodes && filterCodes.length);
+
+      let targetSummary = summary || null;
+      let targetId = null;
+
+      const summaryReelId =
+        targetSummary && targetSummary.reel && targetSummary.reel.reel_id !== undefined
+          ? Number(targetSummary.reel.reel_id)
+          : null;
+      if (Number.isFinite(summaryReelId)) {
+        targetId = summaryReelId;
+      }
+
+      if ((targetId === null || targetId === undefined) && hasFilterSelection) {
+        const preferred = getPrimaryFilterReelId();
+        if (preferred !== null && preferred !== undefined) {
+          targetId = preferred;
+        }
+      }
+
+      if ((targetId === null || targetId === undefined) && reviewPanel.dataset.reelId) {
+        const datasetId = Number(reviewPanel.dataset.reelId);
+        if (Number.isFinite(datasetId)) {
+          targetId = datasetId;
+        }
+      }
+
+      if (targetId !== null && targetId !== undefined && !Number.isFinite(targetId)) {
+        targetId = null;
+      }
+
+      if (targetId !== null && targetId !== undefined && !targetSummary) {
+        targetSummary = summaryCache.get(Number(targetId)) || null;
+      }
+
+      const candidateCode =
+        (targetSummary && targetSummary.reel && targetSummary.reel.reel_code) || getPrimaryFilterCode();
+      const inReview =
+        hasFilterSelection &&
+        targetId !== null &&
+        targetId !== undefined &&
+        Filters.hasReelSelection(targetId, candidateCode || null);
+
+      if (!inReview) {
+        state.selectedReelId = null;
+        reviewPanelActiveId = null;
+        reviewPanel.classList.remove("is-active");
+        reviewPanel.dataset.reelId = "";
+        reviewPanel.dataset.reelCode = "";
+        if (reviewPanelStatusEl) {
+          reviewPanelStatusEl.textContent = "Select a reel from Job Explorer to start a review.";
+        }
+        if (reviewPanelMetaEl) {
+          reviewPanelMetaEl.textContent = "";
+        }
+        setReviewButtonsDisabled(true);
+        if (reviewPanelNewBtn) {
+          reviewPanelNewBtn.disabled = true;
+        }
+        toggleReviewControlsVisible(true);
+        syncReviewButtonState(null);
+        closeReviewForm();
+        return;
+      }
+
+      const normalizedId = Number(targetId);
+      if (Number.isFinite(normalizedId)) {
+        state.selectedReelId = normalizedId;
+      }
+      const previousId = reviewPanelActiveId;
+      reviewPanelActiveId = Number.isFinite(normalizedId) ? normalizedId : previousId;
+      if (previousId !== reviewPanelActiveId) {
+        closeReviewForm();
+      }
+      if (reviewPanelNewBtn) {
+        reviewPanelNewBtn.disabled = false;
+      }
+
+      reviewPanel.classList.add("is-active");
+      if (Number.isFinite(reviewPanelActiveId)) {
+        reviewPanel.dataset.reelId = String(reviewPanelActiveId);
+      } else {
+        reviewPanel.dataset.reelId = "";
+      }
+      const summaryReel = targetSummary && targetSummary.reel ? targetSummary.reel : null;
+      const displayCode =
+        (summaryReel && summaryReel.reel_code) || reviewPanel.dataset.reelCode || candidateCode || "";
+      reviewPanel.dataset.reelCode = displayCode;
+
+      const reviewData = targetSummary && targetSummary.review ? targetSummary.review : null;
+      const hasDecision = Boolean(reviewData && reviewData.decision);
+      reviewPanel.classList.toggle("review-pass", hasDecision && String(reviewData.decision).toLowerCase() === "pass");
+      reviewPanel.classList.toggle("review-fail", hasDecision && String(reviewData.decision).toLowerCase() === "fail");
+
+      if (reviewPanelStatusEl) {
+        if (hasDecision) {
+          const label = String(reviewData.decision).toLowerCase() === "fail" ? "Review status: Failed" : "Review status: Passed";
+          reviewPanelStatusEl.textContent = label;
+        } else {
+          const label = displayCode || (Number.isFinite(reviewPanelActiveId) ? `Reel ${reviewPanelActiveId}` : "Selected reel");
+          const jobLabel = summaryReel && summaryReel.job_name ? ` - ${summaryReel.job_name}` : "";
+          const suffix = targetSummary ? jobLabel : jobLabel || " (loading details…)";
+          reviewPanelStatusEl.textContent = `Reviewing ${label}${suffix}`;
+        }
+      }
+
+      if (reviewPanelMetaEl) {
+        if (hasDecision) {
+          const reviewer = reviewData.reviewer_name || reviewData.reviewer_id || "";
+          const timestamp = reviewData.created_at ? formatTime(reviewData.created_at) : "";
+          const bits = [];
+          if (reviewer) bits.push(`By ${reviewer}`);
+          if (timestamp) bits.push(timestamp);
+          reviewPanelMetaEl.textContent = bits.join(" • ");
+        } else {
+          reviewPanelMetaEl.textContent = "";
+        }
+      }
+
+      if (hasDecision) {
+        setReviewButtonsDisabled(true);
+        toggleReviewControlsVisible(false);
+        if (reviewPanelNewBtn) {
+          reviewPanelNewBtn.disabled = false;
+        }
+        syncReviewButtonState(reviewData);
+        closeReviewForm();
+        return;
+      }
+
+      toggleReviewControlsVisible(true);
+      setReviewButtonsDisabled(false);
+      if (reviewPanelNewBtn) {
+        reviewPanelNewBtn.disabled = false;
+      }
+      syncReviewButtonState(targetSummary);
+      if (!targetSummary && Number.isFinite(reviewPanelActiveId)) {
+        ensureReviewSummary(reviewPanelActiveId);
+      }
+    }
+
+    async function ensureReviewSummary(reelId) {
+      if (!Number.isFinite(reelId)) return;
+      if (summaryCache.has(reelId)) return;
+      const key = String(reelId);
+      if (reviewSummaryFetches.has(key)) return;
+      reviewSummaryFetches.set(key, true);
+      try {
+        const summary = await Api.get(`reel/${reelId}/summary`);
+        if (summary) {
+          summaryCache.set(reelId, summary);
+          updateReviewPanel(summary);
+        }
+      } catch (err) {
+        console.error(`Failed to load review summary for reel ${reelId}`, err);
+      } finally {
+        reviewSummaryFetches.delete(key);
+      }
     }
 
     function updateStatusFilterUI() {
@@ -3295,7 +3565,7 @@
         ensureReferenceBackground(cached);
         detailEl.innerHTML = buildSummary(cached);
         attachGalleryListeners(detailEl);
-        attachSummaryActions(detailEl);
+        attachSummaryActions(detailEl, cached);
         JobHeatmap.attach(detailEl, cached);
         MaskHeatmap.attach(detailEl, cached);
         if (immediate) {
@@ -3313,7 +3583,7 @@
         if (state.selectedReelId !== reelId) return;
         detailEl.innerHTML = buildSummary(summary);
         attachGalleryListeners(detailEl);
-        attachSummaryActions(detailEl);
+        attachSummaryActions(detailEl, summary);
         JobHeatmap.attach(detailEl, summary);
         MaskHeatmap.attach(detailEl, summary);
       } catch (err) {
@@ -3352,20 +3622,14 @@
           ? reel.reel_end - reel.reel_start
           : null;
       const inReview = Filters.hasReelSelection(reel.reel_id, reel.reel_code);
-      const addButton = reel.reel_code
-        ? `<button class="add-reel-button" data-add-reel="${reel.reel_code}" data-add-reel-id="${reel.reel_id ?? ""}" ${inReview ? "disabled" : ""}>${
-            inReview ? "In review" : "Add to review"
-          }</button>`
-        : "";
+      const hasReviewed = Boolean(review && review.decision);
+      const addButton =
+        reel.reel_code && !hasReviewed
+          ? `<button class="add-reel-button" data-add-reel="${reel.reel_code}" data-add-reel-id="${reel.reel_id ?? ""}" ${inReview ? "disabled" : ""}>${
+              inReview ? "In review" : "Review"
+            }</button>`
+          : "";
       const reviewBadge = renderReviewBadge(review);
-      const isPassActive = review && String(review.decision).toLowerCase() === "pass";
-      const isFailActive = review && String(review.decision).toLowerCase() === "fail";
-      const reviewControls = inReview
-        ? `<div class="review-controls" data-review-controls>
-             <button class="review-action review-action--pass${isPassActive ? " is-active" : ""}" data-review-action="pass">Pass</button>
-             <button class="review-action review-action--fail${isFailActive ? " is-active" : ""}" data-review-action="fail">Fail</button>
-           </div>`
-        : "";
       const reviewSummaryBlock = (() => {
         if (!review) {
           return "<span class='badge'>No review decision recorded.</span>";
@@ -3395,7 +3659,6 @@
           </div>
         `;
       })();
-      const reviewFormHost = `<div class="review-form-host" data-review-form-host></div>`;
 
       const phaseTimeline = renderTimeline(phases, "Inspection timeline");
       const rlmPhaseTimeline =
@@ -3522,7 +3785,6 @@
                 ${reel.reel_code || "Reel"}
                 ${reviewBadge || ""}
               </div>
-              ${reviewControls || ""}
             </div>
             <div class="summary-metadata">
               <span>${reel.job_name || "No Job"}</span>
@@ -3537,8 +3799,6 @@
             ${addButton}
           </div>
         </div>
-
-        ${reviewFormHost}
         <div class="summary-section summary-section--review">
           <h4>Review</h4>
           ${reviewSummaryBlock}
@@ -3768,8 +4028,9 @@ function extractRlmMetrics(config) {
       });
     }
 
-    function attachSummaryActions(scope) {
+    function attachSummaryActions(scope, summaryData) {
       if (!scope) return;
+      const summary = summaryData || summaryCache.get(state.selectedReelId) || null;
       const addButton = scope.querySelector("[data-add-reel]");
       if (addButton) {
         const reelCode = addButton.dataset.addReel || "";
@@ -3781,9 +4042,9 @@ function extractRlmMetrics(config) {
         }
         addButton.addEventListener("click", () => {
           if (!reelCode) return;
-          const summary = summaryCache.get(state.selectedReelId) || null;
-          if (summary && summary.reel) {
-            const { job_name: jobName, order_number: orderNumber } = summary.reel;
+          const currentSummary = summaryCache.get(state.selectedReelId) || summary;
+          if (currentSummary && currentSummary.reel) {
+            const { job_name: jobName, order_number: orderNumber } = currentSummary.reel;
             const { job: currentJob, order: currentOrder } = Filters.getState();
             const updates = {};
             if (!currentOrder || currentOrder === ORDER_NONE) {
@@ -3802,35 +4063,50 @@ function extractRlmMetrics(config) {
               Filters.setMany(updates, { emit: true });
             }
           }
-          Filters.addReel(reelCode, reelIdAttr || (summary && summary.reel ? summary.reel.reel_id : ""));
+          Filters.addReel(reelCode, reelIdAttr || (currentSummary && currentSummary.reel ? currentSummary.reel.reel_id : ""));
           addButton.disabled = true;
           addButton.textContent = "In review";
+          updateReviewPanel(currentSummary);
+          Router.setActive("defects");
         });
       }
-
-      scope.querySelectorAll("[data-review-action]").forEach((button) => {
-        button.addEventListener("click", () => {
-          const decision = (button.dataset.reviewAction || "").toLowerCase();
-          if (!decision) return;
-          openReviewForm(decision, scope);
-        });
-      });
+      updateReviewPanel(summary);
     }
 
-    function openReviewForm(decision, scope) {
-      if (!scope) return;
-      const host = scope.querySelector("[data-review-form-host]");
-      if (!host) return;
+    function openReviewForm(decision) {
+      if (!reviewPanel || !reviewPanelHost) return;
+      if (reviewPanelControls && reviewPanelControls.classList.contains("is-hidden")) {
+        return;
+      }
       const normalizedDecision = decision === "fail" ? "fail" : "pass";
       const decisionLabel = normalizedDecision === "pass" ? "Pass" : "Fail";
-      const summary = summaryCache.get(state.selectedReelId) || {};
-      const existingReview = summary.review || null;
+      let summary = summaryCache.get(state.selectedReelId) || null;
+      if (!summary && reviewPanel && reviewPanel.dataset.reelId) {
+        const fallbackId = Number(reviewPanel.dataset.reelId);
+        if (Number.isFinite(fallbackId)) {
+          summary = summaryCache.get(fallbackId) || null;
+        }
+      }
+      let reel = summary && summary.reel ? summary.reel : null;
+      if (!reel && reviewPanel) {
+        const fallbackId = Number(reviewPanel.dataset.reelId);
+        if (Number.isFinite(fallbackId)) {
+          reel = {
+            reel_id: fallbackId,
+            reel_code: reviewPanel.dataset.reelCode || "",
+          };
+        }
+      }
+      if (!reel || !Filters.hasReelSelection(reel.reel_id, reel.reel_code || reviewPanel.dataset.reelCode || "")) {
+        return;
+      }
+      const existingReview = summary && summary.review ? summary.review : null;
       const reviewerPrefill =
         existingReview && (existingReview.reviewer_name || existingReview.reviewer_id)
           ? Utils.escapeHtml(existingReview.reviewer_name || existingReview.reviewer_id)
           : "";
       const suffix = state.selectedReelId || "reel";
-      host.innerHTML = `
+      reviewPanelHost.innerHTML = `
         <div class="review-form">
           <div class="review-form-header">
             <h5>${decisionLabel} Roll</h5>
@@ -3854,17 +4130,17 @@ function extractRlmMetrics(config) {
           </form>
         </div>
       `;
-      const form = host.querySelector("[data-review-form]");
+      const form = reviewPanelHost.querySelector("[data-review-form]");
       if (!form) return;
-      const cancelButtons = host.querySelectorAll("[data-review-cancel]");
+      const cancelButtons = reviewPanelHost.querySelectorAll("[data-review-cancel]");
       cancelButtons.forEach((btn) =>
         btn.addEventListener("click", () => {
-          closeReviewForm(host);
+          closeReviewForm();
         })
       );
       form.addEventListener("submit", (event) => {
         event.preventDefault();
-        submitReviewDecision(normalizedDecision, form, host);
+        submitReviewDecision(normalizedDecision, form, reviewPanelHost);
       });
       const reviewerInput = form.querySelector("[name='reviewer_name']");
       if (reviewerInput) {
@@ -3876,18 +4152,18 @@ function extractRlmMetrics(config) {
         const len = reviewerInput.value.length;
         reviewerInput.setSelectionRange(len, len);
       }
-      const container = host.closest(".job-layout");
+      const container = reviewPanel;
       if (container) {
         container.scrollIntoView({ behavior: "smooth", block: "nearest" });
       }
     }
 
-    function closeReviewForm(host) {
+    function closeReviewForm(host = reviewPanelHost) {
       if (!host) return;
       host.innerHTML = "";
     }
 
-    function setReviewError(host, message) {
+    function setReviewError(host = reviewPanelHost, message) {
       if (!host) return;
       const errorEl = host.querySelector("[data-review-error]");
       if (!errorEl) return;
@@ -3911,9 +4187,25 @@ function extractRlmMetrics(config) {
       });
     }
 
-    async function submitReviewDecision(decision, form, host) {
-      if (!state.selectedReelId) {
+    async function submitReviewDecision(decision, form, host = reviewPanelHost) {
+      let targetId = state.selectedReelId;
+      if (targetId === null || targetId === undefined) {
+        const panelId =
+          reviewPanel && reviewPanel.dataset.reelId
+            ? Number(reviewPanel.dataset.reelId)
+            : null;
+        if (Number.isFinite(panelId)) {
+          targetId = panelId;
+          state.selectedReelId = panelId;
+        }
+      }
+      if (targetId === null || targetId === undefined) {
         setReviewError(host, "No reel selected.");
+        return;
+      }
+      const normalizedTargetId = Number(targetId);
+      if (!Number.isFinite(normalizedTargetId)) {
+        setReviewError(host, "Invalid reel selected.");
         return;
       }
       const normalizedDecision = decision === "fail" ? "fail" : decision === "pass" ? "pass" : "";
@@ -3941,15 +4233,15 @@ function extractRlmMetrics(config) {
           reviewer_name: reviewer,
           comments,
         };
-        const response = await Api.post(`reel/${state.selectedReelId}/review`, payload);
+        const response = await Api.post(`reel/${normalizedTargetId}/review`, payload);
         const latestReview = response && response.review ? response.review : null;
         if (latestReview) {
-          const summary = summaryCache.get(state.selectedReelId);
+          const summary = summaryCache.get(normalizedTargetId);
           if (summary) {
             summary.review = latestReview;
-            summaryCache.set(state.selectedReelId, summary);
+            summaryCache.set(normalizedTargetId, summary);
           }
-          const index = state.cachedItems.findIndex((item) => item.reel_id === state.selectedReelId);
+          const index = state.cachedItems.findIndex((item) => item.reel_id === normalizedTargetId);
           if (index !== -1) {
             const reviewStatusValue = latestReview && latestReview.decision
               ? (String(latestReview.decision).toLowerCase() === "pass" ? "pass" : "fail")
@@ -3969,6 +4261,7 @@ function extractRlmMetrics(config) {
         setReviewFormLoading(form, false);
         if (shouldClose) {
           closeReviewForm(host);
+          updateReviewPanel(summaryCache.get(normalizedTargetId) || null);
           renderList();
           load.flush();
         }
@@ -4016,6 +4309,7 @@ function extractRlmMetrics(config) {
     let updating = false;
     let typeOptionCache = new Set();
     const defaultBucketKeys = HEATMAP_BUCKETS.map((bucket) => bucket.key);
+    let decisionSummary = null;
 
     const state = {
       page: 1,
@@ -4600,17 +4894,81 @@ function extractRlmMetrics(config) {
     }
 
     function renderDecisionSummary(summary) {
-      const data = summary || {};
-      const total = Number.isFinite(data.total) ? data.total : null;
-      const pass = Number.isFinite(data.pass) ? data.pass : null;
-      const fail = Number.isFinite(data.fail) ? data.fail : null;
-      const unidentified = Number.isFinite(data.unidentified) ? data.unidentified : null;
-      if (decisionTotalEl) decisionTotalEl.textContent = total === null ? "--" : Utils.formatNumber(total);
-      if (decisionPassEl) decisionPassEl.textContent = pass === null ? "--" : Utils.formatNumber(pass);
-      if (decisionFailEl) decisionFailEl.textContent = fail === null ? "--" : Utils.formatNumber(fail);
-      if (decisionUnidentifiedEl) {
-        decisionUnidentifiedEl.textContent = unidentified === null ? "--" : Utils.formatNumber(unidentified);
+      decisionSummary = sanitizeDecisionSummary(summary);
+      updateDecisionSummaryDisplay();
+    }
+
+    function sanitizeDecisionSummary(summary) {
+      if (!summary || typeof summary !== "object") {
+        return { total: 0, pass: 0, fail: 0, unidentified: 0 };
       }
+      const ensure = (value) => (Number.isFinite(value) ? Number(value) : 0);
+      const sanitized = {
+        total: ensure(summary.total),
+        pass: ensure(summary.pass),
+        fail: ensure(summary.fail),
+        unidentified: ensure(summary.unidentified),
+      };
+      if (!Number.isFinite(summary.total)) {
+        sanitized.total = sanitized.pass + sanitized.fail + sanitized.unidentified;
+      }
+      return sanitized;
+    }
+
+    function updateDecisionSummaryDisplay() {
+      if (!decisionTotalEl && !decisionPassEl && !decisionFailEl && !decisionUnidentifiedEl) return;
+      if (!decisionSummary) {
+        if (decisionTotalEl) decisionTotalEl.textContent = "--";
+        if (decisionPassEl) decisionPassEl.textContent = "--";
+        if (decisionFailEl) decisionFailEl.textContent = "--";
+        if (decisionUnidentifiedEl) decisionUnidentifiedEl.textContent = "--";
+        return;
+      }
+      if (decisionTotalEl) decisionTotalEl.textContent = Utils.formatNumber(decisionSummary.total || 0);
+      if (decisionPassEl) decisionPassEl.textContent = Utils.formatNumber(decisionSummary.pass || 0);
+      if (decisionFailEl) decisionFailEl.textContent = Utils.formatNumber(decisionSummary.fail || 0);
+      if (decisionUnidentifiedEl) {
+        decisionUnidentifiedEl.textContent = Utils.formatNumber(decisionSummary.unidentified || 0);
+      }
+    }
+
+    function adjustDecisionSummary(previousDecision, nextDecision) {
+      if (!decisionSummary) {
+        decisionSummary = sanitizeDecisionSummary({});
+      }
+      const summary = { ...decisionSummary };
+      const prev = normalizeDecisionValue(previousDecision);
+      const next = normalizeDecisionValue(nextDecision);
+
+      if (prev === "pass") {
+        summary.pass = Math.max(0, (summary.pass || 0) - 1);
+      } else if (prev === "fail") {
+        summary.fail = Math.max(0, (summary.fail || 0) - 1);
+      } else {
+        summary.unidentified = Math.max(0, (summary.unidentified || 0) - 1);
+      }
+
+      if (next === "pass") {
+        summary.pass = (summary.pass || 0) + 1;
+      } else if (next === "fail") {
+        summary.fail = (summary.fail || 0) + 1;
+      } else {
+        summary.unidentified = (summary.unidentified || 0) + 1;
+      }
+
+      summary.total = Math.max(
+        0,
+        (summary.pass || 0) + (summary.fail || 0) + (summary.unidentified || 0)
+      );
+      decisionSummary = summary;
+      updateDecisionSummaryDisplay();
+    }
+
+    function normalizeDecisionValue(value) {
+      if (!value) return null;
+      const normalized = String(value).trim().toLowerCase();
+      if (normalized === "pass" || normalized === "fail") return normalized;
+      return null;
     }
 
     function renderTable(rows) {
@@ -4655,6 +5013,7 @@ function extractRlmMetrics(config) {
     async function saveDefectDecision(cell, defectId, decision) {
       const normalized = (decision || "").toLowerCase();
       if (!normalized || (normalized !== "pass" && normalized !== "fail")) return;
+      const previousDecision = (cell.dataset.decision || "").toLowerCase();
       cell.dataset.loading = "true";
       cell.classList.add("defect-decision-saving");
       try {
@@ -4664,6 +5023,7 @@ function extractRlmMetrics(config) {
         cell.innerHTML = buildDecisionBadge(persisted);
         updateDefectImageDecision(defectId, persisted);
         syncModalAfterDecision(defectId, persisted);
+        adjustDecisionSummary(previousDecision, persisted);
       } catch (error) {
         console.error("Failed to update defect decision", error);
         window.alert(
