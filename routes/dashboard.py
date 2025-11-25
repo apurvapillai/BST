@@ -1287,9 +1287,14 @@ def api_overview():
         total_seconds = (
             totals["active_seconds"] + totals["inactive_seconds"] + totals["learn_seconds"]
         )
+        total_length = (
+            totals["active_length"] + totals["inactive_length"] + totals["learn_length"]
+        )
+        if total_length <= 0:
+            total_length = totals["length"]
 
         def pct(value: float) -> float:
-            return round(value / total_seconds * 100, 1) if total_seconds else 0.0
+            return round(value / total_length * 100, 1) if total_length else 0.0
 
         job_events = []
         for entry in sorted(
@@ -1462,15 +1467,15 @@ def api_overview():
             )
 
         response = {
-            "kpis": {
-                "total_jobs": len(job_set),
-                "total_length": round(totals["length"], 2),
-                "active_pct": pct(totals["active_seconds"]),
-                "inactive_pct": pct(totals["inactive_seconds"]),
-                "learn_pct": pct(totals["learn_seconds"]),
-                "active_length": round(totals["active_length"], 2),
-                "inactive_length": round(totals["inactive_length"], 2),
-                "learn_length": round(totals["learn_length"], 2),
+                "kpis": {
+                    "total_jobs": len(job_set),
+                    "total_length": round(total_length, 2),
+                    "active_pct": pct(totals["active_length"]),
+                    "inactive_pct": pct(totals["inactive_length"]),
+                    "learn_pct": pct(totals["learn_length"]),
+                    "active_length": round(totals["active_length"], 2),
+                    "inactive_length": round(totals["inactive_length"], 2),
+                    "learn_length": round(totals["learn_length"], 2),
                 "total_defects": total_defects,
                 "defect_classes": int(defect_classes),
             },
