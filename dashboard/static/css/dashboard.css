@@ -13,6 +13,54 @@ body {
   position: relative;
 }
 
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 24px;
+  padding: 8px 8px 0;
+}
+
+.app-logo {
+  width: 72px;
+  height: auto;
+  object-fit: contain;
+}
+
+.app-title {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.app-title__eyebrow {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.app-title h1 {
+  margin: 0;
+  font-size: 28px;
+  color: #0f172a;
+  letter-spacing: -0.5px;
+}
+
+@media (max-width: 768px) {
+  .app-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .app-title h1 {
+    font-size: 22px;
+  }
+}
+
 .loading-overlay {
   position: fixed;
   inset: 0;

@@ -971,6 +971,7 @@
     return { domId, attach };
   })();
 
+
   const LoadingOverlay = (() => {
     let overlay = null;
 
@@ -3480,14 +3481,11 @@
         : `<div class="heatmap-wrapper heatmap-empty" id="${heatmapId}">
              <span class='badge'>${hasDimensions ? "No defect coordinates" : "Format dimensions unavailable"}</span>
            </div>`;
-      const heatmapInner = `
-          ${wrapperHtml}
-          <div class="heatmap-legend heatmap-legend-job" id="${heatmapId}-legend"></div>
-        `;
       const heatmapSection = `
         <div class="summary-section">
           <h4>Defect Heatmap</h4>
-          ${heatmapInner}
+          ${wrapperHtml}
+          <div class="heatmap-legend heatmap-legend-job" id="${heatmapId}-legend"></div>
         </div>
       `;
       const maskHeatmapId = MaskHeatmap.domId(reel);
@@ -3587,7 +3585,6 @@
           <h4>Inspection Phases</h4>
           ${phaseTimeline}
         </div>
-
         ${heatmapSection}
 
         <div class="summary-section">
