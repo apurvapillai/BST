@@ -255,151 +255,157 @@
 
     <!-- Defect Explorer Tab -->
     <section id="tab-defects" class="tab-content hidden">
-      <div class="defect-toolbar">
-        <div class="defect-filter">
-          <label for="defectTypeFilter">Type</label>
-          <select id="defectTypeFilter">
-            <option value="">All</option>
-          </select>
+      <div class="defect-group defect-group--review">
+        <div class="defect-review-panel" id="defectReviewPanel">
+          <div class="defect-review-header">
+            <div class="defect-review-copy">
+              <h4>Reel Review</h4>
+              <p class="defect-review-status" data-review-status>
+                Select a reel from Job Explorer to start a review.
+              </p>
+              <p class="defect-review-meta" data-review-meta></p>
+            </div>
+            <div class="review-actions-group">
+              <button type="button" class="review-new-btn" data-review-new disabled>Review New Reel</button>
+              <div class="review-controls" data-review-controls>
+                <button class="review-action review-action--pass" data-review-action="pass" disabled>Pass</button>
+                <button class="review-action review-action--fail" data-review-action="fail" disabled>Fail</button>
+              </div>
+            </div>
+          </div>
+          <div class="review-form-host" data-review-form-host></div>
         </div>
-        <div class="defect-filter">
-          <label for="defectPhaseFilter">Phase</label>
-          <select id="defectPhaseFilter">
-            <option value="">All</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-            <option value="learn">Learn</option>
-          </select>
+        <div class="defect-decision-summary" id="defectDecisionSummary">
+          <div class="defect-decision-card total">
+            <span>Total Defects</span>
+            <strong data-decision-total>--</strong>
+          </div>
+          <div class="defect-decision-card pass">
+            <span>Total Pass</span>
+            <strong data-decision-pass>--</strong>
+          </div>
+          <div class="defect-decision-card fail">
+            <span>Total Fail</span>
+            <strong data-decision-fail>--</strong>
+          </div>
+          <div class="defect-decision-card pending">
+            <span>Unidentified</span>
+            <strong data-decision-unidentified>--</strong>
+          </div>
         </div>
-        <div class="defect-filter range">
-          <label>Magnitude</label>
-          <input type="number" id="magnitudeMin" placeholder="Min" step="0.1">
-          <span>–</span>
-          <input type="number" id="magnitudeMax" placeholder="Max" step="0.1">
+
+        <div class="table-wrapper defect-table-section">
+          <h4 class="defect-table-title">Defect Records</h4>
+          <div class="defect-table-scroll">
+            <table id="defectTable">
+              <thead>
+                <tr>
+                  <th>Reel Code</th>
+                  <th>Time</th>
+                  <th>Order</th>
+                  <th>Job</th>
+                  <th>Type</th>
+                  <th>Magnitude</th>
+                  <th>Severity</th>
+                  <th>Position</th>
+                  <th>Image</th>
+                  <th>Pass/Fail</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
-        <div class="defect-filter range">
-          <label>Severity</label>
-          <input type="number" id="severityMin" placeholder="Min" step="0.1">
-          <span>–</span>
-          <input type="number" id="severityMax" placeholder="Max" step="0.1">
+        <div class="pagination" id="defectPagination"></div>
+      </div>
+
+      <div class="defect-group">
+        <div class="defect-toolbar">
+          <div class="defect-filter">
+            <label for="defectTypeFilter">Type</label>
+            <select id="defectTypeFilter">
+              <option value="">All</option>
+            </select>
+          </div>
+          <div class="defect-filter">
+            <label for="defectPhaseFilter">Phase</label>
+            <select id="defectPhaseFilter">
+              <option value="">All</option>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+              <option value="learn">Learn</option>
+            </select>
+          </div>
+          <div class="defect-filter range">
+            <label>Magnitude</label>
+            <input type="number" id="magnitudeMin" placeholder="Min" step="0.1">
+            <span>–</span>
+            <input type="number" id="magnitudeMax" placeholder="Max" step="0.1">
+          </div>
+          <div class="defect-filter range">
+            <label>Severity</label>
+            <input type="number" id="severityMin" placeholder="Min" step="0.1">
+            <span>–</span>
+            <input type="number" id="severityMax" placeholder="Max" step="0.1">
+          </div>
+          <div class="defect-filter range">
+            <label>Position</label>
+            <input type="number" id="positionMin" placeholder="Min" step="1">
+            <span>–</span>
+            <input type="number" id="positionMax" placeholder="Max" step="1">
+          </div>
+          <div class="defect-filter range">
+            <label>Size</label>
+            <input type="number" id="sizeMin" placeholder="Min" step="1">
+            <span>–</span>
+            <input type="number" id="sizeMax" placeholder="Max" step="1">
+          </div>
         </div>
-        <div class="defect-filter range">
-          <label>Position</label>
-          <input type="number" id="positionMin" placeholder="Min" step="1">
-          <span>–</span>
-          <input type="number" id="positionMax" placeholder="Max" step="1">
+
+        <div class="defect-summary" id="defectSummary">
+          <div class="defect-summary-card total">
+            <h4>Total Defects</h4>
+            <p data-defect-total>--</p>
+          </div>
+          <div class="defect-summary-types" id="defectSummaryTypes"></div>
         </div>
-        <div class="defect-filter range">
-          <label>Size</label>
-          <input type="number" id="sizeMin" placeholder="Min" step="1">
-          <span>–</span>
-          <input type="number" id="sizeMax" placeholder="Max" step="1">
+
+        <div class="charts">
+          <div id="defectTypeChart" class="chart"></div>
+          <div id="defectMagnitudeChart" class="chart"></div>
+          <div id="defectSeverityChart" class="chart"></div>
+          <div id="defectPositionChart" class="chart"></div>
         </div>
       </div>
 
-      <div class="defect-summary" id="defectSummary">
-        <div class="defect-summary-card total">
-          <h4>Total Defects</h4>
-          <p data-defect-total>--</p>
-        </div>
-        <div class="defect-summary-types" id="defectSummaryTypes"></div>
-      </div>
-
-      <div class="charts">
-        <div id="defectTypeChart" class="chart"></div>
-        <div id="defectMagnitudeChart" class="chart"></div>
-        <div id="defectSeverityChart" class="chart"></div>
-        <div id="defectPositionChart" class="chart"></div>
-      </div>
-
-      <div class="defect-footprints-grid">
-        <div class="defect-footprint">
-          <div class="defect-footprint-header">
-            <h4>Defect Heatmap</h4>
-            <button type="button" class="footprint-expand-btn" data-footprint-target="heatmap-defect-explorer" data-footprint-title="Defect Heatmap" aria-label="Open full screen">
-              ⤢
-            </button>
+      <div class="defect-group">
+        <div class="defect-footprints-grid">
+          <div class="defect-footprint">
+            <div class="defect-footprint-header">
+              <h4>Defect Heatmap</h4>
+              <button type="button" class="footprint-expand-btn" data-footprint-target="heatmap-defect-explorer" data-footprint-title="Defect Heatmap" aria-label="Open full screen">
+                ⤢
+              </button>
+            </div>
+            <div class="heatmap-wrapper heatmap-empty" id="heatmap-defect-explorer">
+              <span class="badge">Load defects to view footprints.</span>
+            </div>
           </div>
-          <div class="heatmap-wrapper heatmap-empty" id="heatmap-defect-explorer">
-            <span class="badge">Load defects to view footprints.</span>
-          </div>
-        </div>
-        <div class="defect-footprint">
-          <div class="defect-footprint-header">
-            <h4>Mask Footprints</h4>
-            <button type="button" class="footprint-expand-btn" data-footprint-target="mask-heatmap-defect-explorer" data-footprint-title="Mask Footprints" aria-label="Open full screen">
-              ⤢
-            </button>
-          </div>
-          <div class="heatmap-wrapper heatmap-empty" id="mask-heatmap-defect-explorer">
-            <span class="badge">No mask data for current filters.</span>
-          </div>
-        </div>
-      </div>
-      <div class="defect-footprints-legend-grid">
-        <div class="heatmap-legend heatmap-legend-job" id="heatmap-defect-explorer-legend"></div>
-      </div>
-
-      <div class="defect-decision-summary" id="defectDecisionSummary">
-        <div class="defect-decision-card total">
-          <span>Total Defects</span>
-          <strong data-decision-total>--</strong>
-        </div>
-        <div class="defect-decision-card pass">
-          <span>Total Pass</span>
-          <strong data-decision-pass>--</strong>
-        </div>
-        <div class="defect-decision-card fail">
-          <span>Total Fail</span>
-          <strong data-decision-fail>--</strong>
-        </div>
-        <div class="defect-decision-card pending">
-          <span>Unidentified</span>
-          <strong data-decision-unidentified>--</strong>
-        </div>
-      </div>
-
-      <div class="table-wrapper defect-table-section">
-        <h4 class="defect-table-title">Defect Records</h4>
-        <div class="defect-table-scroll">
-          <table id="defectTable">
-            <thead>
-              <tr>
-                <th>Reel Code</th>
-                <th>Time</th>
-                <th>Order</th>
-                <th>Job</th>
-                <th>Type</th>
-                <th>Magnitude</th>
-                <th>Severity</th>
-                <th>Position</th>
-                <th>Image</th>
-                <th>Pass/Fail</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
-      <div class="pagination" id="defectPagination"></div>
-      <div class="defect-review-panel" id="defectReviewPanel">
-        <div class="defect-review-header">
-          <div class="defect-review-copy">
-            <h4>Reel Review</h4>
-            <p class="defect-review-status" data-review-status>
-              Select a reel from Job Explorer to start a review.
-            </p>
-            <p class="defect-review-meta" data-review-meta></p>
-          </div>
-          <div class="review-actions-group">
-            <button type="button" class="review-new-btn" data-review-new disabled>Review New Reel</button>
-            <div class="review-controls" data-review-controls>
-              <button class="review-action review-action--pass" data-review-action="pass" disabled>Pass</button>
-              <button class="review-action review-action--fail" data-review-action="fail" disabled>Fail</button>
+          <div class="defect-footprint">
+            <div class="defect-footprint-header">
+              <h4>Mask Footprints</h4>
+              <button type="button" class="footprint-expand-btn" data-footprint-target="mask-heatmap-defect-explorer" data-footprint-title="Mask Footprints" aria-label="Open full screen">
+                ⤢
+              </button>
+            </div>
+            <div class="heatmap-wrapper heatmap-empty" id="mask-heatmap-defect-explorer">
+              <span class="badge">No mask data for current filters.</span>
             </div>
           </div>
         </div>
-        <div class="review-form-host" data-review-form-host></div>
+        <div class="defect-footprints-legend-grid">
+          <div class="heatmap-legend heatmap-legend-job" id="heatmap-defect-explorer-legend"></div>
+        </div>
       </div>
     </section>
   </div>
