@@ -3568,6 +3568,7 @@
         attachSummaryActions(detailEl, cached);
         JobHeatmap.attach(detailEl, cached);
         MaskHeatmap.attach(detailEl, cached);
+        renderRlmTrend(detailEl, cached);
         if (immediate) {
           return;
         }
@@ -3586,6 +3587,7 @@
         attachSummaryActions(detailEl, summary);
         JobHeatmap.attach(detailEl, summary);
         MaskHeatmap.attach(detailEl, summary);
+        renderRlmTrend(detailEl, summary);
       } catch (err) {
         console.error("Failed to load reel summary", err);
         if (!cached) {
@@ -3667,6 +3669,7 @@
           : "<span class='badge'>No RLM phases</span>";
 
       const rlmPoints = rlm.points || [];
+      const rlmTrendId = `rlm-trend-${reel.reel_id || reel.reel_code || "reel"}`;
       const rlmPointsTable = rlmPoints.length
         ? `<div class="data-table-scroll rlm-table-scroll">
              <table class="data-table">
@@ -3866,6 +3869,7 @@
           </div>
           ${rlmPointsTable}
           ${rlmPhaseTimeline}
+          <div class="summary-section-chart" data-rlm-trend="${rlmTrendId}"></div>
         </div>
 
       `;
@@ -4002,7 +4006,13 @@ function extractRlmMetrics(config) {
           start: phase.start_time ? new Date(phase.start_time).getTime() : null,
           end: phase.end_time ? new Date(phase.end_time).getTime() : null,
         }))
-        .filter((p) => p.start !== null && p.end !== null && p.end > p.start);
+        .filter(
+          (p) =>
+            p.start !== null &&
+            p.end !== null &&
+            p.end > p.start &&
+            (p.phase || "").toLowerCase() !== "inactive"
+        );
       if (!validPhases.length) return "<span class='badge'>No phase data</span>";
       const minStart = Math.min(...validPhases.map((p) => p.start));
       const maxEnd = Math.max(...validPhases.map((p) => p.end));
@@ -4071,6 +4081,79 @@ function extractRlmMetrics(config) {
         });
       }
       updateReviewPanel(summary);
+    }
+
+    function renderRlmTrend(scope, summary) {
+      if (!scope || !summary) return;
+      const host = scope.querySelector("[data-rlm-trend]");
+      if (!host) return;
+      const points = Array.isArray(summary.rlm && summary.rlm.points) ? summary.rlm.points : [];
+      if (!points.length) {
+        host.innerHTML = "<span class='badge'>No monitoring trend data</span>";
+        return;
+      }
+
+      const times = [];
+      const formats = [];
+      const webspeeds = [];
+      const curlengths = [];
+      points.forEach((point) => {
+        const ts = point && point.timestamp ? new Date(point.timestamp) : null;
+        if (!(ts instanceof Date) || Number.isNaN(ts.getTime())) return;
+        times.push(ts);
+        formats.push(Number(point.format));
+        webspeeds.push(Number(point.webspeed));
+        curlengths.push(Number(point.curlength));
+      });
+
+      if (!times.length) {
+        host.innerHTML = "<span class='badge'>No monitoring trend data</span>";
+        return;
+      }
+
+      const traces = [
+        {
+          x: times,
+          y: formats,
+          mode: "lines+markers",
+          name: "Format",
+          line: { color: "#2563eb" },
+          marker: { size: 6 },
+        },
+        {
+          x: times,
+          y: webspeeds,
+          mode: "lines+markers",
+          name: "Web Speed",
+          line: { color: "#16a34a" },
+          marker: { size: 6 },
+          yaxis: "y2",
+        },
+        {
+          x: times,
+          y: curlengths,
+          mode: "lines+markers",
+          name: "Cur Length",
+          line: { color: "#ea580c" },
+          marker: { size: 6 },
+        },
+      ];
+
+      const layout = {
+        title: "RLM Monitoring Trend",
+        margin: { t: 40, r: 60, l: 60, b: 40 },
+        legend: { orientation: "h", x: 0, y: 1.2 },
+        xaxis: { title: "Timestamp" },
+        yaxis: { title: "Format / Cur Length" },
+        yaxis2: {
+          title: "Web Speed",
+          overlaying: "y",
+          side: "right",
+          showgrid: false,
+        },
+      };
+
+      Plotly.react(host, traces, layout, plotlyConfig());
     }
 
     function openReviewForm(decision) {
