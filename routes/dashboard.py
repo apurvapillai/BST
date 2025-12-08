@@ -502,6 +502,38 @@ def _flatten_config(config_obj: Optional[dict]) -> Dict[str, float]:
     return flat
 
 
+def _extract_tolerances(config_json: Optional[dict]) -> Optional[Dict[str, float]]:
+    """Return the first tolerance entry (nomlength/errexpand/errshrink) if present."""
+    if not isinstance(config_json, dict):
+        return None
+
+    results: List[Dict[str, float]] = []
+
+    def _walk(node):
+        if not isinstance(node, dict):
+            return
+        if node.get("_tag") == "tol":
+            attrs = node.get("_attrs") or {}
+            entry = {
+                "nomlength": _to_float(attrs.get("nomlength")),
+                "errexpand": _to_float(attrs.get("errexpand")),
+                "errshrink": _to_float(attrs.get("errshrink")),
+            }
+            if any(value is not None for value in entry.values()):
+                results.append(entry)
+        for key, value in node.items():
+            if key in {"_attrs", "_text"}:
+                continue
+            _walk(value)
+        children = node.get("_children")
+        if isinstance(children, list):
+            for child in children:
+                _walk(child)
+
+    _walk(config_json)
+    return results[0] if results else None
+
+
 def _standard_map(
     sets_: Optional[Iterable[SensitivitySet]],
 ) -> Dict[str, Tuple[Optional[float], Optional[float]]]:
@@ -891,7 +923,9 @@ def api_overview():
         summary_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
         job_trackers: Dict[Tuple[str, str], Dict[str, object]] = {}
         job_defect_timeline: Dict[Tuple[str, datetime], int] = defaultdict(int)
+        job_reel_defect_timeline: Dict[Tuple[str, str, Optional[int], datetime], int] = defaultdict(int)
         job_operations_timeline_map: Dict[Tuple[str, datetime], Dict[str, object]] = {}
+        reel_operations_timeline_points: List[Dict[str, object]] = []
         job_order_metrics: Dict[
             Tuple[str, str],
             Dict[str, object],
@@ -900,9 +934,19 @@ def api_overview():
             str,
             Dict[str, object],
         ] = {}
+        rlm_trend_points: List[Dict[str, object]] = []
+        rlm_reel_spans: List[Dict[str, object]] = []
 
         def job_label(name: Optional[str]) -> str:
             return name or "Unassigned"
+
+        def mask_signature(masks: Iterable[Mask]) -> List[Tuple[str, str, str]]:
+            signature: List[Tuple[str, str, str]] = []
+            for m in masks or []:
+                coords = (m.coords or "").strip() if m.coords else ""
+                signature.append(((m.xml_id or "").strip(), (m.sensitivitysetid or "").strip(), coords))
+            signature.sort()
+            return signature
 
         def normalize_event_time(ts: Optional[datetime]) -> Optional[datetime]:
             if ts is None:
@@ -997,7 +1041,9 @@ def api_overview():
             job_name = reel.job_name
             job_display = job_label(job_name)
             job_key = (job_name or SENTINEL_NONE, reel.order_number or SENTINEL_NONE)
-            tracker = job_trackers.setdefault(job_key, {"sens": None, "rlm_config": None})
+            tracker = job_trackers.setdefault(
+                job_key, {"sens": None, "rlm_config": None, "mask_signature": None}
+            )
 
             job_order_key = (job_name or SENTINEL_NONE, reel.order_number or SENTINEL_NONE)
             order_display = reel.order_number if reel.order_number else None
@@ -1108,6 +1154,14 @@ def api_overview():
                         reel_code=reel.reel_code,
                     )
 
+            reel_defects_in_window = [
+                d for d in reel.defects or [] if _defect_within_window(d, window_start, window_end)
+            ]
+            if reel_defects_in_window:
+                reel_ts = reel.time_end or reel.time_start or window_end
+                reel_label = reel.reel_code or (f"Reel {reel.reel_id}" if reel.reel_id else "Reel")
+                job_reel_defect_timeline[(job_display, reel_label, reel.reel_id, reel_ts)] += len(reel_defects_in_window)
+
             _accumulate_phase_buckets(
                 state_buckets,
                 inspection_phases_sorted,
@@ -1118,11 +1172,13 @@ def api_overview():
             # Reference image changes
             ordered_refs = _ordered_reference_images(reel.reference_images)
             ref_change_pairs = _reference_change_pairs(ordered_refs)
+            reel_operation_counter: Counter = Counter()
             if ref_change_pairs:
                 change_time = reel.time_end or reel.time_start or window_end
                 change_count = len(ref_change_pairs)
                 job_order_entry["reference_changes"] += change_count
                 job_summary_entry["reference_changes"] += change_count
+                reel_operation_counter[EVENT_REFERENCE] += change_count
                 for previous_ref, new_ref in ref_change_pairs:
                     detail = _reference_change_detail(previous_ref, new_ref)
                     record_event(
@@ -1149,10 +1205,10 @@ def api_overview():
                         job_reference_latest[job_display] = {"time": reel_timestamp, "images": images}
 
             # Mask applications
-            for mask in reel.masks or []:
-                mask_ts = mask.timestamp
-                if not mask_ts or mask_ts < window_start or mask_ts > window_end:
-                    continue
+            masks_in_window = [
+                mask for mask in (reel.masks or []) if mask.timestamp and window_start <= mask.timestamp <= window_end
+            ]
+            for mask in masks_in_window:
                 detail = {
                     "xml_id": mask.xml_id,
                     "sensitivity_id": mask.sensitivitysetid,
@@ -1170,11 +1226,33 @@ def api_overview():
                     job_summary_entry["mask_counter"][mask_label] += 1
                 record_event(
                     job_name,
-                    mask_ts,
+                    mask.timestamp,
                     EVENT_MASK,
                     detail=detail,
                     reel_code=reel.reel_code,
                 )
+
+            current_mask_sig = mask_signature(masks_in_window)
+            previous_mask_sig = tracker.get("mask_signature")
+            if previous_mask_sig is None:
+                tracker["mask_signature"] = current_mask_sig
+            else:
+                if current_mask_sig != previous_mask_sig:
+                    change_time = reel.time_end or reel.time_start or window_end
+                    detail = {
+                        "previous_count": len(previous_mask_sig),
+                        "current_count": len(current_mask_sig),
+                    }
+                    reel_operation_counter[EVENT_MASK] += 1
+                    record_event(
+                        job_name,
+                        change_time,
+                        EVENT_MASK,
+                        detail=detail,
+                        reel_code=reel.reel_code,
+                        count=1,
+                    )
+                tracker["mask_signature"] = current_mask_sig
 
             # RLM monitoring points
             # RLM configuration drift
@@ -1208,6 +1286,7 @@ def api_overview():
                         "previous_settings": _serialize_sensitivity_snapshot(previous_std),
                         "current_settings": _serialize_sensitivity_snapshot(current_watch_std),
                     }
+                    reel_operation_counter[EVENT_SENSITIVITY] += len(sens_changes)
                     record_event(
                         job_name,
                         change_time,
@@ -1251,6 +1330,7 @@ def api_overview():
                         "previous_settings": _serialize_rlm_snapshot(previous_config, changed_keys),
                         "current_settings": _serialize_rlm_snapshot(current_config_flat, changed_keys),
                     }
+                    reel_operation_counter[EVENT_RLM] += len(config_changes)
                     record_event(
                         job_name,
                         change_time,
@@ -1261,6 +1341,37 @@ def api_overview():
                     )
             tracker["rlm_config"] = current_config_flat
 
+            span_start = reel.time_start or window_start
+            span_end = reel.time_end or window_end
+            if span_start and span_end:
+                # store raw span; padding applied client-side
+                rlm_reel_spans.append(
+                    {
+                        "start": _iso(span_start),
+                        "end": _iso(span_end),
+                        "reel_code": reel.reel_code,
+                        "reel_id": reel.reel_id,
+                        "job_name": job_name,
+                        "order_number": reel.order_number,
+                    }
+                )
+
+            for monitor in reel.rlm_monitoring or []:
+                ts = monitor.timestamp
+                if not ts or ts < window_start or ts > window_end:
+                    continue
+                rlm_trend_points.append(
+                    {
+                        "time": _iso(ts),
+                        "webspeed": _to_float(monitor.webspeed),
+                        "repeat_length": _to_float(monitor.curlength),
+                        "reel_code": reel.reel_code,
+                        "reel_id": reel.reel_id,
+                        "job_name": job_name,
+                        "order_number": reel.order_number,
+                    }
+                )
+
             monitor_count = sum(
                 1
                 for monitor in reel.rlm_monitoring or []
@@ -1269,6 +1380,19 @@ def api_overview():
             if monitor_count:
                 job_order_entry["rlm_monitor_count"] += monitor_count
                 job_summary_entry["rlm_monitor_count"] += monitor_count
+
+            if reel_operation_counter:
+                reel_ts = reel.time_end or reel.time_start or window_end
+                reel_label = reel.reel_code or (f"Reel {reel.reel_id}" if reel.reel_id else "Reel")
+                for op_type, op_count in reel_operation_counter.items():
+                    reel_entry = {
+                        "job": job_display,
+                        "reel_code": reel_label,
+                        "event_type": op_type,
+                        "time": _iso(reel_ts),
+                        "count": int(op_count),
+                    }
+                    reel_operations_timeline_points.append(reel_entry)
 
         phase_length_per_second = {}
         for key in ("active", "inactive", "learn"):
@@ -1355,6 +1479,26 @@ def api_overview():
             {"job": job, "time": _iso(bucket), "count": int(count)}
             for (job, bucket), count in sorted(
                 job_defect_timeline.items(), key=lambda item: (item[0][1], item[0][0])
+            )
+        ]
+        job_reel_defects_timeline = [
+            {
+                "job": job,
+                "reel_code": reel_code,
+                "reel_id": reel_id,
+                "time": _iso(bucket),
+                "count": int(count),
+            }
+            for (job, reel_code, reel_id, bucket), count in sorted(
+                job_reel_defect_timeline.items(),
+                key=lambda item: (item[0][3], item[0][0], item[0][1]),
+            )
+        ]
+        job_reel_operations_timeline = [
+            entry
+            for entry in sorted(
+                reel_operations_timeline_points,
+                key=lambda item: (item.get("time") or "", item.get("job") or "", item.get("reel_code") or "", item.get("event_type") or ""),
             )
         ]
 
@@ -1483,6 +1627,41 @@ def api_overview():
                 }
             )
 
+        rlm_trend_points_sorted = sorted(
+            rlm_trend_points,
+            key=lambda entry: (entry.get("time") or ""),
+        )
+        rlm_reel_spans_sorted = sorted(
+            rlm_reel_spans,
+            key=lambda entry: (entry.get("start") or ""),
+        )
+
+        def _rlm_reel_row(span: Dict[str, object]) -> Dict[str, object]:
+            meters = None
+            reel_id = span.get("reel_id")
+            reel_code = span.get("reel_code")
+            if reel_id:
+                try:
+                    reel_obj = next((r for r in reels_sorted if r.reel_id == reel_id), None)
+                except Exception:
+                    reel_obj = None
+                if reel_obj and reel_obj.reel_start is not None and reel_obj.reel_end is not None:
+                    meters = max(
+                        (_to_float(reel_obj.reel_end) or 0.0) - (_to_float(reel_obj.reel_start) or 0.0),
+                        0.0,
+                    )
+            return {
+                "reel_code": reel_code,
+                "reel_id": reel_id,
+                "job_name": span.get("job_name"),
+                "order_number": span.get("order_number"),
+                "start": span.get("start"),
+                "end": span.get("end"),
+                "meters": meters,
+            }
+
+        rlm_reel_table = [_rlm_reel_row(span) for span in rlm_reel_spans_sorted]
+
         response = {
                 "kpis": {
                     "total_jobs": len(job_set),
@@ -1522,10 +1701,17 @@ def api_overview():
             "job_events": job_events,
             "job_event_summary": job_event_summary,
             "jobs_defects_timeline": job_defects_timeline,
+            "job_reel_defects_timeline": job_reel_defects_timeline,
             "job_operations_timeline": job_operations_timeline,
+            "job_reel_operations_timeline": job_reel_operations_timeline,
             "job_order_metrics": job_order_metrics_payload,
             "job_metrics": job_metrics_payload,
             "job_heatmaps": job_heatmap_payload,
+            "rlm_trend": {
+                "points": rlm_trend_points_sorted,
+                "reel_spans": rlm_reel_spans_sorted,
+                "table": rlm_reel_table,
+            },
         }
     return jsonify(response)
 
@@ -1926,6 +2112,7 @@ def api_reel_summary(reel_id: int):
                 "phases": rlm_phases,
                 "monitor_count": len(reel.rlm_monitoring or []),
                 "points": _extract_monpoints(reel.rlm_config.config_json) if reel.rlm_config else [],
+                "tolerances": _extract_tolerances(reel.rlm_config.config_json) if reel.rlm_config else None,
             },
             "defects_summary": defects_summary,
             "defects": defects_payload,

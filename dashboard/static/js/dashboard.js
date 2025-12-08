@@ -1,6 +1,8 @@
 (function () {
   const FETCH_DEBOUNCE_MS = 400;
 
+  const MM_TO_IN = 25.4;
+
   const Utils = {
     qs(selector, scope = document) {
       return scope.querySelector(selector);
@@ -30,6 +32,10 @@
     formatMeters(value) {
       if (value === null || value === undefined) return "--";
       return `${Utils.formatNumber(value, 2)} m`;
+    },
+    toInches(value) {
+      const num = Number(value);
+      return Number.isFinite(num) ? num / MM_TO_IN : null;
     },
     normalizeDateInput(value) {
       if (!value) return "";
@@ -132,6 +138,23 @@
     };
   }
 
+  function scrollToTopSoon() {
+    window.requestAnimationFrame(() => {
+      setTimeout(() => {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }, 30);
+    });
+  }
+
+  function paddedRange(values, pad = 10) {
+    const nums = (values || []).filter((val) => Number.isFinite(val));
+    if (!nums.length) return null;
+    const minVal = Math.min(...nums);
+    const maxVal = Math.max(...nums);
+    const lower = minVal - pad;
+    const upper = maxVal + pad;
+    return [lower, upper];
+  }
   function buildDecisionBadge(decision) {
     const normalized = (decision || "").toLowerCase();
     if (normalized !== "pass" && normalized !== "fail") return "";
@@ -1754,6 +1777,15 @@
       else renderChips();
     }
 
+    function clearReels({ emit: shouldEmit = true } = {}) {
+      if (!state.reel_ids.length && !pendingReelCodes.length) return;
+      state.reel_ids = [];
+      pendingReelCodes = [];
+      syncReelSelect();
+      if (shouldEmit) emit(true);
+      else renderChips();
+    }
+
     function ensureOrderOption(value, label) {
       if (!elements.order) return;
       const exists = Array.from(elements.order.options).some((opt) => opt.value === value);
@@ -1808,6 +1840,7 @@
       hasReelSelection,
       hasJobSelection: () => hasJobSelection(),
       promptJobSelection,
+      clearReels,
     };
   })();
 
@@ -1901,6 +1934,13 @@
     },
   };
 
+  function formatAsDate(value) {
+    if (value === null || value === undefined) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleString();
+  }
+
   function normalizeDateFilterValue(key, rawValue) {
     if (!rawValue) return "";
     const datePart = String(rawValue).split("T")[0];
@@ -1934,6 +1974,9 @@
 
     function setActive(name) {
       if (!tabs[name]) name = "overview";
+      if (name === "overview" && Filters && typeof Filters.clearReels === "function") {
+        Filters.clearReels({ emit: true });
+      }
       const requiresJob = name === "job" || name === "defects";
       if (
         requiresJob &&
@@ -1945,7 +1988,12 @@
         revertHash();
         return;
       }
-      if (active === name) return;
+      if (active === name) {
+        if (tabs[active] && typeof tabs[active].activate === "function") {
+          tabs[active].activate();
+        }
+        return;
+      }
 
       const previous = active;
       active = name;
@@ -1994,6 +2042,7 @@
     let initialized = false;
     let kpiMap = {};
     let heatmapContainer;
+    let rlmRange = null;
     const heatmapState = {
       jobs: [],
       selectedJob: "",
@@ -2238,15 +2287,116 @@
         { responsive: true }
       );
 
-      renderJobsDefectsTrend(jobsDefectsTrend, jobsDefects);
+      const rlmTrend = data.rlm_trend || {};
+      updateRlmRange(rlmTrend);
+
+      // Render in order so all time-series use the same reel-based window
+      renderOverviewRlmTrend(rlmTrend);
+      const reelDefectsTrend = data.job_reel_defects_timeline || [];
+      const defectsTimelineSource = reelDefectsTrend.length ? reelDefectsTrend : jobsDefectsTrend;
+      renderJobsDefectsTrend(defectsTimelineSource, jobsDefects);
       renderJobMetricCards(jobMetrics);
-      renderOperationsTimeline(jobEvents);
+      const reelOpsTimeline = data.job_reel_operations_timeline || [];
+      renderOperationsTimeline(jobEvents, reelOpsTimeline);
       renderJobHeatmap(jobHeatmaps);
+    }
+
+    let rlmRangeMs = null;
+
+    function updateRlmRange(trendData) {
+      const spans = Array.isArray(trendData.reel_spans) ? trendData.reel_spans : [];
+      const tableRows = Array.isArray(trendData.table) ? trendData.table : [];
+      let minTs = null;
+      let maxTs = null;
+
+      function consider(ts) {
+        const date = ts ? new Date(ts) : null;
+        if (!(date instanceof Date) || Number.isNaN(date.getTime())) return;
+        const ms = date.getTime();
+        if (minTs === null || ms < minTs) minTs = ms;
+        if (maxTs === null || ms > maxTs) maxTs = ms;
+      }
+
+      spans.forEach((span) => {
+        consider(span.start);
+        consider(span.end);
+      });
+      tableRows.forEach((row) => {
+        consider(row.start);
+        consider(row.end);
+      });
+
+      if (minTs !== null && maxTs !== null && minTs < maxTs) {
+        const paddedStart = minTs - 60 * 60 * 1000;
+        const paddedEnd = maxTs + 60 * 60 * 1000;
+
+        const roundedStart = new Date(paddedStart);
+        roundedStart.setMinutes(0, 0, 0);
+
+        const roundedEnd = new Date(paddedEnd);
+        roundedEnd.setMinutes(0, 0, 0);
+        if (roundedEnd.getTime() <= paddedEnd) {
+          roundedEnd.setHours(roundedEnd.getHours() + 1);
+        }
+
+        rlmRangeMs = [roundedStart.getTime(), roundedEnd.getTime()];
+      } else {
+        rlmRangeMs = null;
+      }
+    }
+
+    function toLocalIso(msValue) {
+      const d = new Date(msValue);
+      if (Number.isNaN(d.getTime())) return null;
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      const hours = String(d.getHours()).padStart(2, "0");
+      const minutes = String(d.getMinutes()).padStart(2, "0");
+      const seconds = String(d.getSeconds()).padStart(2, "0");
+      return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+    }
+
+    function getTimeRange(trendData) {
+      if (trendData) {
+        updateRlmRange(trendData);
+      }
+      if (rlmRangeMs) {
+        const startIso = toLocalIso(rlmRangeMs[0]);
+        const endIso = toLocalIso(rlmRangeMs[1]);
+        if (startIso && endIso) {
+          return [startIso, endIso];
+        }
+      }
+      // Fallback to the current filter window if no reel-derived window exists
+      const { start, end } = Filters.getState();
+      const startDate = start ? new Date(start) : null;
+      const endDate = end ? new Date(end) : null;
+      if (
+        startDate instanceof Date &&
+        endDate instanceof Date &&
+        !Number.isNaN(startDate.getTime()) &&
+        !Number.isNaN(endDate.getTime()) &&
+        startDate.getTime() < endDate.getTime()
+      ) {
+        const startIso = toLocalIso(startDate.getTime());
+        const endIso = toLocalIso(endDate.getTime());
+        if (startIso && endIso) {
+          return [startIso, endIso];
+        }
+      }
+      return null;
     }
 
     function renderJobsDefectsTrend(trend, totals) {
       const containerId = "overviewJobsDefects";
       if (!document.getElementById(containerId)) return;
+
+      const range = getTimeRange();
+      const rangeLabel =
+        range && range.length === 2
+          ? `${formatAsDate(range[0])} → ${formatAsDate(range[1])}`
+          : "";
 
       if (!trend.length) {
         if (!totals.length) {
@@ -2296,9 +2446,12 @@
       const grouped = new Map();
       trend.forEach((point) => {
         const job = point.job || "Unassigned";
-        const entry = { time: point.time, count: point.count || 0 };
-        if (!grouped.has(job)) grouped.set(job, []);
-        grouped.get(job).push(entry);
+        const reelCode = point.reel_code || "";
+        const reelId = point.reel_id !== undefined && point.reel_id !== null ? point.reel_id : null;
+        const seriesLabel = reelCode ? `${reelCode}${job ? ` · ${job}` : ""}` : job;
+        const entry = { time: point.time, count: point.count || 0, reel: reelCode, reel_id: reelId, job };
+        if (!grouped.has(seriesLabel)) grouped.set(seriesLabel, []);
+        grouped.get(seriesLabel).push(entry);
       });
 
       const traces = Array.from(grouped.entries()).map(([job, points]) => {
@@ -2307,7 +2460,11 @@
           .sort((a, b) => new Date(a.time || 0).getTime() - new Date(b.time || 0).getTime());
         const xs = sortedPoints.map((item) => item.time);
         const ys = sortedPoints.map((item) => item.count || 0);
-        const texts = sortedPoints.map((item) => buildDefectsTrendHover(job, item));
+        const texts = sortedPoints.map((item) => {
+          const base = buildDefectsTrendHover(item.reel || job, item);
+          const timeLabel = item.time ? new Date(item.time).toLocaleString() : "";
+          return timeLabel ? `${base}<br>${timeLabel}` : base;
+        });
         const sizes = ys.map((value) => Math.min(6 + value * 2, 20));
         return {
           type: "scatter",
@@ -2323,27 +2480,195 @@
             sizemode: "diameter",
             line: { color: "#0f172a", width: 1 },
           },
+          customdata: sortedPoints.map((item) => ({
+            reel: item.reel,
+            reel_id: item.reel_id,
+            job: item.job,
+            time: item.time,
+          })),
         };
       });
 
       const layout = withResponsiveLayout({
         title: "Defects per Job (Trend)",
-        xaxis: { type: "date", title: "Time" },
+        xaxis: {
+          type: "date",
+          title: "Time",
+          range: range || undefined,
+          autorange: range ? false : true,
+        },
         yaxis: { title: "Defects" },
-        legend: { orientation: "h", x: 0, y: 1.1 },
+        showlegend: false,
         margin: { t: 70, l: 60, r: 20, b: 90 },
+        annotations: rangeLabel
+          ? [
+              {
+                text: rangeLabel,
+                showarrow: false,
+                xref: "paper",
+                yref: "paper",
+                x: 0,
+                y: 1.12,
+                align: "left",
+                font: { size: 11, color: "#475569" },
+              },
+            ]
+          : [],
       });
 
       Plotly.react(containerId, traces, layout, plotlyConfig());
+
+      const plotEl = document.getElementById(containerId);
+      if (plotEl) {
+        plotEl.on("plotly_click", (eventData) => {
+          if (!eventData || !eventData.points || !eventData.points.length) return;
+          const point = eventData.points[0];
+          const payload = point && point.customdata ? point.customdata : null;
+          const reelCode = payload && payload.reel ? payload.reel : "";
+          const reelId = payload && payload.reel_id ? payload.reel_id : "";
+          if (!reelCode && !reelId) return;
+          Filters.addReel(reelCode, reelId);
+          Router.setActive("job");
+          scrollToTopSoon();
+        });
+        plotEl.style.cursor = "pointer";
+      }
     }
 
-    function renderOperationsTimeline(events) {
+    function renderOperationsTimeline(events, reelEvents = []) {
       const containerId = "overviewOperationsTimeline";
       if (!document.getElementById(containerId)) return;
+
+      const range = getTimeRange();
+      const rangeLabel =
+        range && range.length === 2
+          ? `${formatAsDate(range[0])} → ${formatAsDate(range[1])}`
+          : "";
+
+      const reelEventList = Array.isArray(reelEvents) ? reelEvents : [];
+      const useReelEvents = reelEventList.length > 0;
 
       const filtered = (events || []).filter((event) =>
         TIMELINE_TYPES.includes(event.event_type)
       );
+
+      if (useReelEvents) {
+        const typesInData = Array.from(
+          new Set(reelEventList.map((event) => event.event_type || "other"))
+        );
+        if (!typesInData.length) {
+          return renderOperationsTimeline([], []);
+        }
+        const typeIndex = new Map(typesInData.map((type, idx) => [type, idx]));
+        const traces = typesInData.map((type) => {
+          const meta = getEventMeta(type);
+          const points = reelEventList.filter((event) => (event.event_type || "other") === type);
+          const xs = points.map((event) => event.time);
+          const ys = points.map(() => typeIndex.get(type) || 0);
+          const sizes = points.map((event) => Math.min(10 + (event.count || 1) * 2, 26));
+          const texts = points.map((event) => {
+            const lines = [];
+            lines.push(`<b>${event.job || "Unassigned"}</b>`);
+            if (event.reel_code) lines.push(`Reel: ${event.reel_code}`);
+            if (event.time) {
+              const date = new Date(event.time);
+              if (!Number.isNaN(date.getTime())) {
+                lines.push(date.toLocaleString());
+              }
+            }
+            lines.push(`${meta.label} change`);
+            lines.push(`Count: ${event.count || 0}`);
+            return lines.join("<br>");
+          });
+          return {
+            type: "scatter",
+            mode: "markers",
+            name: meta.label,
+            x: xs,
+            y: ys,
+            text: texts,
+            hoverinfo: "text",
+            marker: {
+              size: sizes,
+              symbol: TIMELINE_SYMBOL[type] || "circle",
+              color: meta.color,
+              opacity: 0.9,
+              line: { color: "#0f172a", width: 1 },
+            },
+            showlegend: false,
+            customdata: points.map((event) => ({
+              reel: event.reel_code || "",
+              reel_id: event.reel_id || "",
+            })),
+          };
+        });
+
+        const yTicks = typesInData.map((type) => typeIndex.get(type) || 0);
+        const yLabels = typesInData.map((type) => getEventMeta(type).label);
+
+        const layout = {
+          title: "Operational Changes Timeline",
+          xaxis: {
+            title: "Time",
+            type: "date",
+            range: range || undefined,
+            autorange: range ? false : true,
+          },
+          yaxis: {
+            title: "Change",
+            tickvals: yTicks,
+            ticktext: yLabels,
+            range: [Math.min(...yTicks) - 0.5, Math.max(...yTicks) + 0.5],
+            zeroline: false,
+          },
+          legend: { orientation: "h", x: 0, y: 1.1 },
+          margin: { t: 70, l: 80, r: 20, b: 80 },
+          shapes: [
+            {
+              type: "line",
+              xref: "paper",
+              x0: 0,
+              x1: 1,
+              yref: "paper",
+              y0: 0,
+              y1: 0,
+              line: { color: "#cbd5f5", width: 1, dash: "dot" },
+            },
+          ],
+          annotations: rangeLabel
+            ? [
+                {
+                  text: rangeLabel,
+                  showarrow: false,
+                  xref: "paper",
+                  yref: "paper",
+                  x: 0,
+                  y: 1.12,
+                  align: "left",
+                  font: { size: 11, color: "#475569" },
+                },
+              ]
+            : [],
+        };
+
+        Plotly.react(containerId, traces, withResponsiveLayout(layout), plotlyConfig({ displayModeBar: false, showlegend: false }));
+        const plotEl = document.getElementById(containerId);
+        if (plotEl) {
+        plotEl.on("plotly_click", (eventData) => {
+          if (!eventData || !eventData.points || !eventData.points.length) return;
+          const point = eventData.points[0];
+          const payload = point && point.customdata ? point.customdata : null;
+          const reelCode = payload && payload.reel ? payload.reel : "";
+          const reelId = payload && payload.reel_id ? payload.reel_id : "";
+          if (!reelCode && !reelId) return;
+          Filters.addReel(reelCode, reelId);
+          Router.setActive("job");
+          scrollToTopSoon();
+        });
+          plotEl.style.cursor = "pointer";
+        }
+        return;
+      }
 
       if (!filtered.length) {
         Plotly.react(
@@ -2362,7 +2687,7 @@
                 font: { color: "#94a3b8" },
               },
             ],
-            xaxis: { title: "Time", type: "date" },
+            xaxis: { title: "Time", type: "date", range: range || undefined },
             yaxis: {
               title: "Change",
               range: [-0.1, 1.2],
@@ -2430,7 +2755,12 @@
 
       const layout = {
         title: "Operational Changes Timeline",
-        xaxis: { title: "Time", type: "date" },
+        xaxis: {
+          title: "Time",
+          type: "date",
+          range: range || undefined,
+          autorange: range ? false : true,
+        },
         yaxis: {
           title: "Change",
           range: [-0.1, 1.2],
@@ -2451,9 +2781,511 @@
             line: { color: "#cbd5f5", width: 1, dash: "dot" },
           },
         ],
+        annotations: rangeLabel
+          ? [
+              {
+                text: rangeLabel,
+                showarrow: false,
+                xref: "paper",
+                yref: "paper",
+                x: 0,
+                y: 1.12,
+                align: "left",
+                font: { size: 11, color: "#475569" },
+              },
+            ]
+          : [],
       };
 
       Plotly.react(containerId, traces, withResponsiveLayout(layout), plotlyConfig({ displayModeBar: false }));
+    }
+
+    function renderOverviewRlmTrend(trendData) {
+      const containerId = "overviewRlmTrendChart";
+      const missingId = "overviewRlmMissing";
+      const containerEl = document.getElementById(containerId);
+      const missingEl = document.getElementById(missingId);
+      if (!containerEl) return;
+      updateRlmRange(trendData);
+
+      const points = Array.isArray(trendData.points) ? trendData.points : [];
+      const spans = Array.isArray(trendData.reel_spans) ? trendData.reel_spans : [];
+      const tableRows = Array.isArray(trendData.table) ? trendData.table : [];
+      const xRange = getTimeRange();
+      const rangeLabel =
+        xRange && xRange.length === 2
+          ? `${formatAsDate(xRange[0])} → ${formatAsDate(xRange[1])}`
+          : "";
+
+      function renderMissingList(missingSpans) {
+        if (!missingEl) return;
+        if (!tableRows.length) {
+          missingEl.innerHTML = "<div class=\"placeholder\">No reels in this window.</div>";
+          return;
+        }
+        const pointStatsCache = new Map();
+        function getPointStats(row) {
+          const label = labelFor(row);
+          const cacheKey = `${label}-${row.start || ""}-${row.end || ""}`;
+          if (pointStatsCache.has(cacheKey)) return pointStatsCache.get(cacheKey);
+          const startTs = row.start ? new Date(row.start).getTime() : null;
+          const endTs = row.end ? new Date(row.end).getTime() : null;
+          const stats = { count: 0, min: null, max: null, sum: 0, hasRepeat: false };
+          points.forEach((p) => {
+            if (labelFor(p) !== label) return;
+            const ts = p.time ? new Date(p.time).getTime() : null;
+            if (ts === null || Number.isNaN(ts)) return;
+            if (startTs !== null && !Number.isNaN(startTs) && ts < startTs) return;
+            if (endTs !== null && !Number.isNaN(endTs) && ts > endTs) return;
+            const repeat = Number.isFinite(p.repeat_length) ? Number(p.repeat_length) : null;
+            stats.count += 1;
+            if (repeat !== null) {
+              stats.hasRepeat = true;
+              stats.min = stats.min === null ? repeat : Math.min(stats.min, repeat);
+              stats.max = stats.max === null ? repeat : Math.max(stats.max, repeat);
+              stats.sum += repeat;
+            }
+          });
+          if (stats.hasRepeat && stats.count) {
+            stats.avg = stats.sum / stats.count;
+          } else {
+            stats.avg = null;
+          }
+          pointStatsCache.set(cacheKey, stats);
+          return stats;
+        }
+        const rows = tableRows
+          .map((row) => {
+            const label = labelFor(row);
+            const windowLabel = `${formatAsDate(row.start)} → ${formatAsDate(row.end)}`;
+            const metersLabel = row.meters !== undefined && row.meters !== null ? Utils.formatMeters(row.meters) : "N/A";
+            const stats = getPointStats(row);
+            const rlmCount = stats.count;
+            const hasPoints = rlmCount > 0 ? "On" : "Off";
+            const minRepeat = stats.min !== null ? Utils.formatNumber(stats.min, 2) : "—";
+            const maxRepeat = stats.max !== null ? Utils.formatNumber(stats.max, 2) : "—";
+            const avgRepeat = stats.avg !== null ? Utils.formatNumber(stats.avg, 2) : "—";
+            return `
+              <tr>
+                <td>${Utils.escapeHtml(label)}</td>
+                <td>${Utils.escapeHtml(windowLabel)}</td>
+                <td>${Utils.escapeHtml(metersLabel)}</td>
+                <td>${hasPoints}</td>
+                <td>${rlmCount}</td>
+                <td>${minRepeat}</td>
+                <td>${maxRepeat}</td>
+                <td>${avgRepeat}</td>
+              </tr>
+            `;
+          })
+          .join("");
+        missingEl.innerHTML = `
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Reel</th>
+                  <th>Window</th>
+                  <th>Meters</th>
+                  <th>Repeat Length</th>
+                  <th>RLM Points</th>
+                  <th>Min Repeat</th>
+                  <th>Max Repeat</th>
+                  <th>Avg Repeat</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      function formatAsDate(value) {
+        if (!value) return "N/A";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "N/A";
+        return date.toLocaleString();
+      }
+
+      if (!points.length) {
+        renderMissingList(spans);
+        Plotly.react(
+          containerId,
+          [],
+          {
+            title: "Repeat Length (RLM)",
+            annotations: [
+              {
+                text: "No monitoring data in this window",
+                showarrow: false,
+                xref: "paper",
+                yref: "paper",
+                x: 0.5,
+                y: 0.5,
+                font: { color: "#94a3b8" },
+              },
+            ],
+            xaxis: {
+              title: "Time",
+              type: "date",
+              range: xRange || undefined,
+              autorange: xRange ? false : true,
+            },
+        yaxis: { title: "Repeat Length (in)" },
+            margin: { t: 60, l: 60, r: 60, b: 60 },
+            showlegend: false,
+            annotations: rangeLabel
+              ? [
+                  {
+                    text: rangeLabel,
+                    showarrow: false,
+                    xref: "paper",
+                    yref: "paper",
+                    x: 0,
+                    y: 1.15,
+                    align: "left",
+                    font: { size: 11, color: "#475569" },
+                  },
+                ]
+              : [],
+          },
+          plotlyConfig({ displayModeBar: false })
+        );
+        return;
+      }
+
+      const palette = ["#0ea5e9", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6", "#ec4899", "#e11d48"];
+      const colorMap = new Map();
+      function colorForLabel(label) {
+        const key = label || "Reel";
+        if (!colorMap.has(key)) {
+          const nextColor = palette[colorMap.size % palette.length];
+          colorMap.set(key, nextColor);
+        }
+        return colorMap.get(key);
+      }
+
+      function labelFor(entry) {
+        return entry.reel_code || entry.order_number || (Number.isFinite(entry.reel_id) ? `Reel ${entry.reel_id}` : "Reel");
+      }
+
+      function toRgba(hex, alpha) {
+        if (typeof hex !== "string" || !hex.startsWith("#") || (hex.length !== 7 && hex.length !== 4)) {
+          return `rgba(15, 23, 42, ${alpha})`;
+        }
+        let r;
+        let g;
+        let b;
+        if (hex.length === 4) {
+          r = parseInt(hex[1] + hex[1], 16);
+          g = parseInt(hex[2] + hex[2], 16);
+          b = parseInt(hex[3] + hex[3], 16);
+        } else {
+          r = parseInt(hex.slice(1, 3), 16);
+          g = parseInt(hex.slice(3, 5), 16);
+          b = parseInt(hex.slice(5, 7), 16);
+        }
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      }
+
+      const normalizedPoints = points
+        .map((entry) => {
+          const time = entry.time;
+          if (!time) return null;
+          const webspeed = Number.isFinite(entry.webspeed) ? Number(entry.webspeed) : null;
+          const repeatLength = Utils.toInches(entry.repeat_length);
+          return {
+            time,
+            webspeed,
+            repeatLength,
+            label: labelFor(entry),
+            reel_code: entry.reel_code || "",
+            reel_id: entry.reel_id !== undefined ? entry.reel_id : null,
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => new Date(a.time || 0).getTime() - new Date(b.time || 0).getTime());
+
+      const labelsWithData = new Set(normalizedPoints.map((p) => p.label));
+      const spansWithData = spans.filter((span) => labelsWithData.has(labelFor(span)));
+      const spansMissing = spans.filter((span) => !labelsWithData.has(labelFor(span)));
+      renderMissingList(spansMissing);
+
+      function paddedRange(values) {
+        const nums = values.filter((val) => Number.isFinite(val));
+        if (!nums.length) return null;
+        const minVal = Math.min(...nums);
+        const maxVal = Math.max(...nums);
+        const pad = 10;
+        const lower = minVal - pad;
+        const upper = maxVal + pad;
+        return [lower, upper];
+      }
+
+      if (!normalizedPoints.length) {
+        Plotly.react(
+          containerId,
+          [],
+          {
+            title: "Repeat Length & Web Speed (RLM)",
+            annotations: [
+              {
+                text: "No monitoring data in this window",
+                showarrow: false,
+                xref: "paper",
+                yref: "paper",
+                x: 0.5,
+                y: 0.5,
+                font: { color: "#94a3b8" },
+              },
+            ],
+            xaxis: { title: "Time", type: "date" },
+            yaxis: { title: "Web Speed" },
+            yaxis2: { title: "Repeat Length", overlaying: "y", side: "right" },
+            margin: { t: 60, l: 60, r: 60, b: 60 },
+          },
+          plotlyConfig({ displayModeBar: false })
+        );
+        return;
+      }
+
+      const groupedRepeat = new Map();
+      normalizedPoints.forEach((point) => {
+        const label = point.label;
+        if (!groupedRepeat.has(label)) groupedRepeat.set(label, []);
+        groupedRepeat.get(label).push(point);
+      });
+
+      const repeatRanges = paddedRange(
+        normalizedPoints
+          .map((p) => (Number.isFinite(p.repeatLength) ? Number(p.repeatLength) : null))
+          .filter((v) => v !== null)
+      );
+
+      function bucketByDate(series) {
+        const buckets = new Map();
+        series.forEach((item) => {
+          const day = item.time ? item.time.split("T")[0] : "unknown";
+          if (!buckets.has(day)) buckets.set(day, []);
+          buckets.get(day).push(item);
+        });
+        return buckets;
+      }
+
+      const repeatTraces = Array.from(groupedRepeat.entries()).flatMap(([label, series]) => {
+        const color = colorForLabel(label);
+        const buckets = bucketByDate(series);
+        return Array.from(buckets.entries()).map(([day, bucketSeries], idx) => ({
+          type: "scatter",
+          mode: "lines+markers",
+          name: `Repeat Length (${label})`,
+          x: bucketSeries.map((item) => item.time),
+          y: bucketSeries.map((item) => item.repeatLength),
+          line: { color },
+          marker: { size: 6, color },
+          hovertemplate: `Reel: ${label}<br>Date: ${day}<br>Time: %{x}<br>Repeat Length: %{y}<extra></extra>`,
+          legendgroup: label,
+          showlegend: false,
+          customdata: bucketSeries.map((item) => ({
+            reel: item.reel_code || label,
+            reel_id: item.reel_id,
+            time: item.time,
+          })),
+        }));
+      });
+
+      const shapes = spans
+        .filter((span) => span && span.start && span.end)
+        .map((span) => {
+          const label = labelFor(span);
+          const hasData = labelsWithData.has(label);
+          const base = colorForLabel(label);
+          const color = hasData ? toRgba(base, 0.08) : toRgba(base, 0.04);
+          return {
+            type: "rect",
+            xref: "x",
+            yref: "paper",
+            x0: span.start,
+            x1: span.end,
+            y0: 0,
+            y1: 1,
+            fillcolor: color,
+            line: { width: 0 },
+          };
+        });
+
+      const layout = withResponsiveLayout({
+        title: "Repeat Length (RLM)",
+        xaxis: {
+          title: "Time",
+          type: "date",
+          range: xRange || undefined,
+          autorange: xRange ? false : true,
+        },
+        yaxis: { title: "Repeat Length (in)", range: repeatRanges || undefined },
+        showlegend: false,
+        margin: { t: 70, l: 70, r: 70, b: 80 },
+        shapes,
+        annotations: rangeLabel
+          ? [
+              {
+                text: rangeLabel,
+                showarrow: false,
+                xref: "paper",
+                yref: "paper",
+                x: 0,
+                y: 1.12,
+                align: "left",
+                font: { size: 11, color: "#475569" },
+              },
+            ]
+          : [],
+      });
+
+      Plotly.react(containerId, repeatTraces, layout, plotlyConfig({ displayModeBar: false, showlegend: false }));
+
+      const plotEl = document.getElementById(containerId);
+      if (plotEl) {
+        plotEl.on("plotly_click", (eventData) => {
+          if (!eventData || !eventData.points || !eventData.points.length) return;
+          const point = eventData.points[0];
+          const payload = point && point.customdata ? point.customdata : null;
+          const reelCode = payload && payload.reel ? payload.reel : "";
+          const reelId = payload && payload.reel_id ? payload.reel_id : "";
+          if (!reelCode && !reelId) return;
+          Filters.addReel(reelCode, reelId);
+          Router.setActive("job");
+          scrollToTopSoon();
+        });
+        plotEl.style.cursor = "pointer";
+      }
+
+      renderAvgTrend(normalizedPoints);
+
+      function renderAvgTrend(pointsList) {
+        const avgContainer = document.getElementById("overviewRlmAvgTrend");
+        if (!avgContainer) return;
+        if (!pointsList.length) {
+          Plotly.react(
+            avgContainer,
+            [],
+            {
+              title: "Average Repeat Length by Reel",
+              annotations: [
+                {
+                  text: "No monitoring data in this window",
+                  showarrow: false,
+                  xref: "paper",
+                  yref: "paper",
+                  x: 0.5,
+                  y: 0.5,
+                  font: { color: "#94a3b8" },
+                },
+              ],
+              xaxis: { visible: false },
+              yaxis: { title: "Repeat Length (in)" },
+              margin: { t: 50, l: 60, r: 20, b: 40 },
+              showlegend: false,
+            },
+            plotlyConfig({ displayModeBar: false })
+          );
+          return;
+        }
+
+        const byLabel = new Map();
+        pointsList.forEach((p) => {
+          const label = p.label;
+          if (!byLabel.has(label)) byLabel.set(label, []);
+          byLabel.get(label).push(p);
+        });
+
+        const avgTraces = Array.from(byLabel.entries()).flatMap(([label, series]) => {
+          const color = colorForLabel(label);
+          const buckets = bucketByDate(series);
+          return Array.from(buckets.entries()).map(([day, bucketSeries]) => {
+            const repeatValues = bucketSeries
+              .map((item) => (Number.isFinite(item.repeatLength) ? Number(item.repeatLength) : null))
+              .filter((val) => val !== null);
+            const avg =
+              repeatValues.length > 0
+                ? repeatValues.reduce((sum, val) => sum + val, 0) / repeatValues.length
+                : null;
+            const tsMid = bucketSeries[Math.floor(bucketSeries.length / 2)].time;
+          return {
+            type: "scatter",
+            mode: "markers",
+            name: `${label} (${day})`,
+            x: [tsMid],
+            y: [avg],
+            marker: { size: 10, color },
+            hovertemplate: `Reel: ${label}<br>Date: ${day}<br>Avg Repeat Length: %{y}<extra></extra>`,
+            showlegend: false,
+            customdata: [
+              {
+                reel: label,
+                reel_id: series && series.length ? series[0].reel_id : null,
+                time: tsMid,
+              },
+            ],
+          };
+        });
+        });
+
+        const avgValues = avgTraces
+          .map((trace) => (trace && Array.isArray(trace.y) ? trace.y[0] : null))
+          .filter((val) => Number.isFinite(val));
+        const avgRange = paddedRange(avgValues);
+
+        const avgPlotEl = document.getElementById("overviewRlmAvgTrend");
+
+        Plotly.react(
+          avgContainer,
+          avgTraces,
+          withResponsiveLayout({
+            title: "Average Repeat Length by Reel",
+            xaxis: {
+              title: "Time",
+              type: "date",
+              range: xRange || undefined,
+              autorange: xRange ? false : true,
+            },
+            yaxis: { title: "Repeat Length (in)", range: avgRange || undefined },
+            showlegend: false,
+            margin: { t: 60, l: 70, r: 20, b: 60 },
+            annotations: rangeLabel
+              ? [
+                  {
+                    text: rangeLabel,
+                    showarrow: false,
+                    xref: "paper",
+                    yref: "paper",
+                    x: 0,
+                    y: 1.12,
+                    align: "left",
+                    font: { size: 11, color: "#475569" },
+                  },
+                ]
+              : [],
+          }),
+          plotlyConfig({ displayModeBar: false, showlegend: false })
+        );
+
+        if (avgPlotEl) {
+          avgPlotEl.on("plotly_click", (eventData) => {
+            if (!eventData || !eventData.points || !eventData.points.length) return;
+            const point = eventData.points[0];
+            const raw = point && point.customdata;
+            const payload = Array.isArray(raw) ? raw[0] : raw || null;
+            const reelCode = payload && payload.reel ? payload.reel : "";
+            const reelId = payload && payload.reel_id ? payload.reel_id : "";
+            if (!reelCode && !reelId) return;
+            Filters.addReel(reelCode, reelId);
+            Router.setActive("job");
+            scrollToTopSoon();
+          });
+          avgPlotEl.style.cursor = "pointer";
+        }
+      }
     }
 
     function renderJobMetricCards(jobMetrics) {
@@ -3690,12 +4522,12 @@
                         <td>${formatTime(point.timestamp)}</td>
                         <td>${formatMetricCell(point.format)}</td>
                         <td>${formatMetricCell(point.webspeed)}</td>
-                        <td>${formatMetricCell(point.curlength)}</td>
+                        <td>${formatMetricCell(Utils.toInches(point.curlength))} in (${formatMetricCell(point.curlength)} mm)</td>
                       </tr>`
                    )
                    .join("")}
-               </tbody>
-             </table>
+                 </tbody>
+               </table>
            </div>`
         : "<span class='badge'>No RLM monitoring points</span>";
 
@@ -3870,6 +4702,7 @@
           ${rlmPointsTable}
           ${rlmPhaseTimeline}
           <div class="summary-section-chart" data-rlm-trend="${rlmTrendId}"></div>
+          <div class="summary-rlm-legend" data-rlm-legend="${rlmTrendId}-legend"></div>
         </div>
 
       `;
@@ -4086,10 +4919,20 @@ function extractRlmMetrics(config) {
     function renderRlmTrend(scope, summary) {
       if (!scope || !summary) return;
       const host = scope.querySelector("[data-rlm-trend]");
+      const legendTarget = (() => {
+        if (!host) return null;
+        const id = host.getAttribute("data-rlm-trend");
+        if (!id) return null;
+        return scope.querySelector(`[data-rlm-legend="${id}-legend"]`);
+      })();
       if (!host) return;
       const points = Array.isArray(summary.rlm && summary.rlm.points) ? summary.rlm.points : [];
+      const tolerances = summary.rlm && summary.rlm.tolerances ? summary.rlm.tolerances : null;
       if (!points.length) {
         host.innerHTML = "<span class='badge'>No monitoring trend data</span>";
+        if (legendTarget) {
+          legendTarget.innerHTML = "<span class='badge'>No monitoring trend data</span>";
+        }
         return;
       }
 
@@ -4101,7 +4944,7 @@ function extractRlmMetrics(config) {
         if (!(ts instanceof Date) || Number.isNaN(ts.getTime())) return;
         times.push(ts);
         webspeeds.push(Number(point.webspeed));
-        repeatLengths.push(Number(point.curlength));
+        repeatLengths.push(Utils.toInches(point.curlength));
       });
 
       if (!times.length) {
@@ -4112,38 +4955,175 @@ function extractRlmMetrics(config) {
       const traces = [
         {
           x: times,
-          y: webspeeds,
-          mode: "lines+markers",
-          name: "Web Speed",
-          line: { color: "#16a34a" },
-          marker: { size: 6 },
-        },
-        {
-          x: times,
           y: repeatLengths,
           mode: "lines+markers",
           name: "Repeat Length",
-          line: { color: "#ea580c" },
+          line: { color: "#2563eb", shape: "linear" },
+          marker: { size: 6, color: "#2563eb" },
+        },
+        {
+          x: times,
+          y: webspeeds,
+          mode: "lines+markers",
+          name: "Web Speed",
+          line: { color: "#16a34a", shape: "linear" },
           marker: { size: 6 },
+          visible: "legendonly",
           yaxis: "y2",
         },
       ];
+
+      const repStats = (() => {
+        const values = repeatLengths.filter((v) => Number.isFinite(v));
+        if (!values.length) return null;
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const avg = values.reduce((sum, v) => sum + v, 0) / values.length;
+        return { min, max, avg };
+      })();
+
+      let repeatRanges = paddedRange(
+        repeatLengths.filter((v) => Number.isFinite(v))
+      );
+
+      const shapes = [];
+      if (tolerances && tolerances.nomlength !== undefined) {
+        const start = times[0];
+        const end = times[times.length - 1];
+        const nom = Utils.toInches(tolerances.nomlength);
+        const expand = Utils.toInches(tolerances.errexpand);
+        const shrink = Utils.toInches(tolerances.errshrink);
+        const upper = Number.isFinite(expand) && nom !== null ? nom + expand : null;
+        const lower = Number.isFinite(shrink) && nom !== null ? nom - shrink : null;
+
+        shapes.push({
+          type: "line",
+          xref: "x",
+          yref: "y",
+          x0: start,
+          x1: end,
+          y0: nom,
+          y1: nom,
+          line: { color: "#22c55e", width: 2 },
+        });
+        if (upper !== null) {
+          shapes.push({
+            type: "line",
+            xref: "x",
+            yref: "y",
+            x0: start,
+            x1: end,
+            y0: upper,
+            y1: upper,
+            line: { color: "#ef4444", width: 2, dash: "dash" },
+          });
+          if (repeatRanges) {
+            repeatRanges[1] = Math.max(repeatRanges[1], upper + 5);
+          } else {
+            repeatRanges = [upper - 5, upper + 5];
+          }
+        }
+        if (lower !== null) {
+          shapes.push({
+            type: "line",
+            xref: "x",
+            yref: "y",
+            x0: start,
+            x1: end,
+            y0: lower,
+            y1: lower,
+            line: { color: "#ef4444", width: 2, dash: "dash" },
+          });
+          if (repeatRanges) {
+            repeatRanges[0] = Math.min(repeatRanges[0], lower - 5);
+          } else {
+            repeatRanges = [lower - 5, lower + 5];
+          }
+        }
+      }
 
       const layout = {
         title: "RLM Monitoring Trend",
         margin: { t: 40, r: 60, l: 60, b: 40 },
         legend: { orientation: "h", x: 0, y: 1.2 },
         xaxis: { title: "Timestamp" },
-        yaxis: { title: "Web Speed" },
+        yaxis: { title: "Repeat Length (in)" },
         yaxis2: {
-          title: "Repeat Length",
+          title: "Web Speed",
           overlaying: "y",
           side: "right",
           showgrid: false,
         },
+        shapes,
       };
 
       Plotly.react(host, traces, layout, plotlyConfig());
+
+      if (legendTarget) {
+        const nom = tolerances && tolerances.nomlength !== undefined ? Utils.toInches(tolerances.nomlength) : null;
+        const expand = tolerances && tolerances.errexpand !== undefined ? Utils.toInches(tolerances.errexpand) : null;
+        const shrink = tolerances && tolerances.errshrink !== undefined ? Utils.toInches(tolerances.errshrink) : null;
+        const upper = nom !== null && expand !== null ? nom + expand : null;
+        const lower = nom !== null && shrink !== null ? nom - shrink : null;
+        const stats = repStats || { min: null, max: null, avg: null };
+
+        const formatVal = (value, digits = 3) =>
+          Number.isFinite(value) ? Utils.formatNumber(value, digits) : "—";
+        const formatDual = (inVal) => {
+          if (!Number.isFinite(inVal)) return "—";
+          const mmVal = inVal * MM_TO_IN;
+          return `${formatVal(inVal)} in (${formatVal(mmVal)} mm)`;
+        };
+
+        legendTarget.innerHTML = `
+          <div class="rlm-legend-grid">
+            <table class="rlm-legend-table">
+              <thead>
+                <tr>
+                  <th>Metric</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="rlm-swatch rlm-swatch--nom"></span>Reference Length</td>
+                  <td>${formatDual(nom)}</td>
+                </tr>
+                <tr>
+                  <td><span class="rlm-swatch rlm-swatch--limit"></span>Shrink Tolerance</td>
+                  <td>${formatDual(shrink)} ${lower !== null ? `(limit: ${formatDual(lower)})` : ""}</td>
+                </tr>
+                <tr>
+                  <td><span class="rlm-swatch rlm-swatch--limit"></span>Expand Tolerance</td>
+                  <td>${formatDual(expand)} ${upper !== null ? `(limit: ${formatDual(upper)})` : ""}</td>
+                </tr>
+              </tbody>
+            </table>
+            <table class="rlm-legend-table">
+              <thead>
+                <tr>
+                  <th>Repeat Metric</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="rlm-swatch rlm-swatch--repeat"></span>Repeat Length Min</td>
+                  <td>${formatDual(stats.min)}</td>
+                </tr>
+                <tr>
+                  <td><span class="rlm-swatch rlm-swatch--repeat"></span>Repeat Length Max</td>
+                  <td>${formatDual(stats.max)}</td>
+                </tr>
+                <tr>
+                  <td><span class="rlm-swatch rlm-swatch--repeat"></span>Repeat Length Avg</td>
+                  <td>${formatDual(stats.avg)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        `;
+      }
     }
 
     function openReviewForm(decision) {
