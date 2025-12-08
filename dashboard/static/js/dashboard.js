@@ -4094,16 +4094,14 @@ function extractRlmMetrics(config) {
       }
 
       const times = [];
-      const formats = [];
       const webspeeds = [];
-      const curlengths = [];
+      const repeatLengths = [];
       points.forEach((point) => {
         const ts = point && point.timestamp ? new Date(point.timestamp) : null;
         if (!(ts instanceof Date) || Number.isNaN(ts.getTime())) return;
         times.push(ts);
-        formats.push(Number(point.format));
         webspeeds.push(Number(point.webspeed));
-        curlengths.push(Number(point.curlength));
+        repeatLengths.push(Number(point.curlength));
       });
 
       if (!times.length) {
@@ -4114,28 +4112,20 @@ function extractRlmMetrics(config) {
       const traces = [
         {
           x: times,
-          y: formats,
-          mode: "lines+markers",
-          name: "Format",
-          line: { color: "#2563eb" },
-          marker: { size: 6 },
-        },
-        {
-          x: times,
           y: webspeeds,
           mode: "lines+markers",
           name: "Web Speed",
           line: { color: "#16a34a" },
           marker: { size: 6 },
-          yaxis: "y2",
         },
         {
           x: times,
-          y: curlengths,
+          y: repeatLengths,
           mode: "lines+markers",
-          name: "Cur Length",
+          name: "Repeat Length",
           line: { color: "#ea580c" },
           marker: { size: 6 },
+          yaxis: "y2",
         },
       ];
 
@@ -4144,9 +4134,9 @@ function extractRlmMetrics(config) {
         margin: { t: 40, r: 60, l: 60, b: 40 },
         legend: { orientation: "h", x: 0, y: 1.2 },
         xaxis: { title: "Timestamp" },
-        yaxis: { title: "Format / Cur Length" },
+        yaxis: { title: "Web Speed" },
         yaxis2: {
-          title: "Web Speed",
+          title: "Repeat Length",
           overlaying: "y",
           side: "right",
           showgrid: false,
