@@ -47,6 +47,13 @@ HEATMAP_BUCKETS = [
 ]
 HEATMAP_BUCKET_MAP = {entry["key"]: entry for entry in HEATMAP_BUCKETS}
 DEFAULT_SIZE_RANGE = (0.0, math.inf)
+VALID_REEL_CLASSIFICATIONS = {
+    "active",
+    "inspection_deactivated",
+    "make_ready",
+    "splice",
+    "scrap",
+}
 
 dashboard_bp = Blueprint("dashboard", __name__)
 
@@ -69,6 +76,15 @@ def _to_float(value: Optional[Decimal]) -> Optional[float]:
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:
     return dt.isoformat() if dt else None
+
+
+def _normalize_classification(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = str(value).strip().lower().replace(" ", "_")
+    if normalized in VALID_REEL_CLASSIFICATIONS:
+        return normalized
+    return None
 
 
 def _serialize_review(review: Optional[ReelReview]) -> Optional[Dict[str, object]]:
@@ -1950,6 +1966,7 @@ def api_job_explorer():
                 "reel_id": reel.reel_id,
                 "reel_code": reel.reel_code,
                 "job_name": reel.job_name,
+                "classification": _normalize_classification(reel.classification) or "active",
                 "order_number": reel.order_number,
                 "time_start": _iso(reel.time_start),
                 "time_end": _iso(reel.time_end),
@@ -2095,6 +2112,7 @@ def api_reel_summary(reel_id: int):
                 "reel_code": reel.reel_code,
                 "machine": reel.machine.name if reel.machine else None,
                 "job_name": reel.job_name,
+                "classification": _normalize_classification(reel.classification) or "active",
                 "order_number": reel.order_number,
                 "time_start": _iso(reel.time_start),
                 "time_end": _iso(reel.time_end),
@@ -2128,6 +2146,31 @@ def api_reel_summary(reel_id: int):
             latest_review = None
         response["review"] = _serialize_review(latest_review)
         return jsonify(response)
+
+
+@dashboard_bp.route("/api/reel/<int:reel_id>/classification", methods=["POST"])
+def api_reel_classification(reel_id: int):
+    payload = request.get_json(silent=True) or {}
+    requested_classification = _normalize_classification(payload.get("classification"))
+    if not requested_classification:
+        return (
+            jsonify(
+                {
+                    "error": "Invalid classification",
+                    "allowed": sorted(VALID_REEL_CLASSIFICATIONS),
+                }
+            ),
+            400,
+        )
+
+    with SessionLocal() as session:
+        reel = session.query(Reel).filter(Reel.reel_id == reel_id).first()
+        if not reel:
+            return jsonify({"error": "Reel not found"}), 404
+        reel.classification = requested_classification
+        session.add(reel)
+        session.commit()
+        return jsonify({"reel_id": reel.reel_id, "classification": requested_classification})
 
 
 @dashboard_bp.route("/api/reel/<int:reel_id>/review", methods=["GET", "POST"])

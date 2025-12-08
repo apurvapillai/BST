@@ -42,6 +42,7 @@ class Reel(Base):
     reel_code = Column(String(50), index=True)
     order_number = Column(String(50), index=True)
     job_name = Column(String(100), index=True)
+    classification = Column(String(32), index=True, default="active")
 
     reel_start = Column(DECIMAL(10, 2))
     reel_end = Column(DECIMAL(10, 2))

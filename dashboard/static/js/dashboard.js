@@ -2824,6 +2824,12 @@
           return;
         }
         const pointStatsCache = new Map();
+        const FEET_PER_METER = 3.28084;
+        function formatRepeatDual(valueInInches) {
+          if (valueInInches === null || valueInInches === undefined || Number.isNaN(valueInInches)) return "—";
+          const mm = valueInInches * MM_TO_IN;
+          return `${Utils.formatNumber(valueInInches, 2)} in (${Utils.formatNumber(mm, 2)} mm)`;
+        }
         function getPointStats(row) {
           const label = labelFor(row);
           const cacheKey = `${label}-${row.start || ""}-${row.end || ""}`;
@@ -2837,9 +2843,9 @@
             if (ts === null || Number.isNaN(ts)) return;
             if (startTs !== null && !Number.isNaN(startTs) && ts < startTs) return;
             if (endTs !== null && !Number.isNaN(endTs) && ts > endTs) return;
-            const repeat = Number.isFinite(p.repeat_length) ? Number(p.repeat_length) : null;
+            const repeat = Utils.toInches(p.repeat_length);
             stats.count += 1;
-            if (repeat !== null) {
+            if (repeat !== null && Number.isFinite(repeat)) {
               stats.hasRepeat = true;
               stats.min = stats.min === null ? repeat : Math.min(stats.min, repeat);
               stats.max = stats.max === null ? repeat : Math.max(stats.max, repeat);
@@ -2858,13 +2864,16 @@
           .map((row) => {
             const label = labelFor(row);
             const windowLabel = `${formatAsDate(row.start)} → ${formatAsDate(row.end)}`;
-            const metersLabel = row.meters !== undefined && row.meters !== null ? Utils.formatMeters(row.meters) : "N/A";
+            const metersLabel =
+              row.meters !== undefined && row.meters !== null
+                ? `${Utils.formatNumber(row.meters * FEET_PER_METER, 2)} ft (${Utils.formatNumber(row.meters, 2)} m)`
+                : "N/A";
             const stats = getPointStats(row);
             const rlmCount = stats.count;
             const hasPoints = rlmCount > 0 ? "On" : "Off";
-            const minRepeat = stats.min !== null ? Utils.formatNumber(stats.min, 2) : "—";
-            const maxRepeat = stats.max !== null ? Utils.formatNumber(stats.max, 2) : "—";
-            const avgRepeat = stats.avg !== null ? Utils.formatNumber(stats.avg, 2) : "—";
+            const minRepeat = stats.min !== null ? formatRepeatDual(stats.min) : "—";
+            const maxRepeat = stats.max !== null ? formatRepeatDual(stats.max) : "—";
+            const avgRepeat = stats.avg !== null ? formatRepeatDual(stats.avg) : "—";
             return `
               <tr>
                 <td>${Utils.escapeHtml(label)}</td>
@@ -2886,12 +2895,12 @@
                 <tr>
                   <th>Reel</th>
                   <th>Window</th>
-                  <th>Meters</th>
+                  <th>Length (ft / m)</th>
                   <th>Repeat Length</th>
                   <th>RLM Points</th>
-                  <th>Min Repeat</th>
-                  <th>Max Repeat</th>
-                  <th>Avg Repeat</th>
+                  <th>Min Repeat (in / mm)</th>
+                  <th>Max Repeat (in / mm)</th>
+                  <th>Avg Repeat (in / mm)</th>
                 </tr>
               </thead>
               <tbody>${rows}</tbody>
@@ -3799,6 +3808,13 @@
     const statusCheckboxes = {};
     let statusUpdating = false;
     const REVIEW_STATUS_VALUES = ["pass", "fail", "uninspected"];
+    const CLASSIFICATION_OPTIONS = [
+      { value: "active", label: "Active" },
+      { value: "inspection_deactivated", label: "Inspection Deactivated" },
+      { value: "make_ready", label: "Make Ready" },
+      { value: "splice", label: "Splice" },
+      { value: "scrap", label: "Scrap" },
+    ];
     let state = {
       page: 1,
       selectedReelId: null,
@@ -3821,6 +3837,16 @@
     let reviewPanelListenerAttached = false;
     let reviewPanelActiveId = null;
     const reviewSummaryFetches = new Map();
+    function normalizeClassification(value, fallback = "active") {
+      if (value === null || value === undefined) return fallback;
+      const normalized = String(value).trim().toLowerCase().replace(/\s+/g, "_");
+      return CLASSIFICATION_OPTIONS.some((opt) => opt.value === normalized) ? normalized : fallback;
+    }
+    function classificationLabel(value) {
+      const normalized = normalizeClassification(value);
+      const match = CLASSIFICATION_OPTIONS.find((opt) => opt.value === normalized);
+      return match ? match.label : normalized;
+    }
 
     const load = Utils.debounce(async () => {
       LoadingOverlay.show();
@@ -4451,6 +4477,7 @@
       const defectsWithCoords = defects.filter((defect) => Array.isArray(defect.coords) && defect.coords.length);
       const defectsSummary = data.defects_summary || { total: 0, types: 0 };
       const review = data.review || null;
+      const classificationValue = normalizeClassification(reel.classification);
       const reelMeters =
         typeof reel.reel_start === "number" && typeof reel.reel_end === "number"
           ? reel.reel_end - reel.reel_start
@@ -4611,6 +4638,22 @@
             })
             .join("")
         : "";
+      const classificationRadios = CLASSIFICATION_OPTIONS.map(
+        (opt) =>
+          `<label class="inline-radio">
+            <input type="radio" name="reel-classification-${reel.reel_id || reel.reel_code || "reel"}" value="${opt.value}" data-classification-radio ${classificationValue === opt.value ? "checked" : ""}>
+            <span>${opt.label}</span>
+          </label>`
+      ).join("");
+      const classificationSection = `
+        <div class="summary-section summary-section--classification">
+          <h4>Reel Classification</h4>
+          <div class="classification-controls" data-classification-group>
+            ${classificationRadios}
+            <span class="classification-status" data-classification-status></span>
+          </div>
+        </div>
+      `;
 
       return `
         <div class="summary-header">
@@ -4631,9 +4674,11 @@
             <span>Machine: ${reel.machine || "N/A"}</span>
             <span>Length: ${Utils.formatMeters(reelMeters)}</span>
             <span>Format: ${Utils.formatNumber(reel.format_length, 2)} × ${Utils.formatNumber(reel.format_width, 2)}</span>
+            <span data-classification-label>Classification: ${classificationLabel(classificationValue)}</span>
             ${addButton}
           </div>
         </div>
+        ${classificationSection}
         <div class="summary-section summary-section--review">
           <h4>Review</h4>
           ${reviewSummaryBlock}
@@ -4911,6 +4956,59 @@ function extractRlmMetrics(config) {
           addButton.textContent = "In review";
           updateReviewPanel(currentSummary);
           Router.setActive("defects");
+        });
+      }
+      const classificationGroup = scope.querySelector("[data-classification-group]");
+      if (classificationGroup && summary && summary.reel && summary.reel.reel_id) {
+        const statusEl = classificationGroup.querySelector("[data-classification-status]");
+        const radios = Array.from(classificationGroup.querySelectorAll("[data-classification-radio]"));
+        const reelId = summary.reel.reel_id;
+        const classificationLabelEl = scope.querySelector("[data-classification-label]");
+        let saving = false;
+        const setStatus = (text, isError = false) => {
+          if (!statusEl) return;
+          statusEl.textContent = text || "";
+          statusEl.classList.toggle("error", Boolean(isError));
+        };
+        const setChecked = (value) => {
+          radios.forEach((radio) => {
+            radio.checked = radio.value === value;
+          });
+        };
+        radios.forEach((radio) => {
+          radio.addEventListener("change", async (event) => {
+            if (saving) return;
+            const nextValue = normalizeClassification(event.target.value, null);
+            if (!nextValue) return;
+            const currentValue = normalizeClassification(summary.reel.classification);
+            if (nextValue === currentValue) return;
+            saving = true;
+            setStatus("Saving…");
+            try {
+              const result = await Api.post(`reel/${reelId}/classification`, { classification: nextValue });
+              const savedValue = normalizeClassification(result && result.classification, nextValue);
+              summary.reel.classification = savedValue;
+              const cached = summaryCache.get(reelId);
+              if (cached && cached.reel) {
+                cached.reel.classification = savedValue;
+              }
+              const cachedItem = state.cachedItems.find((it) => it.reel_id === reelId);
+              if (cachedItem) {
+                cachedItem.classification = savedValue;
+              }
+              setChecked(savedValue);
+              if (classificationLabelEl) {
+                classificationLabelEl.textContent = `Classification: ${classificationLabel(savedValue)}`;
+              }
+              setStatus("Saved");
+            } catch (err) {
+              console.error("Failed to update reel classification", err);
+              setChecked(currentValue);
+              setStatus(err && err.message ? err.message : "Failed to save", true);
+            } finally {
+              saving = false;
+            }
+          });
         });
       }
       updateReviewPanel(summary);
