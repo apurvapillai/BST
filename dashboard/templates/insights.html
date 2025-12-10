@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Process BST — Insights & Comparisons</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/insights.css') }}">
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+  <header class="insights-header">
+    <div class="brand">
+      <span class="eyebrow">Process BST Module</span>
+      <h1>Insights &amp; Comparisons</h1>
+    </div>
+  </header>
+
+  <main class="insights-page" id="insightsApp">
+    <section class="insights-panel">
+      <div class="panel-header">
+        <h2>Analysis Filters</h2>
+      </div>
+      <div class="insights-filters">
+        <div class="filter-card">
+          <label for="insightsStart">Start Date</label>
+          <input type="datetime-local" id="insightsStart">
+        </div>
+        <div class="filter-card">
+          <label for="insightsEnd">End Date</label>
+          <input type="datetime-local" id="insightsEnd">
+        </div>
+        <div class="filter-card">
+          <label for="insightsPrimary">Primary Selection</label>
+          <select id="insightsPrimary"></select>
+        </div>
+        <div class="filter-card">
+          <label for="insightsSecondary">Comparison Selection</label>
+          <select id="insightsSecondary"></select>
+        </div>
+        <div class="filter-actions">
+          <button type="button" class="btn" id="insightsApply">Run Comparison</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="insights-panel">
+      <div class="panel-header">
+        <h2>Summary</h2>
+        <span class="badge" id="insightsRangeLabel"></span>
+      </div>
+      <div class="insights-kpis" id="insightsSummary"></div>
+      <div class="insights-top-defects" id="insightsTopDefects"></div>
+    </section>
+
+    <section class="insights-panel">
+      <div class="panel-header">
+        <h2>Defect Trend Comparison</h2>
+        <span class="badge">Independent from global filters</span>
+      </div>
+      <div id="insightsTrendChart" class="insights-chart"></div>
+    </section>
+
+    <section class="insights-panel">
+      <div class="panel-header">
+        <h2>Job / Roll Comparison</h2>
+      </div>
+      <div class="insights-comparison-grid">
+        <div class="chart-with-title">
+          <h4>Defect Mix</h4>
+          <div id="insightsMixChart" class="insights-chart"></div>
+        </div>
+        <div class="chart-with-title">
+          <h4>Defects by Type</h4>
+          <div id="insightsTypeBars" class="insights-chart"></div>
+        </div>
+        <div class="chart-with-title">
+          <h4>Trend Overlay</h4>
+          <div id="insightsOverlayTrend" class="insights-chart"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="insights-panel">
+      <div class="panel-header">
+        <h2>Severity &amp; Position Analysis</h2>
+      </div>
+      <div class="insights-map-grid">
+        <div id="insightsSeverityCompare" class="insights-chart"></div>
+        <div id="insightsPositionHist" class="insights-chart"></div>
+      </div>
+    </section>
+
+    <section class="insights-panel">
+      <div class="panel-header">
+        <h2>Cumulative Defects by Meter</h2>
+      </div>
+      <div id="insightsCumulativeChart" class="insights-chart"></div>
+      <div class="chart-with-title cumulative-wrapper">
+        <h4>Cumulative by Defect Type</h4>
+        <div id="insightsCumulativeByType" class="cumulative-types"></div>
+      </div>
+    </section>
+  </main>
+
+  <div class="insights-loading hidden" id="insightsLoading">
+    <div class="insights-loading__spinner"></div>
+    <div class="insights-loading__text">Loading comparison…</div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/insights.js') }}"></script>
+</body>
+</html>
