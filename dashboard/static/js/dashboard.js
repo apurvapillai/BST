@@ -1038,6 +1038,13 @@
     const reelOptionCache = new Map(); // reel_id -> { value, code, label }
     const reelIdsByCode = new Map(); // reel_code -> [reel_id]
     let pendingReelCodes = [];
+    const STATUS_STYLES = {
+      pass: { bg: "rgba(34, 197, 94, 0.35)", color: "#065f46" },
+      fail: { bg: "rgba(248, 113, 113, 0.4)", color: "#7f1d1d" },
+      pending: { bg: "", color: "" },
+      no_defects: { bg: "rgba(191, 219, 254, 0.7)", color: "#1d4ed8" },
+      complete: { bg: "rgba(191, 219, 254, 0.6)", color: "#1e3a8a" },
+    };
 
     function rememberReelOption(entry) {
       if (!entry || !entry.value) return;
@@ -1046,6 +1053,7 @@
         value: id,
         code: entry.code || entry.reel_code || "",
         label: entry.label || entry.reel_code || entry.code || `Reel ${id}`,
+        status: entry.status || "",
       };
       reelOptionCache.set(id, normalized);
       if (normalized.code) {
@@ -1064,6 +1072,7 @@
           id,
           code: entry && entry.code ? entry.code : "",
           label: entry && entry.label ? entry.label : entry && entry.code ? entry.code : `Reel ${id}`,
+          status: entry && entry.status ? entry.status : "",
         };
       });
     }
@@ -1234,23 +1243,40 @@
         .filter((value) => value);
     }
 
+    function applyOptionStatusStyles(option, status) {
+      if (!option) return;
+      const normalized = status || "";
+      option.dataset.status = normalized;
+      const styles = STATUS_STYLES[normalized];
+      if (styles && styles.bg) {
+        option.style.backgroundColor = styles.bg;
+        option.style.color = styles.color || "";
+        option.style.fontWeight = "600";
+      } else {
+        option.style.backgroundColor = "";
+        option.style.color = "";
+        option.style.fontWeight = "";
+      }
+    }
+
     function syncReelSelect() {
       if (!elements.reel) return;
       const selectedSet = new Set(state.reel_ids.map((id) => `${id}`));
       const options = Array.from(elements.reel.options);
       selectedSet.forEach((id) => {
-        if (!options.some((option) => option.value === id)) {
-          const cached = reelOptionCache.get(id);
-          const option = document.createElement("option");
-          option.value = id;
-          option.textContent = cached && cached.label ? cached.label : cached && cached.code ? cached.code : `Reel ${id}`;
-          if (cached && cached.code) {
-            option.dataset.reelCode = cached.code;
-          }
-          option.selected = true;
-          elements.reel.appendChild(option);
+      if (!options.some((option) => option.value === id)) {
+        const cached = reelOptionCache.get(id);
+        const option = document.createElement("option");
+        option.value = id;
+        option.textContent = cached && cached.label ? cached.label : cached && cached.code ? cached.code : `Reel ${id}`;
+        if (cached && cached.code) {
+          option.dataset.reelCode = cached.code;
         }
-      });
+        applyOptionStatusStyles(option, cached && cached.status);
+        option.selected = true;
+        elements.reel.appendChild(option);
+      }
+    });
       Array.from(elements.reel.options).forEach((option) => {
         if (option.value === "") {
           option.selected = !selectedSet.size;
@@ -1351,12 +1377,14 @@
         defaultOption.value = "";
         defaultOption.textContent = "All";
         defaultOption.selected = !selectedSet.size;
+        applyOptionStatusStyles(defaultOption, "");
         frag.appendChild(defaultOption);
       } else if (!Array.from(selectedSet).length) {
         const defaultOption = document.createElement("option");
         defaultOption.value = "";
         defaultOption.textContent = "All";
         defaultOption.selected = true;
+        applyOptionStatusStyles(defaultOption, "");
         frag.appendChild(defaultOption);
       }
 
@@ -1371,6 +1399,7 @@
               value: String(rawValue),
               label: raw.label || raw.reel_code || raw.code || String(rawValue),
               code: raw.reel_code || raw.code || "",
+              status: raw.status || "",
             };
           }
         } else if (raw !== undefined && raw !== null && raw !== "") {
@@ -1379,6 +1408,7 @@
             value,
             label: selectEl === elements.order && value === ORDER_NONE ? "None" : value,
             code: "",
+            status: "",
           };
         }
         if (entry && entry.value) {
@@ -1399,7 +1429,7 @@
           if (cached) {
             entry = cached;
           } else {
-            entry = { value, label: `Reel ${value}`, code: "" };
+            entry = { value, label: `Reel ${value}`, code: "", status: "" };
             rememberReelOption(entry);
           }
         } else {
@@ -1407,6 +1437,7 @@
             value,
             label: selectEl === elements.order && value === ORDER_NONE ? "None" : value,
             code: "",
+            status: "",
           };
         }
         entryMap.set(value, entry);
@@ -1420,6 +1451,7 @@
         if (entry.code) {
           option.dataset.reelCode = entry.code;
         }
+        applyOptionStatusStyles(option, entry.status);
         option.selected = selectedSet.has(entry.value);
         frag.appendChild(option);
       });
@@ -6286,6 +6318,10 @@ function extractRlmMetrics(config) {
     let contentEl;
     let imageEl;
     let imagePlaceholderEl;
+    let referenceImageEl;
+    let referencePlaceholderEl;
+    let referenceCanvasEl;
+    let defectCanvasEl;
     let labelEl;
     let timeEl;
     let headerJobEl;
@@ -6303,7 +6339,12 @@ function extractRlmMetrics(config) {
     let summaryCountPassEl;
     let summaryCountFailEl;
     let summaryCountPendingEl;
+    let summaryCountNoImageEl;
+    let noImageNoteEl;
     let pendingEl;
+    let noReelNoticeEl;
+    let noReelNoticeTextEl;
+    let nextReelBtn;
     let passBtn;
     let failBtn;
     let retryBtn;
@@ -6318,13 +6359,18 @@ function extractRlmMetrics(config) {
     let initialized = false;
     let loading = false;
     let saving = false;
+    let summarySaving = false;
     let savingReel = false;
     let needsRefresh = true;
     let currentDefect = null;
     let currentReel = null;
     let summaryData = null;
     let pendingInReel = 0;
+    let summaryTableListenerAttached = false;
+    let lastNoReelAlert = "";
     let filtersListenerAttached = false;
+    let overlayResizeListenerAttached = false;
+    let overlayRenderHandle = null;
 
     function init() {
       if (initialized) return;
@@ -6337,6 +6383,10 @@ function extractRlmMetrics(config) {
       contentEl = Utils.qs("#qcReviewContent");
       imageEl = Utils.qs("#qcReviewImage");
       imagePlaceholderEl = Utils.qs("#qcReviewImagePlaceholder");
+      referenceImageEl = Utils.qs("#qcReferenceImage");
+      referencePlaceholderEl = Utils.qs("#qcReferencePlaceholder");
+      referenceCanvasEl = Utils.qs("#qcReferenceCanvas");
+      defectCanvasEl = Utils.qs("#qcReviewCanvas");
       labelEl = Utils.qs("#qcReviewLabel");
       timeEl = Utils.qs("#qcReviewTime");
       headerJobEl = Utils.qs("#qcReviewJob");
@@ -6354,7 +6404,12 @@ function extractRlmMetrics(config) {
       summaryCountPassEl = Utils.qs("#qcSummaryPass");
       summaryCountFailEl = Utils.qs("#qcSummaryFail");
       summaryCountPendingEl = Utils.qs("#qcSummaryPending");
+      summaryCountNoImageEl = Utils.qs("#qcSummaryNoImage");
+      noImageNoteEl = Utils.qs("#qcNoImageNote");
       pendingEl = Utils.qs("#qcReviewPending");
+      noReelNoticeEl = Utils.qs("#qcNoReelNotice");
+      noReelNoticeTextEl = Utils.qs("#qcNoReelNoticeText");
+      nextReelBtn = Utils.qs("#qcReviewNextReel");
       defectActionsEl = Utils.qs("#qcDefectActions");
       reelActionsEl = Utils.qs("#qcReelActions");
       reelPassBtn = Utils.qs("#qcReelPass");
@@ -6385,11 +6440,47 @@ function extractRlmMetrics(config) {
       if (reviewerInput) {
         reviewerInput.addEventListener("input", syncReelActionState);
       }
+      if (referenceImageEl) {
+        referenceImageEl.addEventListener("load", scheduleOverlayRender);
+        referenceImageEl.addEventListener("error", () => {
+          referenceImageEl.classList.add("hidden");
+          if (referencePlaceholderEl) {
+            referencePlaceholderEl.classList.remove("hidden");
+          }
+          clearOverlayCanvas(referenceCanvasEl);
+          scheduleOverlayRender();
+        });
+      }
+      if (imageEl) {
+        imageEl.addEventListener("load", scheduleOverlayRender);
+        imageEl.addEventListener("error", () => {
+          imageEl.classList.add("hidden");
+          if (imagePlaceholderEl) {
+            imagePlaceholderEl.classList.remove("hidden");
+          }
+          clearOverlayCanvas(defectCanvasEl);
+          scheduleOverlayRender();
+        });
+      }
+      if (summaryTableBody && !summaryTableListenerAttached) {
+        summaryTableBody.addEventListener("click", handleSummaryActionClick);
+        summaryTableListenerAttached = true;
+      }
       if (!filtersListenerAttached && Filters && typeof Filters.onChange === "function") {
         Filters.onChange(() => {
           needsRefresh = true;
         });
         filtersListenerAttached = true;
+      }
+      if (!overlayResizeListenerAttached) {
+        window.addEventListener("resize", scheduleOverlayRender);
+        overlayResizeListenerAttached = true;
+      }
+      if (nextReelBtn) {
+        nextReelBtn.addEventListener("click", () => {
+          hideNoReelNotice();
+          fetchNext(true);
+        });
       }
       initialized = true;
     }
@@ -6410,14 +6501,20 @@ function extractRlmMetrics(config) {
       if (reelPendingEl) reelPendingEl.textContent = Utils.formatNumber(pendingInReel);
     }
 
-    async function fetchNext(force = false) {
+    async function fetchNext(force = false, options = {}) {
+      const { lockToReel = false } = options;
       if (!panel || loading) return;
+      hideNoReelNotice();
       loading = true;
       setActionsDisabled(true);
       setReelActionsDisabled(true);
       setViewState(force ? "loading" : "content");
       try {
-        const data = await Api.get("qc-review");
+        const params = {};
+        if (lockToReel && currentReel && currentReel.reel_id) {
+          params.focus_reel_id = currentReel.reel_id;
+        }
+        const data = await Api.get("qc-review", params);
         applyPayload(data || {});
         needsRefresh = false;
       } catch (error) {
@@ -6442,8 +6539,20 @@ function extractRlmMetrics(config) {
       if (!currentReel) {
         setViewState("empty");
         syncCompletionHighlights(false);
+        if (payload && payload.pending_total > 0) {
+          showNoReelNotice("This reel has no pending defects. Click Next Reel to continue.", true);
+          if (lastNoReelAlert !== "pending") {
+            window.alert("This reel has no defects. Click the Next Reel button to continue.");
+            lastNoReelAlert = "pending";
+          }
+        } else {
+          showNoReelNotice("No reels require review right now.", false);
+          lastNoReelAlert = "";
+        }
         return;
       }
+      hideNoReelNotice();
+      lastNoReelAlert = "";
       updateHeaderInfo(currentReel, currentDefect);
       syncCompletionHighlights(pendingInReel === 0);
       if (currentDefect) {
@@ -6464,11 +6573,29 @@ function extractRlmMetrics(config) {
       summaryData = null;
       syncCompletionHighlights(false);
       setViewState("error", message);
+      hideNoReelNotice();
     }
 
     function updatePendingCount(total) {
       if (!pendingEl) return;
       pendingEl.textContent = Utils.formatNumber(total);
+    }
+
+    function showNoReelNotice(message, showButton) {
+      if (!noReelNoticeEl) return;
+      noReelNoticeEl.classList.remove("hidden");
+      if (noReelNoticeTextEl) {
+        noReelNoticeTextEl.textContent = message;
+      }
+      if (nextReelBtn) {
+        nextReelBtn.classList.toggle("hidden", !showButton);
+        nextReelBtn.disabled = !showButton;
+      }
+    }
+
+    function hideNoReelNotice() {
+      if (!noReelNoticeEl) return;
+      noReelNoticeEl.classList.add("hidden");
     }
 
     function setActionsDisabled(disabled) {
@@ -6545,24 +6672,19 @@ function extractRlmMetrics(config) {
       if (labelEl) labelEl.textContent = label;
       if (timeEl) timeEl.textContent = formatTime(defect.defect_time);
 
-      if (defect.image_src) {
-        const src = urlForStatic(defect.image_src);
-        if (imageEl) {
-          imageEl.src = src;
-          imageEl.classList.remove("hidden");
-        }
-        if (imagePlaceholderEl) {
-          imagePlaceholderEl.classList.add("hidden");
-        }
-      } else {
-        if (imageEl) {
-          imageEl.removeAttribute("src");
-          imageEl.classList.add("hidden");
-        }
-        if (imagePlaceholderEl) {
-          imagePlaceholderEl.classList.remove("hidden");
-        }
+      const hasDefectImage = updatePreviewImage(imageEl, imagePlaceholderEl, defect.image_src);
+      const hasReferenceImage = updatePreviewImage(
+        referenceImageEl,
+        referencePlaceholderEl,
+        defect.reference_image_src
+      );
+      if (!hasDefectImage) {
+        clearOverlayCanvas(defectCanvasEl);
       }
+      if (!hasReferenceImage) {
+        clearOverlayCanvas(referenceCanvasEl);
+      }
+      scheduleOverlayRender();
 
       FIELD_KEYS.forEach((key) => {
         const el = fieldEls[key];
@@ -6571,7 +6693,165 @@ function extractRlmMetrics(config) {
       });
     }
 
+    function updatePreviewImage(image, placeholder, src) {
+      if (!image) return false;
+      const hasSrc = Boolean(src);
+      if (hasSrc) {
+        const normalized = urlForStatic(src);
+        if (image.getAttribute("src") !== normalized) {
+          image.src = normalized;
+        }
+        image.classList.remove("hidden");
+        if (placeholder) {
+          placeholder.classList.add("hidden");
+        }
+      } else {
+        image.removeAttribute("src");
+        image.classList.add("hidden");
+        if (placeholder) {
+          placeholder.classList.remove("hidden");
+        }
+      }
+      return hasSrc;
+    }
+
+    function scheduleOverlayRender() {
+      if (overlayRenderHandle) {
+        window.cancelAnimationFrame(overlayRenderHandle);
+      }
+      overlayRenderHandle = window.requestAnimationFrame(() => {
+        overlayRenderHandle = null;
+        renderReferenceOverlay();
+        renderDefectOverlay();
+      });
+    }
+
+    function renderReferenceOverlay() {
+      if (!referenceCanvasEl) return;
+      if (!currentDefect || !currentDefect.reference_image_src) {
+        clearOverlayCanvas(referenceCanvasEl);
+        return;
+      }
+      drawCoordsOverlay(referenceCanvasEl, referenceImageEl, currentDefect.coords, {
+        formatWidth: currentDefect.format_width,
+        formatLength: currentDefect.format_length,
+      });
+    }
+
+    function renderDefectOverlay() {
+      if (!defectCanvasEl) return;
+      if (!currentDefect || !currentDefect.image_src) {
+        clearOverlayCanvas(defectCanvasEl);
+        return;
+      }
+      drawCoordsOverlay(defectCanvasEl, imageEl, currentDefect.coords, {
+        formatWidth: currentDefect.format_width,
+        formatLength: currentDefect.format_length,
+      });
+    }
+
+    function drawCoordsOverlay(canvas, image, coords, options = {}) {
+      if (!canvas || !image || !Array.isArray(coords) || !coords.length || image.classList.contains("hidden")) {
+        clearOverlayCanvas(canvas);
+        return;
+      }
+      const normalizedShapes = [];
+      coords.forEach((shape) => {
+        const xsSource = shape && Array.isArray(shape.x) ? shape.x : [];
+        const ysSource = shape && Array.isArray(shape.y) ? shape.y : [];
+        const xs = xsSource.map((value) => Number(value)).filter((value) => Number.isFinite(value));
+        const ys = ysSource.map((value) => Number(value)).filter((value) => Number.isFinite(value));
+        const count = Math.min(xs.length, ys.length);
+        if (count < 3) return;
+        normalizedShapes.push({ xs: xs.slice(0, count), ys: ys.slice(0, count) });
+      });
+      if (!normalizedShapes.length) {
+        clearOverlayCanvas(canvas);
+        return;
+      }
+
+      const width = image.clientWidth;
+      const height = image.clientHeight;
+      if (!width || !height) {
+        clearOverlayCanvas(canvas);
+        return;
+      }
+
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, width, height);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      normalizedShapes.forEach((shape) => {
+        shape.xs.forEach((value) => {
+          minX = Math.min(minX, value);
+          maxX = Math.max(maxX, value);
+        });
+        shape.ys.forEach((value) => {
+          minY = Math.min(minY, value);
+          maxY = Math.max(maxY, value);
+        });
+      });
+
+      let formatWidth = Number(options.formatWidth);
+      let formatLength = Number(options.formatLength);
+      const hasFormatWidth = Number.isFinite(formatWidth) && formatWidth > 0;
+      const hasFormatLength = Number.isFinite(formatLength) && formatLength > 0;
+      if (!hasFormatWidth) {
+        formatWidth = Number.isFinite(maxX - minX) && maxX > minX ? maxX - minX : null;
+      }
+      if (!hasFormatLength) {
+        formatLength = Number.isFinite(maxY - minY) && maxY > minY ? maxY - minY : null;
+      }
+      if (!Number.isFinite(formatWidth) || formatWidth <= 0) formatWidth = 1;
+      if (!Number.isFinite(formatLength) || formatLength <= 0) formatLength = 1;
+
+      const centerX = hasFormatWidth ? 0 : Number.isFinite(minX + maxX) ? (minX + maxX) / 2 : 0;
+      const centerY = hasFormatLength ? 0 : Number.isFinite(minY + maxY) ? (minY + maxY) / 2 : 0;
+      const scale = Math.min(width / formatWidth, height / formatLength) || 1;
+      const offsetX = width / 2;
+      const offsetY = height / 2;
+
+      canvas.classList.remove("hidden");
+      normalizedShapes.forEach((shape) => {
+        ctx.beginPath();
+        shape.xs.forEach((value, idx) => {
+          const px = offsetX + (value - centerX) * scale;
+          const py = offsetY - (shape.ys[idx] - centerY) * scale;
+          if (idx === 0) {
+            ctx.moveTo(px, py);
+          } else {
+            ctx.lineTo(px, py);
+          }
+        });
+        ctx.closePath();
+        ctx.fillStyle = "rgba(59, 130, 246, 0.22)";
+        ctx.strokeStyle = "rgba(37, 99, 235, 0.9)";
+        ctx.lineWidth = 2;
+        ctx.fill();
+        ctx.stroke();
+      });
+    }
+
+    function clearOverlayCanvas(canvas) {
+      if (!canvas) return;
+      canvas.classList.add("hidden");
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+
     function renderSummary(summary) {
+      summaryData = summary || null;
       if (!summaryEl) return;
       if (!summary || !Array.isArray(summary.defects) || !summary.defects.length) {
         if (summaryTableBody) {
@@ -6580,10 +6860,22 @@ function extractRlmMetrics(config) {
       } else if (summaryTableBody) {
         summaryTableBody.innerHTML = summary.defects
           .map((row) => {
-            const decisionBadge = row.qc_decision ? buildDecisionBadge(row.qc_decision) : "<span class=\"defect-decision-badge\">Pending</span>";
+            const decisionBadge = row.qc_decision
+              ? buildDecisionBadge(row.qc_decision)
+              : '<span class="defect-decision-badge defect-decision-badge-pending">Pending</span>';
             const position = Number.isFinite(Number(row.format_position))
               ? `${Utils.formatNumber(row.format_position, 1)} mm`
               : "--";
+            const hasImage = row.has_image !== false;
+            const canManualReview = !hasImage && !row.qc_decision;
+            const decisionCell = canManualReview
+              ? `
+                  <div class="qc-summary-actions">
+                    <button type="button" data-summary-action="pass" data-defect-id="${row.defect_id}">Pass</button>
+                    <button type="button" data-summary-action="fail" data-defect-id="${row.defect_id}">Fail</button>
+                  </div>
+                `
+              : decisionBadge;
             return `
               <tr>
                 <td>#${row.defect_id}</td>
@@ -6591,7 +6883,7 @@ function extractRlmMetrics(config) {
                 <td>${Utils.formatNumber(row.magnitude_value, 3)}</td>
                 <td>${Utils.formatNumber(row.severity_value, 2)}</td>
                 <td>${position}</td>
-                <td>${decisionBadge}</td>
+                <td>${decisionCell}</td>
               </tr>
             `;
           })
@@ -6601,6 +6893,7 @@ function extractRlmMetrics(config) {
       if (summaryCountPassEl) summaryCountPassEl.textContent = Utils.formatNumber(summary?.counts?.pass || 0);
       if (summaryCountFailEl) summaryCountFailEl.textContent = Utils.formatNumber(summary?.counts?.fail || 0);
       if (summaryCountPendingEl) summaryCountPendingEl.textContent = Utils.formatNumber(summary?.counts?.pending || 0);
+      if (summaryCountNoImageEl) summaryCountNoImageEl.textContent = Utils.formatNumber(summary?.no_image_total || 0);
 
       if (summaryByTypeEl) {
         const entries = Array.isArray(summary?.by_type) ? summary.by_type : [];
@@ -6619,8 +6912,21 @@ function extractRlmMetrics(config) {
       if (summaryNoticeEl) {
         summaryNoticeEl.textContent =
           pendingInReel === 0
-            ? "All defects reviewed. Submit a reel decision to proceed."
-            : "Review remaining defects to enable reel decisions.";
+            ? "All photo-backed defects are reviewed. Submit a reel decision to continue."
+            : "Review remaining defects with images to enable reel decisions.";
+      }
+      if (noImageNoteEl) {
+        const pendingNoImage = Number(summary?.no_image_pending || 0);
+        const totalNoImage = Number(summary?.no_image_total || 0);
+        if (totalNoImage > 0) {
+          if (pendingNoImage > 0) {
+            noImageNoteEl.textContent = `${pendingNoImage} of ${totalNoImage} defects lack preview images. Use the inline buttons to label them.`;
+          } else {
+            noImageNoteEl.textContent = `${totalNoImage} defects had no preview images.`;
+          }
+        } else {
+          noImageNoteEl.textContent = "";
+        }
       }
       if (summaryHistoryEl) {
         const latest = summary && summary.latest_review ? summary.latest_review : null;
@@ -6634,12 +6940,78 @@ function extractRlmMetrics(config) {
       }
     }
 
+    function handleSummaryActionClick(event) {
+      const button = event.target.closest("button[data-summary-action]");
+      if (!button || summarySaving) return;
+      event.preventDefault();
+      const action = (button.dataset.summaryAction || "").toLowerCase();
+      if (action !== "pass" && action !== "fail") return;
+      const defectId = Number(button.dataset.defectId);
+      if (!defectId) return;
+      summarySaving = true;
+      button.disabled = true;
+      button.classList.add("is-loading");
+      handleSummaryDefectDecision(defectId, action, button);
+    }
+
+    async function handleSummaryDefectDecision(defectId, decision, triggerButton) {
+      try {
+        await persistDefectDecision(defectId, decision);
+        applySummaryDecisionLocal(defectId, decision);
+      } catch (error) {
+        const message = error && error.message ? error.message : "Failed to update decision.";
+        window.alert(message);
+        if (triggerButton) {
+          triggerButton.disabled = false;
+        }
+      } finally {
+        summarySaving = false;
+        if (triggerButton) {
+          triggerButton.classList.remove("is-loading");
+        }
+      }
+    }
+
     function syncCompletionHighlights(isComplete) {
       COMPLETION_FIELDS.forEach((key) => {
         const el = fieldEls[key];
         if (!el) return;
         el.classList.toggle("qc-field-complete", Boolean(isComplete));
       });
+    }
+
+    function applySummaryDecisionLocal(defectId, decision) {
+      if (!summaryData || !Array.isArray(summaryData.defects)) return;
+      const target = summaryData.defects.find((row) => Number(row.defect_id) === Number(defectId));
+      if (!target) return;
+      const prev = (target.qc_decision || "").toLowerCase();
+      const next = decision === "fail" ? "fail" : "pass";
+      if (prev === next) {
+        renderSummary(summaryData);
+        syncReelActionState();
+        return;
+      }
+      const counts = summaryData.counts || { total: 0, pass: 0, fail: 0, pending: 0 };
+      if (prev === "pass") {
+        counts.pass = Math.max(0, (counts.pass || 0) - 1);
+      } else if (prev === "fail") {
+        counts.fail = Math.max(0, (counts.fail || 0) - 1);
+      } else {
+        counts.pending = Math.max(0, (counts.pending || 0) - 1);
+      }
+      if (next === "pass") {
+        counts.pass = (counts.pass || 0) + 1;
+      } else {
+        counts.fail = (counts.fail || 0) + 1;
+      }
+      counts.total = Math.max(0, (counts.pass || 0) + (counts.fail || 0) + (counts.pending || 0));
+      summaryData.counts = counts;
+      if (target.has_image === false) {
+        summaryData.no_image_pending = Math.max(0, (summaryData.no_image_pending || 0) - 1);
+      }
+      target.qc_decision = next;
+      renderSummary(summaryData);
+      syncReelActionState();
     }
 
     async function handleDecision(decision) {
@@ -6649,7 +7021,7 @@ function extractRlmMetrics(config) {
       try {
         await persistDefectDecision(currentDefect.defect_id, decision);
         needsRefresh = true;
-        await fetchNext(false);
+        await fetchNext(false, { lockToReel: true });
       } catch (error) {
         const message = error && error.message ? error.message : "Failed to update decision.";
         window.alert(message);
@@ -6660,7 +7032,7 @@ function extractRlmMetrics(config) {
     }
 
     function syncReelActionState() {
-      if (!summaryData || pendingInReel > 0) {
+      if (!summaryData || !currentReel) {
         setReelActionsDisabled(true);
         return;
       }
@@ -6670,7 +7042,7 @@ function extractRlmMetrics(config) {
     }
 
     async function handleReelDecision(decision) {
-      if (!summaryData || pendingInReel > 0 || savingReel || !currentReel) return;
+      if (!summaryData || savingReel || !currentReel) return;
       const reviewer = reviewerInput ? reviewerInput.value.trim() : "";
       if (!reviewer) {
         window.alert("Enter your name before submitting a reel decision.");
@@ -6686,6 +7058,12 @@ function extractRlmMetrics(config) {
           comments,
         });
         if (commentsInput) commentsInput.value = "";
+        if (Filters && typeof Filters.hasReelSelection === "function" && typeof Filters.removeReel === "function") {
+          const isSelected = Filters.hasReelSelection(currentReel.reel_id, currentReel.reel_code || "");
+          if (isSelected) {
+            Filters.removeReel(currentReel.reel_id, { emit: true });
+          }
+        }
         needsRefresh = true;
         await fetchNext(true);
       } catch (error) {

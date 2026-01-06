@@ -445,6 +445,10 @@
             <div id="qcReviewEmpty" class="qc-review-placeholder hidden">
               <p>No pending defects match the current filters.</p>
             </div>
+            <div id="qcNoReelNotice" class="qc-review-placeholder hidden">
+              <p id="qcNoReelNoticeText">Selected reel has no pending defects.</p>
+              <button type="button" class="qc-review-retry" id="qcReviewNextReel">Next Reel</button>
+            </div>
             <div id="qcReviewError" class="qc-review-placeholder hidden">
               <p></p>
               <button type="button" class="qc-review-retry" data-qc-review-retry>Try again</button>
@@ -454,34 +458,10 @@
               <div class="qc-review-details">
                 <p class="qc-review-label" id="qcReviewLabel">—</p>
                 <p class="qc-review-time" id="qcReviewTime">—</p>
-                <dl class="qc-review-meta">
-                  <div>
-                    <dt>Defect ID</dt>
-                    <dd data-qc-field="defect_id">—</dd>
-                  </div>
-                  <div>
-                    <dt>Machine</dt>
-                    <dd data-qc-field="machine_name">—</dd>
-                  </div>
-                  <div>
-                    <dt>Reel Code</dt>
-                    <dd data-qc-field="reel_code">—</dd>
-                  </div>
-                  <div>
-                    <dt>Job</dt>
-                    <dd data-qc-field="job_name">—</dd>
-                  </div>
-                  <div>
-                    <dt>Order</dt>
-                    <dd data-qc-field="order_number">—</dd>
-                  </div>
+                <dl class="qc-review-meta qc-review-meta--compact">
                   <div>
                     <dt>Type</dt>
                     <dd data-qc-field="class_name">—</dd>
-                  </div>
-                  <div>
-                    <dt>Phase</dt>
-                    <dd data-qc-field="phase">—</dd>
                   </div>
                   <div>
                     <dt>Position</dt>
@@ -497,9 +477,23 @@
                   </div>
                 </dl>
               </div>
-              <div class="qc-review-image">
-                <div id="qcReviewImagePlaceholder" class="qc-review-image-placeholder hidden">No preview image.</div>
-                <img id="qcReviewImage" alt="Pending defect" loading="lazy" decoding="async">
+              <div class="qc-review-images">
+                <div class="qc-review-image qc-review-image--reference">
+                  <div class="qc-review-image-header">Reference</div>
+                  <div class="qc-review-image-stage">
+                    <div id="qcReferencePlaceholder" class="qc-review-image-placeholder">No reference image.</div>
+                    <img id="qcReferenceImage" alt="Reference" loading="lazy" decoding="async">
+                    <canvas id="qcReferenceCanvas" class="qc-review-overlay"></canvas>
+                  </div>
+                </div>
+                <div class="qc-review-image qc-review-image--defect">
+                  <div class="qc-review-image-header">Defect</div>
+                  <div class="qc-review-image-stage">
+                    <div id="qcReviewImagePlaceholder" class="qc-review-image-placeholder hidden">No preview image.</div>
+                    <img id="qcReviewImage" alt="Pending defect" loading="lazy" decoding="async">
+                    <canvas id="qcReviewCanvas" class="qc-review-overlay"></canvas>
+                  </div>
+                </div>
               </div>
             </div>
               <div class="qc-review-actions" id="qcDefectActions">
@@ -527,14 +521,19 @@
                     <span>Fail</span>
                     <strong id="qcSummaryFail">0</strong>
                   </div>
-                  <div class="qc-summary-card pending">
-                    <span>Pending</span>
-                    <strong id="qcSummaryPending">0</strong>
-                  </div>
+                <div class="qc-summary-card pending">
+                  <span>Pending</span>
+                  <strong id="qcSummaryPending">0</strong>
                 </div>
-                <div class="qc-summary-table">
-                  <table>
-                    <thead>
+                <div class="qc-summary-card no-image">
+                  <span>No Image</span>
+                  <strong id="qcSummaryNoImage">0</strong>
+                </div>
+              </div>
+              <p class="qc-noimage-note" id="qcNoImageNote"></p>
+              <div class="qc-summary-table">
+                <table>
+                  <thead>
                       <tr>
                         <th>ID</th>
                         <th>Type</th>

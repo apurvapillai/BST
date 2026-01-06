@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from flask import Blueprint, jsonify, render_template, request
-from sqlalchemy import and_, case, exists, false, func, literal, or_, text
+from sqlalchemy import and_, case, collate, exists, false, func, literal, or_, text
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from db.connection import SessionLocal
@@ -76,6 +76,45 @@ def _to_float(value: Optional[Decimal]) -> Optional[float]:
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:
     return dt.isoformat() if dt else None
+
+
+def _serialize_coords(coords_data) -> List[Dict[str, List[float]]]:
+    if not coords_data:
+        return []
+    if isinstance(coords_data, str):
+        try:
+            coords = json.loads(coords_data)
+        except (TypeError, ValueError):
+            return []
+    else:
+        coords = coords_data
+    if not isinstance(coords, (list, tuple)):
+        return []
+    normalized: List[Dict[str, List[float]]] = []
+    for shape in coords:
+        if not isinstance(shape, dict):
+            continue
+        xs_raw = shape.get("x")
+        ys_raw = shape.get("y")
+        if not isinstance(xs_raw, (list, tuple)) or not isinstance(ys_raw, (list, tuple)):
+            continue
+        xs: List[float] = []
+        ys: List[float] = []
+        for val in xs_raw:
+            try:
+                xs.append(float(val))
+            except (TypeError, ValueError):
+                continue
+        for val in ys_raw:
+            try:
+                ys.append(float(val))
+            except (TypeError, ValueError):
+                continue
+        count = min(len(xs), len(ys))
+        if count < 3:
+            continue
+        normalized.append({"x": xs[:count], "y": ys[:count]})
+    return normalized
 
 
 def _normalize_classification(value: Optional[str]) -> Optional[str]:
@@ -806,6 +845,13 @@ def api_filters():
         base_query = _apply_reel_filters(
             session.query(Reel), filters, include_reel_code=False
         )
+        status_filters = dict(filters)
+        status_filters["reel_code"] = None
+        status_filters["reel_codes"] = []
+        status_filters["reel_ids"] = []
+        status_query = _apply_reel_filters(
+            session.query(Reel), status_filters, include_reel_code=True
+        )
 
         job_filters = dict(filters)
         job_filters["job"] = None
@@ -844,15 +890,135 @@ def api_filters():
             .all()
         )
 
-        order_values: List[str] = []
+        status_rows = (
+            status_query.with_entities(
+                Reel.reel_id,
+                Reel.reel_code,
+                Reel.job_name,
+                Reel.order_number,
+            ).all()
+        )
+        reel_ids = [row.reel_id for row in status_rows if row.reel_id is not None]
+        reel_codes = [row.reel_code for row in status_rows if row.reel_code]
+        defect_counts: Dict[int, int] = {}
+        if reel_ids:
+            defect_counts = {
+                reel_id: count
+                for reel_id, count in (
+                    session.query(Defect.reel_id, func.count(Defect.defect_id))
+                    .filter(Defect.reel_id.in_(reel_ids))
+                    .group_by(Defect.reel_id)
+                    .all()
+                )
+            }
+        latest_reviews: Dict[str, Optional[str]] = {}
+        if reel_codes:
+            latest_review_subq = (
+                session.query(
+                    ReelReview.reel_code.label("reel_code"),
+                    func.max(ReelReview.review_id).label("max_id"),
+                )
+                .filter(ReelReview.reel_code.in_(reel_codes))
+                .group_by(ReelReview.reel_code)
+                .subquery()
+            )
+            latest_reviews = {
+                code: decision
+                for code, decision in (
+                    session.query(
+                        latest_review_subq.c.reel_code,
+                        ReelReview.decision,
+                    )
+                    .join(
+                        ReelReview,
+                        ReelReview.review_id == latest_review_subq.c.max_id,
+                    )
+                    .all()
+                )
+            }
+
+        reel_status_map: Dict[int, Dict[str, object]] = {}
+        job_stats: Dict[Optional[str], Dict[str, int]] = defaultdict(lambda: {"defect_total": 0, "defect_completed": 0})
+        order_stats: Dict[str, Dict[str, int]] = defaultdict(lambda: {"defect_total": 0, "defect_completed": 0})
+        for row in status_rows:
+            reel_id = row.reel_id
+            if reel_id is None:
+                continue
+            defect_total = int(defect_counts.get(reel_id, 0))
+            decision = (latest_reviews.get(row.reel_code or "", "") or "").strip().lower()
+            if defect_total == 0:
+                status = "no_defects"
+            elif decision in {"pass", "fail"}:
+                status = decision
+            else:
+                status = "pending"
+            reel_status_map[reel_id] = {
+                "status": status,
+                "defect_count": defect_total,
+                "job_name": row.job_name,
+                "order_number": row.order_number,
+            }
+            if defect_total > 0:
+                job_stats[row.job_name]["defect_total"] += 1
+                if status in {"pass", "fail"}:
+                    job_stats[row.job_name]["defect_completed"] += 1
+                order_key = row.order_number if row.order_number else SENTINEL_NONE
+                order_stats[order_key]["defect_total"] += 1
+                if status in {"pass", "fail"}:
+                    order_stats[order_key]["defect_completed"] += 1
+
+        def _job_status(job_name: Optional[str]) -> str:
+            stats = job_stats.get(job_name)
+            if not stats:
+                return "complete"
+            if stats["defect_total"] == 0:
+                return "complete"
+            if stats["defect_completed"] >= stats["defect_total"]:
+                return "complete"
+            return "pending"
+
+        def _order_status(order_value: Optional[str]) -> str:
+            key = order_value if order_value else SENTINEL_NONE
+            stats = order_stats.get(key)
+            if not stats:
+                return "complete"
+            if stats["defect_total"] == 0:
+                return "complete"
+            if stats["defect_completed"] >= stats["defect_total"]:
+                return "complete"
+            return "pending"
+
+        job_entries = [
+            {
+                "value": job_name or "",
+                "label": job_name or "",
+                "status": _job_status(job_name),
+            }
+            for job_name, _ in jobs
+        ]
+
+        order_entries: List[Dict[str, str]] = []
         has_null_order = False
         for order_value, _ in order_rows:
             if order_value is None or (isinstance(order_value, str) and not order_value.strip()):
                 has_null_order = True
             else:
-                order_values.append(order_value)
+                order_entries.append(
+                    {
+                        "value": order_value,
+                        "label": order_value,
+                        "status": _order_status(order_value),
+                    }
+                )
         if has_null_order:
-            order_values.insert(0, SENTINEL_NONE)
+            order_entries.insert(
+                0,
+                {
+                    "value": SENTINEL_NONE,
+                    "label": "None",
+                    "status": _order_status(None),
+                },
+            )
 
         reel_query = order_query
         order_filter = filters.get("order")
@@ -887,6 +1053,7 @@ def api_filters():
                 "reel_id": reel_id,
                 "reel_code": reel_code,
                 "label": _reel_label(reel_code, order_number, time_end),
+                "status": reel_status_map.get(reel_id, {}).get("status", "pending"),
             }
             for reel_id, reel_code, order_number, time_end in reel_rows
             if reel_id is not None
@@ -894,8 +1061,8 @@ def api_filters():
 
         return jsonify(
             {
-                "jobs": [job for job, _ in jobs],
-                "orders": order_values,
+                "jobs": job_entries,
+                "orders": order_entries,
                 "reel_codes": reel_options,
             }
         )
@@ -2668,6 +2835,8 @@ def api_qc_review():
             "position_max": request.args.get("position_max", type=float),
         }
 
+        focus_reel_id = request.args.get("focus_reel_id", type=int)
+
         base_query = _build_defect_query(
             session,
             filters,
@@ -2675,15 +2844,217 @@ def api_qc_review():
             numeric_filters,
             None,
         )
+
+        latest_review_subq = (
+            session.query(
+                ReelReview.reel_code.label("reel_code"),
+                func.max(ReelReview.review_id).label("max_id"),
+            )
+            .group_by(ReelReview.reel_code)
+            .subquery()
+        )
+        finalized_reels_subq = (
+            session.query(Reel.reel_id)
+            .join(
+                latest_review_subq,
+                collate(Reel.reel_code, "utf8mb4_unicode_ci")
+                == collate(latest_review_subq.c.reel_code, "utf8mb4_unicode_ci"),
+            )
+            .join(
+                ReelReview,
+                ReelReview.review_id == latest_review_subq.c.max_id,
+            )
+            .filter(ReelReview.decision.in_(("pass", "fail")))
+            .subquery()
+        )
+        base_query = base_query.filter(
+            ~Defect.reel_id.in_(session.query(finalized_reels_subq.c.reel_id))
+        )
+
         pending_filter = or_(Defect.qc_decision.is_(None), Defect.qc_decision == "")
         pending_query = base_query.filter(pending_filter)
         pending_total = pending_query.count()
+
+        def build_reel_context(reel_id: int):
+            reel = (
+                session.query(Reel)
+                .options(
+                    selectinload(Reel.machine),
+                    selectinload(Reel.reference_images),
+                )
+                .filter(Reel.reel_id == reel_id)
+                .first()
+            )
+            if not reel:
+                return None
+
+            phases = (
+                session.query(InspectionPhase)
+                .filter(InspectionPhase.reel_id == reel_id)
+                .order_by(InspectionPhase.start_time.asc())
+                .all()
+            )
+
+            reel_query = base_query.filter(Defect.reel_id == reel_id)
+            reel_defect_rows = (
+                reel_query.options(selectinload(Defect.reel))
+                .order_by(Defect.defect_time.asc(), Defect.defect_id.asc())
+                .all()
+            )
+            if not reel_defect_rows:
+                return None
+
+            next_defect_row = (
+                reel_query.filter(pending_filter)
+                .filter(Defect.image_src.isnot(None))
+                .filter(Defect.image_src != "")
+                .order_by(Defect.defect_time.desc(), Defect.defect_id.desc())
+                .first()
+            )
+
+            reference_image_src = None
+            if reel.reference_images:
+                latest_reference = sorted(
+                    reel.reference_images,
+                    key=lambda ref: getattr(ref, "ref_image_id", 0) or 0,
+                    reverse=True,
+                )[0]
+                reference_image_src = latest_reference.image_src
+
+            summary_counts = {"pass": 0, "fail": 0, "pending": 0}
+            type_breakdown: Dict[str, Dict[str, int]] = defaultdict(lambda: {"pass": 0, "fail": 0, "pending": 0})
+            summary_defects: List[Dict[str, Any]] = []
+            pending_with_image = 0
+            pending_without_image = 0
+            no_image_total = 0
+            for defect in reel_defect_rows:
+                decision = _normalize_decision(defect.qc_decision)
+                bucket = decision if decision in {"pass", "fail"} else "pending"
+                summary_counts[bucket] += 1
+                class_name = defect.class_name or "Unclassified"
+                type_breakdown[class_name][bucket] += 1
+                has_image = bool(defect.image_src)
+                if not has_image:
+                    no_image_total += 1
+                if bucket == "pending":
+                    if has_image:
+                        pending_with_image += 1
+                    else:
+                        pending_without_image += 1
+                summary_defects.append(
+                    {
+                        "defect_id": defect.defect_id,
+                        "class_name": defect.class_name,
+                        "magnitude_value": _to_float(defect.magnitude_value),
+                        "severity_value": _to_float(defect.severity_value),
+                        "format_position": _to_float(defect.format_position),
+                        "defect_time": _iso(defect.defect_time),
+                        "qc_decision": decision,
+                        "has_image": has_image,
+                    }
+                )
+
+            summary_counts["total"] = sum(summary_counts.values())
+            type_breakdown_rows = [
+                {
+                    "class_name": cls,
+                    "pass": counts["pass"],
+                    "fail": counts["fail"],
+                    "pending": counts["pending"],
+                }
+                for cls, counts in sorted(type_breakdown.items(), key=lambda item: item[0])
+            ]
+
+            latest_review = None
+            if reel.reel_code:
+                latest_review = (
+                    session.query(ReelReview)
+                    .filter(
+                        collate(ReelReview.reel_code, "utf8mb4_unicode_ci")
+                        == collate(reel.reel_code, "utf8mb4_unicode_ci")
+                    )
+                    .order_by(ReelReview.created_at.desc(), ReelReview.review_id.desc())
+                    .first()
+                )
+
+            next_defect_payload: Optional[Dict[str, Any]] = None
+            if next_defect_row:
+                phase_value = None
+                if next_defect_row.defect_time:
+                    phase_value = _phase_for_timestamp(list(phases), next_defect_row.defect_time)
+                coords_payload = _serialize_coords(next_defect_row.coords_json)
+                next_defect_payload = {
+                    "defect_id": next_defect_row.defect_id,
+                    "reel_id": next_defect_row.reel_id,
+                    "reel_code": reel.reel_code,
+                    "order_number": reel.order_number,
+                    "job_name": reel.job_name,
+                    "class_name": next_defect_row.class_name,
+                    "magnitude_value": _to_float(next_defect_row.magnitude_value),
+                    "severity_value": _to_float(next_defect_row.severity_value),
+                    "format_position": _to_float(next_defect_row.format_position),
+                    "defect_time": _iso(next_defect_row.defect_time),
+                    "image_src": next_defect_row.image_src,
+                    "phase": phase_value,
+                    "machine_name": reel.machine.name if reel.machine else None,
+                    "coords": coords_payload,
+                    "format_length": _to_float(reel.format_length),
+                    "format_width": _to_float(reel.format_width),
+                    "reference_image_src": reference_image_src,
+                }
+
+            reel_summary = {
+                "reel_id": reel.reel_id,
+                "reel_code": reel.reel_code,
+                "job_name": reel.job_name,
+                "order_number": reel.order_number,
+                "machine_name": reel.machine.name if reel.machine else None,
+                "counts": summary_counts,
+                "defects": summary_defects,
+                "by_type": type_breakdown_rows,
+                "latest_review": _serialize_review(latest_review),
+                "no_image_total": no_image_total,
+                "no_image_pending": pending_without_image,
+            }
+
+            reel_payload = {
+                "reel_id": reel.reel_id,
+                "reel_code": reel.reel_code,
+                "order_number": reel.order_number,
+                "job_name": reel.job_name,
+                "machine_name": reel.machine.name if reel.machine else None,
+                "time_start": _iso(reel.time_start),
+                "time_end": _iso(reel.time_end),
+            }
+
+            return {
+                "reel": reel_payload,
+                "reel_summary": reel_summary,
+                "next_defect": next_defect_payload,
+                "pending_in_reel": pending_with_image,
+                "pending_without_image": pending_without_image,
+            }
+
+        if focus_reel_id:
+            context = build_reel_context(focus_reel_id)
+            if context:
+                return jsonify(
+                    {
+                        "pending_total": pending_total,
+                        "pending_in_reel": context["pending_in_reel"],
+                        "pending_without_image": context["pending_without_image"],
+                        "reel": context["reel"],
+                        "next_defect": context["next_defect"],
+                        "reel_summary": context["reel_summary"],
+                    }
+                )
 
         if pending_total == 0:
             return jsonify(
                 {
                     "pending_total": 0,
                     "pending_in_reel": 0,
+                    "pending_without_image": 0,
                     "reel": None,
                     "next_defect": None,
                     "reel_summary": None,
@@ -2704,142 +3075,34 @@ def api_qc_review():
                 {
                     "pending_total": pending_total,
                     "pending_in_reel": 0,
+                    "pending_without_image": 0,
                     "reel": None,
                     "next_defect": None,
                     "reel_summary": None,
                 }
             )
-        target_reel_id = target_reel_entry.reel_id
 
-        reel = (
-            session.query(Reel)
-            .options(selectinload(Reel.machine))
-            .filter(Reel.reel_id == target_reel_id)
-            .first()
-        )
-        if not reel:
+        context = build_reel_context(target_reel_entry.reel_id)
+        if not context:
             return jsonify(
                 {
                     "pending_total": pending_total,
                     "pending_in_reel": 0,
+                    "pending_without_image": 0,
                     "reel": None,
                     "next_defect": None,
                     "reel_summary": None,
                 }
             )
 
-        phases = (
-            session.query(InspectionPhase)
-            .filter(InspectionPhase.reel_id == target_reel_id)
-            .order_by(InspectionPhase.start_time.asc())
-            .all()
-        )
-
-        next_defect_row = (
-            pending_query.filter(Defect.reel_id == target_reel_id)
-            .order_by(Defect.defect_time.desc(), Defect.defect_id.desc())
-            .first()
-        )
-
-        reel_defect_rows = (
-            base_query.filter(Defect.reel_id == target_reel_id)
-            .options(selectinload(Defect.reel))
-            .order_by(Defect.defect_time.asc(), Defect.defect_id.asc())
-            .all()
-        )
-
-        summary_counts = {"pass": 0, "fail": 0, "pending": 0}
-        type_breakdown: Dict[str, Dict[str, int]] = defaultdict(lambda: {"pass": 0, "fail": 0, "pending": 0})
-        summary_defects: List[Dict[str, Any]] = []
-        for defect in reel_defect_rows:
-            decision = _normalize_decision(defect.qc_decision)
-            bucket = decision if decision in {"pass", "fail"} else "pending"
-            summary_counts[bucket] += 1
-            class_name = defect.class_name or "Unclassified"
-            type_breakdown[class_name][bucket] += 1
-            summary_defects.append(
-                {
-                    "defect_id": defect.defect_id,
-                    "class_name": defect.class_name,
-                    "magnitude_value": _to_float(defect.magnitude_value),
-                    "severity_value": _to_float(defect.severity_value),
-                    "format_position": _to_float(defect.format_position),
-                    "defect_time": _iso(defect.defect_time),
-                    "qc_decision": decision,
-                }
-            )
-
-        pending_in_reel = summary_counts["pending"]
-        summary_counts["total"] = sum(summary_counts.values())
-        type_breakdown_rows = [
-            {
-                "class_name": cls,
-                "pass": counts["pass"],
-                "fail": counts["fail"],
-                "pending": counts["pending"],
-            }
-            for cls, counts in sorted(type_breakdown.items(), key=lambda item: item[0])
-        ]
-
-        latest_review = None
-        if reel.reel_code:
-            latest_review = (
-                session.query(ReelReview)
-                .filter(ReelReview.reel_code == reel.reel_code)
-                .order_by(ReelReview.created_at.desc(), ReelReview.review_id.desc())
-                .first()
-            )
-
-        next_defect_payload: Optional[Dict[str, Any]] = None
-        if next_defect_row:
-            phase_value = None
-            if next_defect_row.defect_time:
-                phase_value = _phase_for_timestamp(list(phases), next_defect_row.defect_time)
-            next_defect_payload = {
-                "defect_id": next_defect_row.defect_id,
-                "reel_id": next_defect_row.reel_id,
-                "reel_code": reel.reel_code,
-                "order_number": reel.order_number,
-                "job_name": reel.job_name,
-                "class_name": next_defect_row.class_name,
-                "magnitude_value": _to_float(next_defect_row.magnitude_value),
-                "severity_value": _to_float(next_defect_row.severity_value),
-                "format_position": _to_float(next_defect_row.format_position),
-                "defect_time": _iso(next_defect_row.defect_time),
-                "image_src": next_defect_row.image_src,
-                "phase": phase_value,
-                "machine_name": reel.machine.name if reel.machine else None,
-            }
-
-        reel_summary = {
-            "reel_id": reel.reel_id,
-            "reel_code": reel.reel_code,
-            "job_name": reel.job_name,
-            "order_number": reel.order_number,
-            "machine_name": reel.machine.name if reel.machine else None,
-            "counts": summary_counts,
-            "defects": summary_defects,
-            "by_type": type_breakdown_rows,
-            "latest_review": _serialize_review(latest_review),
-        }
-
-        reel_payload = {
-            "reel_id": reel.reel_id,
-            "reel_code": reel.reel_code,
-            "order_number": reel.order_number,
-            "job_name": reel.job_name,
-            "machine_name": reel.machine.name if reel.machine else None,
-            "time_start": _iso(reel.time_start),
-            "time_end": _iso(reel.time_end),
-        }
-
         return jsonify(
             {
                 "pending_total": pending_total,
-                "pending_in_reel": pending_in_reel,
-                "reel": reel_payload,
-                "next_defect": next_defect_payload,
-                "reel_summary": reel_summary,
+                "pending_in_reel": context["pending_in_reel"],
+                "pending_without_image": context["pending_without_image"],
+                "reel": context["reel"],
+                "next_defect": context["next_defect"],
+                "reel_summary": context["reel_summary"],
             }
         )
 
