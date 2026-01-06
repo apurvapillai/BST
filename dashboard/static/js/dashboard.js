@@ -6339,6 +6339,236 @@ function extractRlmMetrics(config) {
     return { init, activate, deactivate, onFiltersUpdated };
   })();
 
+  const QcReviewTab = (() => {
+    let panel;
+    let loadingEl;
+    let emptyEl;
+    let errorEl;
+    let errorTextEl;
+    let contentEl;
+    let imageEl;
+    let imagePlaceholderEl;
+    let labelEl;
+    let timeEl;
+    let pendingEl;
+    let passBtn;
+    let failBtn;
+    let retryBtn;
+    const fieldEls = {};
+    let initialized = false;
+    let loading = false;
+    let saving = false;
+    let needsRefresh = true;
+    let currentDefect = null;
+    let filtersListenerAttached = false;
+
+    const FIELD_KEYS = [
+      "defect_id",
+      "machine_name",
+      "reel_code",
+      "job_name",
+      "order_number",
+      "class_name",
+      "phase",
+      "format_position",
+      "magnitude_value",
+      "severity_value",
+    ];
+
+    function init() {
+      if (initialized) return;
+      panel = Utils.qs("#qcReviewPanel");
+      if (!panel) return;
+      loadingEl = Utils.qs("#qcReviewLoading");
+      emptyEl = Utils.qs("#qcReviewEmpty");
+      errorEl = Utils.qs("#qcReviewError");
+      errorTextEl = errorEl ? errorEl.querySelector("p") : null;
+      contentEl = Utils.qs("#qcReviewContent");
+      imageEl = Utils.qs("#qcReviewImage");
+      imagePlaceholderEl = Utils.qs("#qcReviewImagePlaceholder");
+      labelEl = Utils.qs("#qcReviewLabel");
+      timeEl = Utils.qs("#qcReviewTime");
+      pendingEl = Utils.qs("#qcReviewPending");
+      passBtn = Utils.qs("#qcReviewPass");
+      failBtn = Utils.qs("#qcReviewFail");
+      retryBtn = Utils.qs("[data-qc-review-retry]");
+      FIELD_KEYS.forEach((key) => {
+        fieldEls[key] = Utils.qs(`[data-qc-field='${key}']`);
+      });
+      if (retryBtn) {
+        retryBtn.addEventListener("click", () => fetchNext(true));
+      }
+      if (passBtn) {
+        passBtn.addEventListener("click", () => handleDecision("pass"));
+      }
+      if (failBtn) {
+        failBtn.addEventListener("click", () => handleDecision("fail"));
+      }
+      if (!filtersListenerAttached && Filters && typeof Filters.onChange === "function") {
+        Filters.onChange(() => {
+          needsRefresh = true;
+        });
+        filtersListenerAttached = true;
+      }
+      initialized = true;
+    }
+
+    async function fetchNext(reset = false) {
+      if (!panel || loading) return;
+      loading = true;
+      if (reset) {
+        currentDefect = null;
+      }
+      setActionsDisabled(true);
+      setViewState(reset ? "loading" : "content");
+      try {
+        const data = await Api.get("qc-review", { page: 1, page_size: 1 });
+        const pendingTotal = data && typeof data.pending_total === "number" ? data.pending_total : 0;
+        updatePendingCount(pendingTotal);
+        const nextDefect = Array.isArray(data?.rows) && data.rows.length ? data.rows[0] : null;
+        if (nextDefect) {
+          renderDefect(nextDefect);
+          setViewState("content");
+          setActionsDisabled(false);
+          needsRefresh = false;
+        } else {
+          currentDefect = null;
+          setViewState("empty");
+        }
+      } catch (error) {
+        currentDefect = null;
+        const message = error && error.message ? error.message : "Failed to load pending defects.";
+        setViewState("error", message);
+      } finally {
+        loading = false;
+        if (!currentDefect) {
+          setActionsDisabled(true);
+        }
+      }
+    }
+
+    function updatePendingCount(total) {
+      if (!pendingEl) return;
+      pendingEl.textContent = Utils.formatNumber(total);
+    }
+
+    function setActionsDisabled(disabled) {
+      const shouldDisable = disabled || !currentDefect;
+      if (passBtn) passBtn.disabled = shouldDisable;
+      if (failBtn) failBtn.disabled = shouldDisable;
+    }
+
+    function setViewState(state, message = "") {
+      if (loadingEl) loadingEl.classList.toggle("hidden", state !== "loading");
+      if (emptyEl) emptyEl.classList.toggle("hidden", state !== "empty");
+      if (errorEl) {
+        const isError = state === "error";
+        errorEl.classList.toggle("hidden", !isError);
+        if (errorTextEl && isError) {
+          errorTextEl.textContent = message;
+        }
+      }
+      if (contentEl) contentEl.classList.toggle("hidden", state !== "content");
+    }
+
+    function formatFieldValue(key, value) {
+      if (value === null || value === undefined || value === "") {
+        return "—";
+      }
+      switch (key) {
+        case "defect_id":
+          return `#${value}`;
+        case "format_position":
+          return `${Utils.formatNumber(value, 1)} mm`;
+        case "magnitude_value":
+          return Utils.formatNumber(value, 3);
+        case "severity_value":
+          return Utils.formatNumber(value, 2);
+        case "phase": {
+          const normalized = String(value).replace(/_/g, " ");
+          return normalized
+            .split(" ")
+            .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+            .join(" ");
+        }
+        default:
+          return String(value);
+      }
+    }
+
+    function renderDefect(defect) {
+      currentDefect = defect;
+      const labelParts = [];
+      if (defect.job_name) labelParts.push(defect.job_name);
+      if (defect.order_number) labelParts.push(defect.order_number);
+      if (!labelParts.length && defect.reel_code) labelParts.push(defect.reel_code);
+      const label = labelParts.length ? labelParts.join(" · ") : `Defect #${defect.defect_id}`;
+      if (labelEl) labelEl.textContent = label;
+      if (timeEl) timeEl.textContent = formatTime(defect.defect_time) || "—";
+
+      if (defect.image_src) {
+        const src = urlForStatic(defect.image_src);
+        if (imageEl) {
+          imageEl.src = src;
+          imageEl.classList.remove("hidden");
+        }
+        if (imagePlaceholderEl) {
+          imagePlaceholderEl.classList.add("hidden");
+        }
+      } else {
+        if (imageEl) {
+          imageEl.removeAttribute("src");
+          imageEl.classList.add("hidden");
+        }
+        if (imagePlaceholderEl) {
+          imagePlaceholderEl.classList.remove("hidden");
+        }
+      }
+
+      FIELD_KEYS.forEach((key) => {
+        const el = fieldEls[key];
+        if (!el) return;
+        el.textContent = formatFieldValue(key, defect[key]);
+      });
+    }
+
+    async function handleDecision(decision) {
+      if (!currentDefect || saving) return;
+      saving = true;
+      setActionsDisabled(true);
+      try {
+        await persistDefectDecision(currentDefect.defect_id, decision);
+        needsRefresh = true;
+        fetchNext(false);
+      } catch (error) {
+        const message = error && error.message ? error.message : "Failed to update decision.";
+        window.alert(message);
+        setActionsDisabled(false);
+      } finally {
+        saving = false;
+      }
+    }
+
+    function activate() {
+      if (!initialized) init();
+      if (!panel) return;
+      if (needsRefresh || !currentDefect) {
+        fetchNext(true);
+      }
+    }
+
+    function deactivate() {
+      // no-op for now
+    }
+
+    function onFiltersUpdated() {
+      needsRefresh = true;
+      fetchNext(true);
+    }
+
+    return { init, activate, deactivate, onFiltersUpdated };
+  })();
+
   function urlForStatic(path) {
     if (!path) return "";
     // remove leading static/ if present
@@ -6367,10 +6597,12 @@ function extractRlmMetrics(config) {
     OverviewTab.init();
     JobExplorerTab.init();
     DefectExplorerTab.init();
+    QcReviewTab.init();
 
     Router.register("overview", OverviewTab);
     Router.register("job", JobExplorerTab);
     Router.register("defects", DefectExplorerTab);
+    Router.register("qc-review", QcReviewTab);
     Router.init();
 
     Filters.onChange(() => {

@@ -2638,6 +2638,107 @@ def api_defects():
         )
 
 
+@dashboard_bp.route("/api/qc-review")
+def api_qc_review():
+    with SessionLocal() as session:
+        try:
+            filters = _validate_filters(session)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        class_names = request.args.getlist("class_name")
+        if len(class_names) == 1 and "," in class_names[0]:
+            class_names = [name.strip() for name in class_names[0].split(",") if name.strip()]
+
+        numeric_filters = {
+            "magnitude_min": request.args.get("magnitude_min", type=float),
+            "magnitude_max": request.args.get("magnitude_max", type=float),
+            "severity_min": request.args.get("severity_min", type=float),
+            "severity_max": request.args.get("severity_max", type=float),
+            "position_min": request.args.get("position_min", type=float),
+            "position_max": request.args.get("position_max", type=float),
+        }
+
+        base_query = _build_defect_query(
+            session,
+            filters,
+            class_names,
+            numeric_filters,
+            None,
+        )
+        pending_query = base_query.filter(
+            or_(
+                Defect.qc_decision.is_(None),
+                Defect.qc_decision == "",
+            )
+        )
+
+        page, page_size = _paginate()
+        rows_query = pending_query.options(
+            selectinload(Defect.reel).selectinload(Reel.machine),
+        )
+        total = rows_query.count()
+        rows = (
+            rows_query.order_by(Defect.defect_time.desc(), Defect.defect_id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+
+        result_rows: List[Dict[str, Any]] = []
+        if rows:
+            reel_ids = {row.reel_id for row in rows}
+            phase_map: Dict[int, List[InspectionPhase]] = defaultdict(list)
+            if reel_ids:
+                for phase in (
+                    session.query(InspectionPhase)
+                    .filter(InspectionPhase.reel_id.in_(reel_ids))
+                    .all()
+                ):
+                    phase_map[phase.reel_id].append(phase)
+
+            for defect in rows:
+                reel = defect.reel
+                phase_name = None
+                if defect.defect_time:
+                    phases = sorted(
+                        phase_map.get(defect.reel_id, []),
+                        key=lambda phase: phase.start_time or datetime.min,
+                    )
+                    phase_name = _phase_for_timestamp(phases, defect.defect_time)
+                result_rows.append(
+                    {
+                        "defect_id": defect.defect_id,
+                        "reel_id": defect.reel_id,
+                        "reel_code": reel.reel_code if reel else None,
+                        "order_number": reel.order_number if reel else None,
+                        "job_name": reel.job_name if reel else None,
+                        "class_name": defect.class_name,
+                        "magnitude_value": _to_float(defect.magnitude_value),
+                        "severity_value": _to_float(defect.severity_value),
+                        "format_position": _to_float(defect.format_position),
+                        "defect_time": _iso(defect.defect_time),
+                        "image_src": defect.image_src,
+                        "phase": phase_name,
+                        "machine_name": reel.machine.name if reel and reel.machine else None,
+                    }
+                )
+
+        total_pages = (total + page_size - 1) // page_size or 1
+        return jsonify(
+            {
+                "rows": result_rows,
+                "page_info": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total": total,
+                    "total_pages": total_pages,
+                },
+                "pending_total": total,
+            }
+        )
+
+
 @dashboard_bp.route("/api/defects/<int:defect_id>/decision", methods=["POST"])
 def api_defect_decision(defect_id: int):
     payload = request.get_json(silent=True) or {}

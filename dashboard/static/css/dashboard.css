@@ -2374,3 +2374,231 @@ body {
   text-align: center;
   max-width: 80%;
 }
+
+.qc-review-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.qc-review-card {
+  background: #fff;
+  border-radius: 18px;
+  padding: 28px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.qc-review-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.qc-review-header h2 {
+  margin: 0;
+  font-size: 24px;
+  color: #0f172a;
+}
+
+.qc-review-header p {
+  margin: 4px 0 0;
+  color: #475569;
+  font-size: 14px;
+}
+
+.qc-review-counter {
+  min-width: 120px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.08);
+  color: #1d4ed8;
+  font-weight: 600;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.qc-review-counter span:first-child {
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.qc-review-body {
+  min-height: 320px;
+  position: relative;
+}
+
+.qc-review-placeholder {
+  border: 1px dashed rgba(148, 163, 184, 0.7);
+  border-radius: 16px;
+  padding: 40px 24px;
+  text-align: center;
+  color: #475569;
+  font-size: 15px;
+}
+
+.qc-review-placeholder.hidden {
+  display: none;
+}
+
+.qc-review-placeholder p {
+  margin: 0;
+}
+
+.qc-review-retry {
+  margin-top: 12px;
+  border: none;
+  background: #1d4ed8;
+  color: #fff;
+  border-radius: 999px;
+  padding: 8px 20px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(30, 64, 175, 0.3);
+}
+
+.qc-review-retry:hover {
+  background: #1e40af;
+}
+
+.qc-review-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.qc-review-content.hidden {
+  display: none;
+}
+
+.qc-review-stage {
+  display: grid;
+  grid-template-columns: minmax(240px, 340px) 1fr;
+  gap: 24px;
+  align-items: stretch;
+}
+
+.qc-review-image {
+  background: #0f172a;
+  border-radius: 16px;
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 260px;
+  position: relative;
+}
+
+.qc-review-image img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 12px;
+  border: 1px solid rgba(226, 232, 240, 0.35);
+  background: #030712;
+}
+
+.qc-review-image-placeholder {
+  position: absolute;
+  inset: 12px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.9);
+  color: rgba(248, 250, 252, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  font-size: 14px;
+}
+
+.qc-review-image-placeholder.hidden {
+  display: none;
+}
+
+.qc-review-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.qc-review-label {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.qc-review-time {
+  margin: 0;
+  color: #475569;
+  font-size: 14px;
+}
+
+.qc-review-meta {
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px;
+}
+
+.qc-review-meta div {
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+.qc-review-meta dt {
+  margin: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+}
+
+.qc-review-meta dd {
+  margin: 4px 0 0;
+  font-size: 15px;
+  color: #0f172a;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.qc-review-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.qc-review-actions .defect-decision-btn {
+  min-width: 120px;
+  font-size: 15px;
+  padding: 10px 22px;
+}
+
+.qc-review-actions .defect-decision-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+@media (max-width: 900px) {
+  .qc-review-stage {
+    grid-template-columns: 1fr;
+  }
+  .qc-review-image {
+    min-height: 200px;
+  }
+}

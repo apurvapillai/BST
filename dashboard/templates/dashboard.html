@@ -121,6 +121,7 @@
       <button class="tab tab-active" data-tab="overview">Overview</button>
       <button class="tab" data-tab="job">Job Explorer</button>
       <button class="tab" data-tab="defects">Defect Explorer</button>
+      <button class="tab" data-tab="qc-review">QC Review</button>
     </div>
     <div class="filter-chips hidden" id="defectLocalChips"></div>
 
@@ -417,6 +418,93 @@
         </div>
         <div class="defect-footprints-legend-grid">
           <div class="heatmap-legend heatmap-legend-job" id="heatmap-defect-explorer-legend"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-qc-review" class="tab-content hidden">
+      <div class="qc-review-wrapper">
+        <div class="qc-review-card" id="qcReviewPanel">
+          <div class="qc-review-header">
+            <div>
+              <h2>QC Review Queue</h2>
+              <p>Review pending defects one image at a time.</p>
+            </div>
+            <div class="qc-review-counter">
+              <span id="qcReviewPending">0</span>
+              <span>pending</span>
+            </div>
+          </div>
+          <div class="qc-review-body">
+            <div id="qcReviewLoading" class="qc-review-placeholder hidden">
+              <p>Loading next defect…</p>
+            </div>
+            <div id="qcReviewEmpty" class="qc-review-placeholder hidden">
+              <p>No pending defects match the current filters.</p>
+            </div>
+            <div id="qcReviewError" class="qc-review-placeholder hidden">
+              <p></p>
+              <button type="button" class="qc-review-retry" data-qc-review-retry>Try again</button>
+            </div>
+            <div id="qcReviewContent" class="qc-review-content hidden">
+              <div class="qc-review-stage">
+                <div class="qc-review-image">
+                  <div id="qcReviewImagePlaceholder" class="qc-review-image-placeholder hidden">No preview image.</div>
+                  <img id="qcReviewImage" alt="Pending defect" loading="lazy" decoding="async">
+                </div>
+                <div class="qc-review-details">
+                  <p class="qc-review-label" id="qcReviewLabel">—</p>
+                  <p class="qc-review-time" id="qcReviewTime">—</p>
+                  <dl class="qc-review-meta">
+                    <div>
+                      <dt>Defect ID</dt>
+                      <dd data-qc-field="defect_id">—</dd>
+                    </div>
+                    <div>
+                      <dt>Machine</dt>
+                      <dd data-qc-field="machine_name">—</dd>
+                    </div>
+                    <div>
+                      <dt>Reel Code</dt>
+                      <dd data-qc-field="reel_code">—</dd>
+                    </div>
+                    <div>
+                      <dt>Job</dt>
+                      <dd data-qc-field="job_name">—</dd>
+                    </div>
+                    <div>
+                      <dt>Order</dt>
+                      <dd data-qc-field="order_number">—</dd>
+                    </div>
+                    <div>
+                      <dt>Type</dt>
+                      <dd data-qc-field="class_name">—</dd>
+                    </div>
+                    <div>
+                      <dt>Phase</dt>
+                      <dd data-qc-field="phase">—</dd>
+                    </div>
+                    <div>
+                      <dt>Position</dt>
+                      <dd data-qc-field="format_position">—</dd>
+                    </div>
+                    <div>
+                      <dt>Magnitude</dt>
+                      <dd data-qc-field="magnitude_value">—</dd>
+                    </div>
+                    <div>
+                      <dt>Severity</dt>
+                      <dd data-qc-field="severity_value">—</dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="qc-review-actions">
+            <button type="button" class="defect-decision-btn defect-decision-btn-fail" id="qcReviewFail">Fail</button>
+            <button type="button" class="defect-decision-btn defect-decision-btn-pass" id="qcReviewPass">Pass</button>
+          </div>
         </div>
       </div>
     </section>
