@@ -2912,15 +2912,6 @@ def api_qc_review():
                 .first()
             )
 
-            reference_image_src = None
-            if reel.reference_images:
-                latest_reference = sorted(
-                    reel.reference_images,
-                    key=lambda ref: getattr(ref, "ref_image_id", 0) or 0,
-                    reverse=True,
-                )[0]
-                reference_image_src = latest_reference.image_src
-
             summary_counts = {"pass": 0, "fail": 0, "pending": 0}
             type_breakdown: Dict[str, Dict[str, int]] = defaultdict(lambda: {"pass": 0, "fail": 0, "pending": 0})
             summary_defects: List[Dict[str, Any]] = []
@@ -3000,7 +2991,6 @@ def api_qc_review():
                     "coords": coords_payload,
                     "format_length": _to_float(reel.format_length),
                     "format_width": _to_float(reel.format_width),
-                    "reference_image_src": reference_image_src,
                 }
 
             reel_summary = {

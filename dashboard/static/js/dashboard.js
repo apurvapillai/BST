@@ -1368,6 +1368,7 @@
 
     function updateSelect(selectEl, values, currentValues) {
       if (!selectEl) return;
+      const isReelSelect = selectEl === elements.reel;
       const isMultiple = !!selectEl.multiple;
       const selectedSet = new Set((currentValues || []).map((value) => `${value}`));
       const frag = document.createDocumentFragment();
@@ -1395,11 +1396,12 @@
         if (raw && typeof raw === "object") {
           const rawValue = raw.value ?? raw.reel_id ?? raw.id ?? raw.reel_code ?? raw.code;
           if (rawValue) {
+            const statusValue = isReelSelect ? raw.status || "" : "";
             entry = {
               value: String(rawValue),
               label: raw.label || raw.reel_code || raw.code || String(rawValue),
               code: raw.reel_code || raw.code || "",
-              status: raw.status || "",
+              status: statusValue,
             };
           }
         } else if (raw !== undefined && raw !== null && raw !== "") {
@@ -1451,7 +1453,7 @@
         if (entry.code) {
           option.dataset.reelCode = entry.code;
         }
-        applyOptionStatusStyles(option, entry.status);
+        applyOptionStatusStyles(option, isReelSelect ? entry.status : "");
         option.selected = selectedSet.has(entry.value);
         frag.appendChild(option);
       });
@@ -6318,10 +6320,6 @@ function extractRlmMetrics(config) {
     let contentEl;
     let imageEl;
     let imagePlaceholderEl;
-    let referenceImageEl;
-    let referencePlaceholderEl;
-    let referenceCanvasEl;
-    let defectCanvasEl;
     let labelEl;
     let timeEl;
     let headerJobEl;
@@ -6369,8 +6367,6 @@ function extractRlmMetrics(config) {
     let summaryTableListenerAttached = false;
     let lastNoReelAlert = "";
     let filtersListenerAttached = false;
-    let overlayResizeListenerAttached = false;
-    let overlayRenderHandle = null;
 
     function init() {
       if (initialized) return;
@@ -6383,10 +6379,6 @@ function extractRlmMetrics(config) {
       contentEl = Utils.qs("#qcReviewContent");
       imageEl = Utils.qs("#qcReviewImage");
       imagePlaceholderEl = Utils.qs("#qcReviewImagePlaceholder");
-      referenceImageEl = Utils.qs("#qcReferenceImage");
-      referencePlaceholderEl = Utils.qs("#qcReferencePlaceholder");
-      referenceCanvasEl = Utils.qs("#qcReferenceCanvas");
-      defectCanvasEl = Utils.qs("#qcReviewCanvas");
       labelEl = Utils.qs("#qcReviewLabel");
       timeEl = Utils.qs("#qcReviewTime");
       headerJobEl = Utils.qs("#qcReviewJob");
@@ -6440,28 +6432,6 @@ function extractRlmMetrics(config) {
       if (reviewerInput) {
         reviewerInput.addEventListener("input", syncReelActionState);
       }
-      if (referenceImageEl) {
-        referenceImageEl.addEventListener("load", scheduleOverlayRender);
-        referenceImageEl.addEventListener("error", () => {
-          referenceImageEl.classList.add("hidden");
-          if (referencePlaceholderEl) {
-            referencePlaceholderEl.classList.remove("hidden");
-          }
-          clearOverlayCanvas(referenceCanvasEl);
-          scheduleOverlayRender();
-        });
-      }
-      if (imageEl) {
-        imageEl.addEventListener("load", scheduleOverlayRender);
-        imageEl.addEventListener("error", () => {
-          imageEl.classList.add("hidden");
-          if (imagePlaceholderEl) {
-            imagePlaceholderEl.classList.remove("hidden");
-          }
-          clearOverlayCanvas(defectCanvasEl);
-          scheduleOverlayRender();
-        });
-      }
       if (summaryTableBody && !summaryTableListenerAttached) {
         summaryTableBody.addEventListener("click", handleSummaryActionClick);
         summaryTableListenerAttached = true;
@@ -6471,10 +6441,6 @@ function extractRlmMetrics(config) {
           needsRefresh = true;
         });
         filtersListenerAttached = true;
-      }
-      if (!overlayResizeListenerAttached) {
-        window.addEventListener("resize", scheduleOverlayRender);
-        overlayResizeListenerAttached = true;
       }
       if (nextReelBtn) {
         nextReelBtn.addEventListener("click", () => {
@@ -6672,182 +6638,30 @@ function extractRlmMetrics(config) {
       if (labelEl) labelEl.textContent = label;
       if (timeEl) timeEl.textContent = formatTime(defect.defect_time);
 
-      const hasDefectImage = updatePreviewImage(imageEl, imagePlaceholderEl, defect.image_src);
-      const hasReferenceImage = updatePreviewImage(
-        referenceImageEl,
-        referencePlaceholderEl,
-        defect.reference_image_src
-      );
-      if (!hasDefectImage) {
-        clearOverlayCanvas(defectCanvasEl);
+      if (defect.image_src) {
+        const src = urlForStatic(defect.image_src);
+        if (imageEl) {
+          imageEl.src = src;
+          imageEl.classList.remove("hidden");
+        }
+        if (imagePlaceholderEl) {
+          imagePlaceholderEl.classList.add("hidden");
+        }
+      } else {
+        if (imageEl) {
+          imageEl.removeAttribute("src");
+          imageEl.classList.add("hidden");
+        }
+        if (imagePlaceholderEl) {
+          imagePlaceholderEl.classList.remove("hidden");
+        }
       }
-      if (!hasReferenceImage) {
-        clearOverlayCanvas(referenceCanvasEl);
-      }
-      scheduleOverlayRender();
 
       FIELD_KEYS.forEach((key) => {
         const el = fieldEls[key];
         if (!el) return;
         el.textContent = formatFieldValue(key, defect[key]);
       });
-    }
-
-    function updatePreviewImage(image, placeholder, src) {
-      if (!image) return false;
-      const hasSrc = Boolean(src);
-      if (hasSrc) {
-        const normalized = urlForStatic(src);
-        if (image.getAttribute("src") !== normalized) {
-          image.src = normalized;
-        }
-        image.classList.remove("hidden");
-        if (placeholder) {
-          placeholder.classList.add("hidden");
-        }
-      } else {
-        image.removeAttribute("src");
-        image.classList.add("hidden");
-        if (placeholder) {
-          placeholder.classList.remove("hidden");
-        }
-      }
-      return hasSrc;
-    }
-
-    function scheduleOverlayRender() {
-      if (overlayRenderHandle) {
-        window.cancelAnimationFrame(overlayRenderHandle);
-      }
-      overlayRenderHandle = window.requestAnimationFrame(() => {
-        overlayRenderHandle = null;
-        renderReferenceOverlay();
-        renderDefectOverlay();
-      });
-    }
-
-    function renderReferenceOverlay() {
-      if (!referenceCanvasEl) return;
-      if (!currentDefect || !currentDefect.reference_image_src) {
-        clearOverlayCanvas(referenceCanvasEl);
-        return;
-      }
-      drawCoordsOverlay(referenceCanvasEl, referenceImageEl, currentDefect.coords, {
-        formatWidth: currentDefect.format_width,
-        formatLength: currentDefect.format_length,
-      });
-    }
-
-    function renderDefectOverlay() {
-      if (!defectCanvasEl) return;
-      if (!currentDefect || !currentDefect.image_src) {
-        clearOverlayCanvas(defectCanvasEl);
-        return;
-      }
-      drawCoordsOverlay(defectCanvasEl, imageEl, currentDefect.coords, {
-        formatWidth: currentDefect.format_width,
-        formatLength: currentDefect.format_length,
-      });
-    }
-
-    function drawCoordsOverlay(canvas, image, coords, options = {}) {
-      if (!canvas || !image || !Array.isArray(coords) || !coords.length || image.classList.contains("hidden")) {
-        clearOverlayCanvas(canvas);
-        return;
-      }
-      const normalizedShapes = [];
-      coords.forEach((shape) => {
-        const xsSource = shape && Array.isArray(shape.x) ? shape.x : [];
-        const ysSource = shape && Array.isArray(shape.y) ? shape.y : [];
-        const xs = xsSource.map((value) => Number(value)).filter((value) => Number.isFinite(value));
-        const ys = ysSource.map((value) => Number(value)).filter((value) => Number.isFinite(value));
-        const count = Math.min(xs.length, ys.length);
-        if (count < 3) return;
-        normalizedShapes.push({ xs: xs.slice(0, count), ys: ys.slice(0, count) });
-      });
-      if (!normalizedShapes.length) {
-        clearOverlayCanvas(canvas);
-        return;
-      }
-
-      const width = image.clientWidth;
-      const height = image.clientHeight;
-      if (!width || !height) {
-        clearOverlayCanvas(canvas);
-        return;
-      }
-
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-      const ctx = canvas.getContext("2d");
-      ctx.scale(dpr, dpr);
-      ctx.clearRect(0, 0, width, height);
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-
-      let minX = Infinity;
-      let maxX = -Infinity;
-      let minY = Infinity;
-      let maxY = -Infinity;
-      normalizedShapes.forEach((shape) => {
-        shape.xs.forEach((value) => {
-          minX = Math.min(minX, value);
-          maxX = Math.max(maxX, value);
-        });
-        shape.ys.forEach((value) => {
-          minY = Math.min(minY, value);
-          maxY = Math.max(maxY, value);
-        });
-      });
-
-      let formatWidth = Number(options.formatWidth);
-      let formatLength = Number(options.formatLength);
-      const hasFormatWidth = Number.isFinite(formatWidth) && formatWidth > 0;
-      const hasFormatLength = Number.isFinite(formatLength) && formatLength > 0;
-      if (!hasFormatWidth) {
-        formatWidth = Number.isFinite(maxX - minX) && maxX > minX ? maxX - minX : null;
-      }
-      if (!hasFormatLength) {
-        formatLength = Number.isFinite(maxY - minY) && maxY > minY ? maxY - minY : null;
-      }
-      if (!Number.isFinite(formatWidth) || formatWidth <= 0) formatWidth = 1;
-      if (!Number.isFinite(formatLength) || formatLength <= 0) formatLength = 1;
-
-      const centerX = hasFormatWidth ? 0 : Number.isFinite(minX + maxX) ? (minX + maxX) / 2 : 0;
-      const centerY = hasFormatLength ? 0 : Number.isFinite(minY + maxY) ? (minY + maxY) / 2 : 0;
-      const scale = Math.min(width / formatWidth, height / formatLength) || 1;
-      const offsetX = width / 2;
-      const offsetY = height / 2;
-
-      canvas.classList.remove("hidden");
-      normalizedShapes.forEach((shape) => {
-        ctx.beginPath();
-        shape.xs.forEach((value, idx) => {
-          const px = offsetX + (value - centerX) * scale;
-          const py = offsetY - (shape.ys[idx] - centerY) * scale;
-          if (idx === 0) {
-            ctx.moveTo(px, py);
-          } else {
-            ctx.lineTo(px, py);
-          }
-        });
-        ctx.closePath();
-        ctx.fillStyle = "rgba(59, 130, 246, 0.22)";
-        ctx.strokeStyle = "rgba(37, 99, 235, 0.9)";
-        ctx.lineWidth = 2;
-        ctx.fill();
-        ctx.stroke();
-      });
-    }
-
-    function clearOverlayCanvas(canvas) {
-      if (!canvas) return;
-      canvas.classList.add("hidden");
-      canvas.width = 0;
-      canvas.height = 0;
     }
 
     function renderSummary(summary) {
