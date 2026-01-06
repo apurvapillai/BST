@@ -115,50 +115,11 @@
     <!-- Tabs -->
     <div class="tabs" id="tabNav">
       <button class="tab tab-active" data-tab="overview">Overview</button>
-     <button class="tab" data-tab="job">Job Explorer</button>
-     <button class="tab" data-tab="defects">Defect Explorer</button>
-     <button class="tab" data-tab="qc-review">QC Review</button>
+      <button class="tab" data-tab="job">Job Explorer</button>
+      <button class="tab" data-tab="defects">Defect Explorer</button>
+      <button class="tab tab--align-right" data-tab="qc-review">QC Review</button>
+      <button class="tab" data-tab="heatmap">Heatmap</button>
     </div>
-    <section class="last-review-bar last-review--empty" id="lastReviewSummary" aria-live="polite">
-      <div class="last-review-bar__primary">
-        <div>
-          <p class="last-review-eyebrow">Most Recent Reel Review</p>
-          <strong class="last-review-bar__title" data-last-review="title">No reviews submitted yet</strong>
-          <span class="last-review-bar__subtitle" data-last-review="timestamp">—</span>
-          <span class="last-review-bar__meta" data-last-review="reel-time">—</span>
-        </div>
-        <span class="last-review-status badge" data-last-review="status">--</span>
-      </div>
-      <div class="last-review-bar__grid">
-        <div>
-          <span>Machine</span>
-          <strong data-last-review="machine">—</strong>
-        </div>
-        <div>
-          <span>Job</span>
-          <strong data-last-review="job">—</strong>
-        </div>
-        <div>
-          <span>Order</span>
-          <strong data-last-review="order">—</strong>
-        </div>
-        <div>
-          <span>Reviewer</span>
-          <strong data-last-review="reviewer">—</strong>
-        </div>
-      </div>
-      <div class="last-review-bar__counts">
-        <span>Pass <strong data-last-review="pass-count">0</strong></span>
-        <span>Fail <strong data-last-review="fail-count">0</strong></span>
-        <span>Total <strong data-last-review="total-count">0</strong></span>
-      </div>
-      <div class="last-review-types">
-        <span class="last-review-types-label">Defect Types</span>
-        <div class="last-review-types-list" data-last-review="types">
-          <span class="badge">No defect details.</span>
-        </div>
-      </div>
-    </section>
     <div class="filter-chips hidden" id="defectLocalChips"></div>
 
     <!-- Overview Tab -->
@@ -455,6 +416,46 @@
     </section>
 
     <section id="tab-qc-review" class="tab-content hidden">
+      <div class="last-review last-review--empty" id="qcLastReviewSummary" aria-live="polite">
+        <div class="last-review-header">
+          <div>
+            <p class="last-review-eyebrow">Most Recent Reel Review</p>
+            <h2 class="last-review-title" data-last-review="title">No reviews submitted yet</h2>
+            <p class="last-review-subtitle" data-last-review="timestamp">—</p>
+            <p class="last-review-window" data-last-review="reel-time">—</p>
+          </div>
+          <span class="last-review-status badge" data-last-review="status">--</span>
+        </div>
+        <div class="last-review-meta">
+          <div>
+            <span>Machine</span>
+            <strong data-last-review="machine">—</strong>
+          </div>
+          <div>
+            <span>Job</span>
+            <strong data-last-review="job">—</strong>
+          </div>
+          <div>
+            <span>Order</span>
+            <strong data-last-review="order">—</strong>
+          </div>
+          <div>
+            <span>Reviewer</span>
+            <strong data-last-review="reviewer">—</strong>
+          </div>
+        </div>
+        <div class="last-review-counts">
+          <span>Pass <strong data-last-review="pass-count">0</strong></span>
+          <span>Fail <strong data-last-review="fail-count">0</strong></span>
+          <span>Total <strong data-last-review="total-count">0</strong></span>
+        </div>
+        <div class="last-review-types">
+          <span class="last-review-types-label">Defect Types</span>
+          <div class="last-review-types-list" data-last-review="types">
+            <span class="badge">No defect details.</span>
+          </div>
+        </div>
+      </div>
       <div class="qc-review-wrapper">
         <div class="qc-review-card" id="qcReviewPanel">
           <div class="qc-review-header">
@@ -590,6 +591,36 @@
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Heatmap Tab -->
+    <section id="tab-heatmap" class="tab-content hidden">
+      <div class="heatmap-editor" id="heatmapEditor">
+        <div class="heatmap-sidebar">
+          <div class="heatmap-sidebar-header">
+            <h3>Heatmap Zones</h3>
+            <p>
+              Choose a job, then drag over the reference image to outline critical regions. Assign a weight between 0 and 100 to describe how severe a defect is in that area.
+            </p>
+          </div>
+        </div>
+        <div class="heatmap-canvas">
+          <div class="heatmap-stage heatmap-stage--disabled" id="heatmapStage">
+            <img id="heatmapReferenceImage" alt="Reference image" class="heatmap-reference hidden" loading="lazy" decoding="async">
+            <div class="heatmap-regions-layer" id="heatmapRegionsLayer"></div>
+            <div class="heatmap-regions-layer heatmap-regions-layer--draft" id="heatmapDraftLayer"></div>
+          </div>
+          <div class="heatmap-empty" id="heatmapEmptyNotice">
+            Select a job to load its reference image and begin marking important zones.
+          </div>
+          <div class="heatmap-region-pane">
+            <div class="heatmap-region-list" id="heatmapRegionList">
+              <p class="heatmap-placeholder">No regions defined yet.</p>
+            </div>
+            <button type="button" id="heatmapSaveBtn" class="heatmap-save-btn" disabled>Save Heatmap</button>
           </div>
         </div>
       </div>

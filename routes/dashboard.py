@@ -25,6 +25,7 @@ from db.models import (
     RLMPhase,
     SensitivitySet,
     ReelReview,
+    HeatmapRegion,
 )
 
 
@@ -665,6 +666,37 @@ def _reference_change_detail(
     }
 
 
+def _latest_reference_for_job(session: Session, job_name: str, machine_id: Optional[int] = None):
+    query = (
+        session.query(ReferenceImage, Reel)
+        .join(Reel, ReferenceImage.reel_id == Reel.reel_id)
+        .filter(Reel.job_name == job_name)
+    )
+    if machine_id:
+        query = query.filter(Reel.machine_id == machine_id)
+    reference_row = (
+        query.order_by(Reel.time_end.desc(), ReferenceImage.ref_image_id.desc())
+        .first()
+    )
+    if not reference_row and machine_id:
+        reference_row = (
+            session.query(ReferenceImage, Reel)
+            .join(Reel, ReferenceImage.reel_id == Reel.reel_id)
+            .filter(Reel.job_name == job_name)
+            .order_by(Reel.time_end.desc(), ReferenceImage.ref_image_id.desc())
+            .first()
+        )
+    if not reference_row:
+        return None
+    image, reel = reference_row
+    return {
+        "image_src": (image.image_src or "").replace("\\", "/"),
+        "filename": image.filename,
+        "reel_code": reel.reel_code,
+        "captured_at": _iso(reel.time_end or reel.time_start),
+    }
+
+
 def _sensitivity_tuple_has_values(values: Optional[Tuple[Optional[float], Optional[float]]]) -> bool:
     if not values:
         return False
@@ -1156,6 +1188,120 @@ def api_last_review():
             "defect_types": defect_types,
         }
         return jsonify({"review": review_payload})
+
+
+@dashboard_bp.route("/api/heatmap", methods=["GET", "POST"])
+def api_heatmap():
+    with SessionLocal() as session:
+        if request.method == "GET":
+            try:
+                filters = _validate_filters(session)
+            except ValueError as exc:
+                return jsonify({"error": str(exc)}), 400
+            job_name = filters.get("job")
+            if not job_name:
+                return jsonify({"error": "Select a job to view its heatmap."}), 400
+            machine_id = filters.get("machine_id")
+            region_query = session.query(HeatmapRegion).filter(HeatmapRegion.job_name == job_name)
+            if machine_id:
+                region_query = region_query.filter(
+                    or_(HeatmapRegion.machine_id == machine_id, HeatmapRegion.machine_id.is_(None))
+                )
+            regions = region_query.order_by(HeatmapRegion.region_id.asc()).all()
+            data = {
+                "regions": [
+                    {
+                        "region_id": region.region_id,
+                        "job_name": region.job_name,
+                        "machine_id": region.machine_id,
+                        "weight_pct": region.weight_pct,
+                        "x0": _to_float(region.x0),
+                        "y0": _to_float(region.y0),
+                        "x1": _to_float(region.x1),
+                        "y1": _to_float(region.y1),
+                    }
+                    for region in regions
+                ],
+                "reference_image": _latest_reference_for_job(session, job_name, machine_id),
+            }
+            return jsonify(data)
+
+        payload = request.get_json(silent=True) or {}
+        job_name = (payload.get("job_name") or "").strip()
+        if not job_name:
+            return jsonify({"error": "Job name is required."}), 400
+        machine_id = payload.get("machine_id")
+        if machine_id is not None:
+            try:
+                machine_id = int(machine_id)
+            except (TypeError, ValueError):
+                machine_id = None
+        regions_payload = payload.get("regions") or []
+        sanitized_regions: List[Dict[str, object]] = []
+
+        def _clamp01(value) -> Optional[float]:
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                return None
+            if not math.isfinite(number):
+                return None
+            return max(0.0, min(1.0, number))
+
+        for entry in regions_payload:
+            x0 = _clamp01(entry.get("x0"))
+            y0 = _clamp01(entry.get("y0"))
+            x1 = _clamp01(entry.get("x1"))
+            y1 = _clamp01(entry.get("y1"))
+            weight = entry.get("weight_pct")
+            try:
+                weight_value = int(weight)
+            except (TypeError, ValueError):
+                weight_value = None
+            if (
+                x0 is None
+                or y0 is None
+                or x1 is None
+                or y1 is None
+                or weight_value is None
+                or weight_value < 0
+                or weight_value > 100
+            ):
+                continue
+            if abs(x1 - x0) < 0.005 or abs(y1 - y0) < 0.005:
+                continue
+            sanitized_regions.append(
+                {
+                    "x0": min(x0, x1),
+                    "y0": min(y0, y1),
+                    "x1": max(x0, x1),
+                    "y1": max(y0, y1),
+                    "weight_pct": weight_value,
+                }
+            )
+
+        delete_query = session.query(HeatmapRegion).filter(HeatmapRegion.job_name == job_name)
+        if machine_id:
+            delete_query = delete_query.filter(
+                or_(HeatmapRegion.machine_id == machine_id, HeatmapRegion.machine_id.is_(None))
+            )
+        else:
+            delete_query = delete_query.filter(HeatmapRegion.machine_id.is_(None))
+        delete_query.delete(synchronize_session=False)
+        for entry in sanitized_regions:
+            session.add(
+                HeatmapRegion(
+                    job_name=job_name,
+                    machine_id=machine_id,
+                    weight_pct=entry["weight_pct"],
+                    x0=entry["x0"],
+                    y0=entry["y0"],
+                    x1=entry["x1"],
+                    y1=entry["y1"],
+                )
+            )
+        session.commit()
+        return jsonify({"success": True, "count": len(sanitized_regions)})
 
 
 @dashboard_bp.route("/api/overview")

@@ -1037,6 +1037,7 @@
 
     const reelOptionCache = new Map(); // reel_id -> { value, code, label }
     const reelIdsByCode = new Map(); // reel_code -> [reel_id]
+    const forcedDisabled = new Map();
     let pendingReelCodes = [];
     const STATUS_STYLES = {
       pass: { bg: "rgba(34, 197, 94, 0.35)", color: "#065f46" },
@@ -1150,19 +1151,21 @@
       return Boolean((state.job || "").trim());
     }
 
-    function setDisabledState(el, disabled) {
+    function setDisabledState(el, disabled, fieldName) {
       if (!el) return;
-      el.disabled = disabled;
+      const override = fieldName ? forcedDisabled.get(fieldName) : undefined;
+      const finalDisabled = override !== undefined ? override : disabled;
+      el.disabled = finalDisabled;
       const card = el.closest(".filter-card");
       if (card) {
-        card.classList.toggle("filter-card--disabled", disabled);
+        card.classList.toggle("filter-card--disabled", finalDisabled);
       }
     }
 
     function updateDependentFilters() {
       const disableSecondary = !hasJobSelection();
-      setDisabledState(elements.order, disableSecondary);
-      setDisabledState(elements.reel, disableSecondary);
+      setDisabledState(elements.order, disableSecondary, "order");
+      setDisabledState(elements.reel, disableSecondary, "reel");
     }
 
     function init() {
@@ -1873,6 +1876,29 @@
       });
     }
 
+    function setFieldDisabled(field, disabled, { lock = false } = {}) {
+      if (!elements[field]) return;
+      if (lock) {
+        forcedDisabled.set(field, Boolean(disabled));
+      } else if (forcedDisabled.has(field)) {
+        forcedDisabled.delete(field);
+      }
+      setDisabledState(elements[field], disabled, field);
+    }
+
+    function clearFieldOverride(field) {
+      if (!forcedDisabled.has(field)) return;
+      forcedDisabled.delete(field);
+      if (elements[field]) {
+        if (field === "order" || field === "reel") {
+          const disableSecondary = !hasJobSelection();
+          setDisabledState(elements[field], disableSecondary, field);
+        } else {
+          setDisabledState(elements[field], false, field);
+        }
+      }
+    }
+
     return {
       init,
       getState,
@@ -1888,6 +1914,8 @@
       promptJobSelection,
       clearReels,
       updateReelStatus,
+      setFieldDisabled,
+      clearFieldOverride,
     };
   })();
 
@@ -1980,119 +2008,6 @@
       return data;
     },
   };
-
-  const LastReviewSummary = (() => {
-    const fields = {};
-    let container = null;
-    let statusEl = null;
-
-    function init() {
-      container = document.getElementById("lastReviewSummary");
-      if (!container) return;
-      statusEl = container.querySelector("[data-last-review='status']");
-      [
-        "title",
-        "timestamp",
-        "reel-time",
-        "machine",
-        "job",
-        "order",
-        "reviewer",
-        "pass-count",
-        "fail-count",
-        "total-count",
-      ].forEach((key) => {
-        fields[key] = container.querySelector(`[data-last-review='${key}']`);
-      });
-      fields.types = container.querySelector("[data-last-review='types']");
-      refresh();
-    }
-
-    async function refresh() {
-      if (!container) return;
-      try {
-        const response = await Api.get("last-review", {}, {});
-        render((response && response.review) || null);
-      } catch (error) {
-        render(null);
-      }
-    }
-
-    function render(review) {
-      if (!container) return;
-      if (!review) {
-        container.classList.add("last-review--empty");
-        updateField("title", "No reviews submitted yet");
-        updateField("timestamp", "—");
-        updateField("reel-time", "—");
-        ["machine", "job", "order", "reviewer"].forEach((key) => updateField(key, "—"));
-        ["pass-count", "fail-count", "total-count"].forEach((key) => updateField(key, "0"));
-        if (statusEl) {
-          statusEl.textContent = "--";
-          statusEl.classList.remove("badge-pass", "badge-fail");
-        }
-        if (fields.types) {
-          fields.types.innerHTML = '<span class="badge">No defect details.</span>';
-        }
-        return;
-      }
-      container.classList.remove("last-review--empty");
-      const code = review.reel_code || "";
-      const label = code ? `Reel ${code}` : review.reel_id ? `Reel #${review.reel_id}` : "Latest review";
-      const reviewerLabel = review.reviewer || review.reviewer_name || review.reviewer_id || "—";
-      updateField("title", label);
-      updateField("timestamp", review.reviewed_at ? `Reviewed ${formatTime(review.reviewed_at)}` : "—");
-      updateField("reel-time", formatReelWindow(review.reel_time_start, review.reel_time_end));
-      updateField("machine", review.machine_name || "—");
-      updateField("job", review.job_name || "—");
-      updateField("order", review.order_number || "—");
-      updateField("reviewer", reviewerLabel);
-      const counts = review.defect_counts || {};
-      updateField("pass-count", Utils.formatNumber(counts.pass || 0));
-      updateField("fail-count", Utils.formatNumber(counts.fail || 0));
-      updateField("total-count", Utils.formatNumber(counts.total || 0));
-      if (statusEl) {
-        const decision = (review.decision || "").toLowerCase();
-        const labelText = decision === "pass" ? "PASS" : decision === "fail" ? "FAIL" : "--";
-        statusEl.textContent = labelText;
-        statusEl.classList.toggle("badge-pass", decision === "pass");
-        statusEl.classList.toggle("badge-fail", decision === "fail");
-      }
-      if (fields.types) {
-        const entries = Array.isArray(review.defect_types) ? review.defect_types : [];
-        if (!entries.length) {
-          fields.types.innerHTML = '<span class="badge">No defect details.</span>';
-        } else {
-          fields.types.innerHTML = entries
-            .map(
-              (entry) =>
-                `<span class="badge">${Utils.escapeHtml(entry.class_name || "Unclassified")} · ${Utils.formatNumber(
-                  entry.count || 0
-                )}</span>`
-            )
-            .join("");
-        }
-      }
-    }
-
-    function updateField(key, value) {
-      if (!fields[key]) return;
-      fields[key].textContent = value;
-    }
-
-    function formatReelWindow(start, end) {
-      if (!start && !end) return "Reel time unavailable";
-      if (start && end) {
-        return `${formatTime(start)} → ${formatTime(end)}`;
-      }
-      if (start) {
-        return `Started ${formatTime(start)}`;
-      }
-      return `Ended ${formatTime(end)}`;
-    }
-
-    return { init, refresh };
-  })();
 
   function formatAsDate(value) {
     if (value === null || value === undefined) return "";
@@ -6500,6 +6415,9 @@ function extractRlmMetrics(config) {
     let summaryTableListenerAttached = false;
     let lastNoReelAlert = "";
     let filtersListenerAttached = false;
+    let lastReviewEl;
+    let lastReviewStatusEl;
+    const lastReviewFields = {};
 
     function init() {
       if (initialized) return;
@@ -6535,6 +6453,25 @@ function extractRlmMetrics(config) {
       noReelNoticeEl = Utils.qs("#qcNoReelNotice");
       noReelNoticeTextEl = Utils.qs("#qcNoReelNoticeText");
       nextReelBtn = Utils.qs("#qcReviewNextReel");
+      lastReviewEl = Utils.qs("#qcLastReviewSummary");
+      if (lastReviewEl) {
+        lastReviewStatusEl = lastReviewEl.querySelector("[data-last-review='status']");
+        [
+          "title",
+          "timestamp",
+          "reel-time",
+          "machine",
+          "job",
+          "order",
+          "reviewer",
+          "pass-count",
+          "fail-count",
+          "total-count",
+        ].forEach((key) => {
+          lastReviewFields[key] = lastReviewEl.querySelector(`[data-last-review='${key}']`);
+        });
+        lastReviewFields.types = lastReviewEl.querySelector("[data-last-review='types']");
+      }
       defectActionsEl = Utils.qs("#qcDefectActions");
       reelActionsEl = Utils.qs("#qcReelActions");
       reelPassBtn = Utils.qs("#qcReelPass");
@@ -7007,9 +6944,6 @@ function extractRlmMetrics(config) {
         if (Filters && typeof Filters.updateReelStatus === "function") {
           Filters.updateReelStatus(currentReel.reel_id, decision, currentReel.reel_code || "");
         }
-        if (LastReviewSummary && typeof LastReviewSummary.refresh === "function") {
-          LastReviewSummary.refresh();
-        }
         if (commentsInput) commentsInput.value = "";
         if (Filters && typeof Filters.hasReelSelection === "function" && typeof Filters.removeReel === "function") {
           const isSelected = Filters.hasReelSelection(currentReel.reel_id, currentReel.reel_code || "");
@@ -7019,6 +6953,7 @@ function extractRlmMetrics(config) {
         }
         needsRefresh = true;
         await fetchNext(true);
+        refreshLastReview();
       } catch (error) {
         const message = error && error.message ? error.message : "Failed to submit reel decision.";
         window.alert(message);
@@ -7031,6 +6966,7 @@ function extractRlmMetrics(config) {
     function activate() {
       if (!initialized) init();
       if (!panel) return;
+      refreshLastReview();
       if (needsRefresh || (!currentDefect && pendingInReel === 0)) {
         fetchNext(true);
       }
@@ -7043,6 +6979,509 @@ function extractRlmMetrics(config) {
     function onFiltersUpdated() {
       needsRefresh = true;
       fetchNext(true);
+    }
+
+    async function refreshLastReview() {
+      if (!lastReviewEl) return;
+      try {
+        const response = await Api.get("last-review", {}, {});
+        renderLastReview((response && response.review) || null);
+      } catch (error) {
+        renderLastReview(null);
+      }
+    }
+
+    function renderLastReview(review) {
+      if (!lastReviewEl) return;
+      if (!review) {
+        lastReviewEl.classList.add("last-review--empty");
+        updateLastReviewField("title", "No reviews submitted yet");
+        updateLastReviewField("timestamp", "—");
+        updateLastReviewField("reel-time", "—");
+        ["machine", "job", "order", "reviewer"].forEach((key) => updateLastReviewField(key, "—"));
+        ["pass-count", "fail-count", "total-count"].forEach((key) => updateLastReviewField(key, "0"));
+        if (lastReviewStatusEl) {
+          lastReviewStatusEl.textContent = "--";
+          lastReviewStatusEl.classList.remove("badge-pass", "badge-fail");
+        }
+        if (lastReviewFields.types) {
+          lastReviewFields.types.innerHTML = '<span class="badge">No defect details.</span>';
+        }
+        return;
+      }
+      lastReviewEl.classList.remove("last-review--empty");
+      const code = review.reel_code || "";
+      const label = code ? `Reel ${code}` : review.reel_id ? `Reel #${review.reel_id}` : "Latest review";
+      const reviewerLabel = review.reviewer || review.reviewer_name || review.reviewer_id || "—";
+      updateLastReviewField("title", label);
+      updateLastReviewField("timestamp", review.reviewed_at ? `Reviewed ${formatTime(review.reviewed_at)}` : "—");
+      updateLastReviewField("reel-time", formatLastReviewWindow(review.reel_time_start, review.reel_time_end));
+      updateLastReviewField("machine", review.machine_name || "—");
+      updateLastReviewField("job", review.job_name || "—");
+      updateLastReviewField("order", review.order_number || "—");
+      updateLastReviewField("reviewer", reviewerLabel);
+      const counts = review.defect_counts || {};
+      updateLastReviewField("pass-count", Utils.formatNumber(counts.pass || 0));
+      updateLastReviewField("fail-count", Utils.formatNumber(counts.fail || 0));
+      updateLastReviewField("total-count", Utils.formatNumber(counts.total || 0));
+      if (lastReviewStatusEl) {
+        const decision = (review.decision || "").toLowerCase();
+        const labelText = decision === "pass" ? "PASS" : decision === "fail" ? "FAIL" : "--";
+        lastReviewStatusEl.textContent = labelText;
+        lastReviewStatusEl.classList.toggle("badge-pass", decision === "pass");
+        lastReviewStatusEl.classList.toggle("badge-fail", decision === "fail");
+      }
+      if (lastReviewFields.types) {
+        const entries = Array.isArray(review.defect_types) ? review.defect_types : [];
+        if (!entries.length) {
+          lastReviewFields.types.innerHTML = '<span class="badge">No defect details.</span>';
+        } else {
+          lastReviewFields.types.innerHTML = entries
+            .map(
+              (entry) =>
+                `<span class="badge">${Utils.escapeHtml(entry.class_name || "Unclassified")} · ${Utils.formatNumber(
+                  entry.count || 0
+                )}</span>`
+            )
+            .join("");
+        }
+      }
+    }
+
+    function updateLastReviewField(key, value) {
+      if (!lastReviewFields[key]) return;
+      lastReviewFields[key].textContent = value;
+    }
+
+    function formatLastReviewWindow(start, end) {
+      if (!start && !end) return "Reel time unavailable";
+      if (start && end) {
+        return `${formatTime(start)} → ${formatTime(end)}`;
+      }
+      if (start) {
+        return `Started ${formatTime(start)}`;
+      }
+      return `Ended ${formatTime(end)}`;
+    }
+
+    return { init, activate, deactivate, onFiltersUpdated };
+  })();
+
+  const HeatmapTab = (() => {
+    let tabEl;
+    let stageEl;
+    let overlayLayer;
+    let draftLayer;
+    let emptyNoticeEl;
+    let imageEl;
+    let regionListEl;
+    let saveBtn;
+    let jobName = "";
+    let machineId = null;
+    let regions = [];
+    let imageReady = false;
+    let loading = false;
+    let active = false;
+    let tempRegionEl = null;
+    let startPoint = null;
+    let pointerId = null;
+    let nextRegionId = -1;
+
+    function init() {
+      tabEl = document.getElementById("tab-heatmap");
+      if (!tabEl) return;
+      stageEl = tabEl.querySelector("#heatmapStage");
+      overlayLayer = tabEl.querySelector("#heatmapRegionsLayer");
+      draftLayer = tabEl.querySelector("#heatmapDraftLayer");
+      emptyNoticeEl = tabEl.querySelector("#heatmapEmptyNotice");
+      imageEl = tabEl.querySelector("#heatmapReferenceImage");
+      regionListEl = tabEl.querySelector("#heatmapRegionList");
+      saveBtn = tabEl.querySelector("#heatmapSaveBtn");
+      if (imageEl) {
+        imageEl.addEventListener("load", handleReferenceImageLoad);
+        imageEl.addEventListener("error", () => {
+          imageReady = false;
+          imageEl.classList.add("hidden");
+          if (stageEl) stageEl.classList.add("heatmap-stage--disabled");
+          setEmptyNotice("Failed to load the reference image for this job.", false);
+        });
+      }
+      if (stageEl) {
+        stageEl.addEventListener("pointerdown", handlePointerDown);
+      }
+      if (overlayLayer) {
+        overlayLayer.addEventListener("click", handleOverlayClick);
+      }
+      if (regionListEl) {
+        regionListEl.addEventListener("click", handleRegionListClick);
+      }
+      if (saveBtn) {
+        saveBtn.addEventListener("click", handleSave);
+      }
+    }
+
+    function activate() {
+      if (!tabEl) init();
+      if (!tabEl) return;
+      active = true;
+      if (Filters && typeof Filters.setFieldDisabled === "function") {
+        Filters.setFieldDisabled("order", true, { lock: true });
+        Filters.setFieldDisabled("reel", true, { lock: true });
+      }
+      loadFromFilters();
+    }
+
+    function deactivate() {
+      active = false;
+      if (Filters && typeof Filters.clearFieldOverride === "function") {
+        Filters.clearFieldOverride("order");
+        Filters.clearFieldOverride("reel");
+      }
+    }
+
+    function onFiltersUpdated() {
+      if (!active) return;
+      loadFromFilters();
+    }
+
+    function loadFromFilters() {
+      const filterState = Filters.getState ? Filters.getState() : {};
+      jobName = (filterState.job || "").trim();
+      machineId = filterState.machine_id || null;
+      if (!jobName) {
+        clearState();
+        setEmptyNotice("Select a job to begin designing its heatmap.", false);
+        return;
+      }
+      fetchHeatmap(filterState);
+    }
+
+    function clearState() {
+      regions = [];
+      jobName = "";
+      imageReady = false;
+      if (imageEl) {
+        imageEl.classList.add("hidden");
+        imageEl.removeAttribute("src");
+      }
+      if (stageEl) stageEl.classList.add("heatmap-stage--disabled");
+      if (overlayLayer) overlayLayer.innerHTML = "";
+      if (draftLayer) draftLayer.innerHTML = "";
+      renderRegionList();
+      updateSaveButtonState();
+    }
+
+    async function fetchHeatmap(filterState) {
+      if (!tabEl) return;
+      loading = true;
+      updateSaveButtonState();
+      setEmptyNotice("Loading heatmap…", true);
+      try {
+        const data = await Api.get("heatmap", {}, filterState);
+        applyPayload(data || {});
+      } catch (error) {
+        if (overlayLayer) overlayLayer.innerHTML = "";
+        regions = [];
+        setEmptyNotice(error && error.message ? error.message : "Failed to load heatmap data.", false);
+        renderRegionList();
+      } finally {
+        loading = false;
+        updateSaveButtonState();
+      }
+    }
+
+    function applyPayload(payload) {
+      const reference = payload && payload.reference_image ? payload.reference_image : null;
+      if (reference && reference.image_src && imageEl) {
+        const src = urlForStatic(reference.image_src);
+        if (imageEl.getAttribute("src") !== src) {
+          imageReady = false;
+          imageEl.classList.add("hidden");
+          if (stageEl) stageEl.classList.add("heatmap-stage--disabled");
+          imageEl.src = src;
+          if (imageEl.complete && imageEl.naturalWidth > 0) {
+            handleReferenceImageLoad();
+          }
+        } else {
+          imageReady = true;
+          imageEl.classList.remove("hidden");
+          if (stageEl) stageEl.classList.remove("heatmap-stage--disabled");
+        }
+        setEmptyNotice("", true);
+      } else {
+        if (imageEl) {
+          imageEl.classList.add("hidden");
+          imageEl.removeAttribute("src");
+        }
+        imageReady = false;
+        setEmptyNotice("No reference image is available for this job.", false);
+      }
+      regions = Array.isArray(payload?.regions)
+        ? payload.regions.map((region) => ({
+            id: region.region_id || generateRegionId(),
+            weight_pct: Number(region.weight_pct) || 0,
+            x0: clamp01(region.x0),
+            y0: clamp01(region.y0),
+            x1: clamp01(region.x1),
+            y1: clamp01(region.y1),
+          }))
+        : [];
+      if (imageReady) {
+        renderRegions();
+      } else if (overlayLayer) {
+        overlayLayer.innerHTML = "";
+      }
+      renderRegionList();
+      updateSaveButtonState();
+    }
+
+    function clamp01(value) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return 0;
+      return Math.min(1, Math.max(0, num));
+    }
+
+    function renderRegions() {
+      if (!overlayLayer) return;
+      overlayLayer.innerHTML = "";
+      regions.forEach((region) => {
+        const rect = document.createElement("div");
+        rect.className = `heatmap-region heatmap-region--bucket-${bucketForWeight(region.weight_pct)}`;
+        rect.dataset.regionId = region.id;
+        const left = Math.min(region.x0, region.x1) * 100;
+        const top = Math.min(region.y0, region.y1) * 100;
+        const width = Math.abs(region.x1 - region.x0) * 100;
+        const height = Math.abs(region.y1 - region.y0) * 100;
+        rect.style.left = `${left}%`;
+        rect.style.top = `${top}%`;
+        rect.style.width = `${width}%`;
+        rect.style.height = `${height}%`;
+        rect.innerHTML = `
+          <span class="heatmap-region__label">${Utils.formatNumber(region.weight_pct || 0)}%</span>
+          <button type="button" class="heatmap-region__remove" data-remove-region="${region.id}" aria-label="Remove region">&times;</button>
+        `;
+        overlayLayer.appendChild(rect);
+      });
+      if (draftLayer) {
+        draftLayer.innerHTML = "";
+      }
+    }
+
+    function renderRegionList() {
+      if (!regionListEl) return;
+      if (!regions.length) {
+        regionListEl.innerHTML = '<p class="heatmap-placeholder">No regions defined yet.</p>';
+        return;
+      }
+      regionListEl.innerHTML = regions
+        .map(
+          (region, index) => `
+            <div class="heatmap-region-row" data-region-row="${region.id}">
+              <div>
+                <strong>${Utils.formatNumber(region.weight_pct || 0)}%</strong>
+                <span>Zone ${index + 1}</span>
+              </div>
+              <button type="button" data-remove-region="${region.id}">Remove</button>
+            </div>
+          `
+        )
+        .join("");
+    }
+
+    function handleOverlayClick(event) {
+      const removeBtn = event.target.closest("[data-remove-region]");
+      if (!removeBtn) return;
+      const regionId = removeBtn.dataset.removeRegion;
+      removeRegion(regionId);
+    }
+
+    function handleRegionListClick(event) {
+      const button = event.target.closest("[data-remove-region]");
+      if (!button) return;
+      const regionId = button.dataset.removeRegion;
+      removeRegion(regionId);
+    }
+
+    function removeRegion(regionId) {
+      if (!regionId) return;
+      regions = regions.filter((region) => String(region.id) !== String(regionId));
+      renderRegions();
+      renderRegionList();
+      updateSaveButtonState();
+    }
+
+    function handlePointerDown(event) {
+      if (!imageReady || !jobName) return;
+      if (event.button !== 0) return;
+      if (event.target.closest("[data-region-id]")) return;
+      const point = getRelativePoint(event);
+      if (!point) return;
+      drawingCancel();
+      startPoint = point;
+      pointerId = event.pointerId;
+      if (stageEl && stageEl.setPointerCapture) {
+        stageEl.setPointerCapture(pointerId);
+      }
+      draftLayer && (draftLayer.innerHTML = "");
+      tempRegionEl = document.createElement("div");
+      tempRegionEl.className = "heatmap-region heatmap-region--draft";
+      draftLayer && draftLayer.appendChild(tempRegionEl);
+      updateDraftRegion(point.x, point.y, point.x, point.y);
+      window.addEventListener("pointermove", handlePointerMove);
+      window.addEventListener("pointerup", handlePointerUp);
+      window.addEventListener("pointercancel", handlePointerCancel);
+    }
+
+    function handlePointerMove(event) {
+      if (event.pointerId !== pointerId) return;
+      const current = getRelativePoint(event);
+      if (!current || !startPoint || !tempRegionEl) return;
+      updateDraftRegion(startPoint.x, startPoint.y, current.x, current.y);
+    }
+
+    function handlePointerUp(event) {
+      if (event.pointerId !== pointerId) return;
+      finalizeDrawing(event);
+    }
+
+    function handlePointerCancel(event) {
+      if (event.pointerId !== pointerId) return;
+      drawingCancel();
+    }
+
+    function drawingCancel() {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
+      if (stageEl && pointerId !== null && stageEl.releasePointerCapture) {
+        try {
+          stageEl.releasePointerCapture(pointerId);
+        } catch (err) {
+          // ignore
+        }
+      }
+      pointerId = null;
+      startPoint = null;
+      if (tempRegionEl && tempRegionEl.parentElement) {
+        tempRegionEl.remove();
+      }
+      tempRegionEl = null;
+    }
+
+    function finalizeDrawing(event) {
+      const endPoint = getRelativePoint(event);
+      if (!startPoint || !endPoint) {
+        drawingCancel();
+        return;
+      }
+      const width = Math.abs(endPoint.x - startPoint.x);
+      const height = Math.abs(endPoint.y - startPoint.y);
+      if (width < 0.01 || height < 0.01) {
+        drawingCancel();
+        return;
+      }
+      const valueInput = window.prompt("Importance percentage (0-100)", "50");
+      if (valueInput === null) {
+        drawingCancel();
+        return;
+      }
+      const pct = Number(valueInput);
+      if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+        window.alert("Enter a value between 0 and 100.");
+        drawingCancel();
+        return;
+      }
+      regions.push({
+        id: generateRegionId(),
+        weight_pct: Math.round(pct),
+        x0: clamp01(startPoint.x),
+        y0: clamp01(startPoint.y),
+        x1: clamp01(endPoint.x),
+        y1: clamp01(endPoint.y),
+      });
+      drawingCancel();
+      renderRegions();
+      renderRegionList();
+      updateSaveButtonState();
+    }
+
+    function updateDraftRegion(x0, y0, x1, y1) {
+      if (!tempRegionEl) return;
+      const left = Math.min(x0, x1) * 100;
+      const top = Math.min(y0, y1) * 100;
+      const width = Math.abs(x1 - x0) * 100;
+      const height = Math.abs(y1 - y0) * 100;
+      tempRegionEl.style.left = `${left}%`;
+      tempRegionEl.style.top = `${top}%`;
+      tempRegionEl.style.width = `${width}%`;
+      tempRegionEl.style.height = `${height}%`;
+    }
+
+    function getRelativePoint(event) {
+      if (!stageEl) return null;
+      const rect = stageEl.getBoundingClientRect();
+      if (!rect.width || !rect.height) return null;
+      const x = (event.clientX - rect.left) / rect.width;
+      const y = (event.clientY - rect.top) / rect.height;
+      return { x: clamp01(x), y: clamp01(y) };
+    }
+
+    function updateSaveButtonState() {
+      if (!saveBtn) return;
+      saveBtn.disabled = !jobName || loading;
+    }
+
+    function setEmptyNotice(message, allowHide) {
+      if (!emptyNoticeEl) return;
+      if (!message && allowHide) {
+        emptyNoticeEl.classList.add("hidden");
+        return;
+      }
+      emptyNoticeEl.textContent = message;
+      emptyNoticeEl.classList.remove("hidden");
+    }
+
+    function handleReferenceImageLoad() {
+      imageReady = true;
+      if (stageEl) stageEl.classList.remove("heatmap-stage--disabled");
+      if (imageEl) imageEl.classList.remove("hidden");
+      setEmptyNotice("", true);
+      renderRegions();
+    }
+
+    function generateRegionId() {
+      nextRegionId -= 1;
+      return nextRegionId;
+    }
+
+    async function handleSave() {
+      if (!jobName) {
+        window.alert("Select a job before saving.");
+        return;
+      }
+      loading = true;
+      updateSaveButtonState();
+      try {
+        await Api.post("heatmap", {
+          job_name: jobName,
+          machine_id: machineId,
+          regions: regions.map((region) => ({
+            weight_pct: region.weight_pct,
+            x0: region.x0,
+            y0: region.y0,
+            x1: region.x1,
+            y1: region.y1,
+          })),
+        });
+        window.alert("Heatmap saved.");
+        fetchHeatmap(Filters.getState ? Filters.getState() : {});
+      } catch (error) {
+        const message = error && error.message ? error.message : "Failed to save heatmap.";
+        window.alert(message);
+      } finally {
+        loading = false;
+        updateSaveButtonState();
+      }
     }
 
     return { init, activate, deactivate, onFiltersUpdated };
@@ -7077,11 +7516,13 @@ function extractRlmMetrics(config) {
     JobExplorerTab.init();
     DefectExplorerTab.init();
     QcReviewTab.init();
+    HeatmapTab.init();
 
     Router.register("overview", OverviewTab);
     Router.register("job", JobExplorerTab);
     Router.register("defects", DefectExplorerTab);
     Router.register("qc-review", QcReviewTab);
+    Router.register("heatmap", HeatmapTab);
     Router.init();
 
     Filters.onChange(() => {
@@ -7106,7 +7547,6 @@ function extractRlmMetrics(config) {
 
   function initializeApp() {
     init();
-    LastReviewSummary.init();
     bindModalControls();
     bindModalZoom();
     bindFootprintExpandButtons();
@@ -7413,3 +7853,11 @@ function extractRlmMetrics(config) {
     }
   });
 })();
+    function bucketForWeight(weight) {
+      const value = Number(weight) || 0;
+      if (value >= 90) return "critical";
+      if (value >= 70) return "high";
+      if (value >= 50) return "elevated";
+      if (value >= 25) return "moderate";
+      return "low";
+    }
