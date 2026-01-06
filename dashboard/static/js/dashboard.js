@@ -1064,6 +1064,25 @@
         }
       }
     }
+    function updateReelStatus(reelId, status, reelCode = "") {
+      const normalizedStatus = status || "";
+      const idValue = reelId !== undefined && reelId !== null ? String(reelId) : "";
+      const cached = idValue ? reelOptionCache.get(idValue) : null;
+      if (cached) {
+        cached.status = normalizedStatus;
+        reelOptionCache.set(idValue, cached);
+      }
+      const targetCode = reelCode || (cached && cached.code) || "";
+      if (elements.reel) {
+        Array.from(elements.reel.options).forEach((option) => {
+          const matchesId = idValue && option.value === idValue;
+          const matchesCode = !matchesId && targetCode && option.dataset.reelCode === targetCode;
+          if (matchesId || matchesCode) {
+            applyOptionStatusStyles(option, normalizedStatus);
+          }
+        });
+      }
+    }
 
     function getSelectedReelEntries() {
       return state.reel_ids.map((id) => {
@@ -1868,6 +1887,7 @@
       hasJobSelection: () => hasJobSelection(),
       promptJobSelection,
       clearReels,
+      updateReelStatus,
     };
   })();
 
@@ -1960,6 +1980,119 @@
       return data;
     },
   };
+
+  const LastReviewSummary = (() => {
+    const fields = {};
+    let container = null;
+    let statusEl = null;
+
+    function init() {
+      container = document.getElementById("lastReviewSummary");
+      if (!container) return;
+      statusEl = container.querySelector("[data-last-review='status']");
+      [
+        "title",
+        "timestamp",
+        "reel-time",
+        "machine",
+        "job",
+        "order",
+        "reviewer",
+        "pass-count",
+        "fail-count",
+        "total-count",
+      ].forEach((key) => {
+        fields[key] = container.querySelector(`[data-last-review='${key}']`);
+      });
+      fields.types = container.querySelector("[data-last-review='types']");
+      refresh();
+    }
+
+    async function refresh() {
+      if (!container) return;
+      try {
+        const response = await Api.get("last-review", {}, {});
+        render((response && response.review) || null);
+      } catch (error) {
+        render(null);
+      }
+    }
+
+    function render(review) {
+      if (!container) return;
+      if (!review) {
+        container.classList.add("last-review--empty");
+        updateField("title", "No reviews submitted yet");
+        updateField("timestamp", "—");
+        updateField("reel-time", "—");
+        ["machine", "job", "order", "reviewer"].forEach((key) => updateField(key, "—"));
+        ["pass-count", "fail-count", "total-count"].forEach((key) => updateField(key, "0"));
+        if (statusEl) {
+          statusEl.textContent = "--";
+          statusEl.classList.remove("badge-pass", "badge-fail");
+        }
+        if (fields.types) {
+          fields.types.innerHTML = '<span class="badge">No defect details.</span>';
+        }
+        return;
+      }
+      container.classList.remove("last-review--empty");
+      const code = review.reel_code || "";
+      const label = code ? `Reel ${code}` : review.reel_id ? `Reel #${review.reel_id}` : "Latest review";
+      const reviewerLabel = review.reviewer || review.reviewer_name || review.reviewer_id || "—";
+      updateField("title", label);
+      updateField("timestamp", review.reviewed_at ? `Reviewed ${formatTime(review.reviewed_at)}` : "—");
+      updateField("reel-time", formatReelWindow(review.reel_time_start, review.reel_time_end));
+      updateField("machine", review.machine_name || "—");
+      updateField("job", review.job_name || "—");
+      updateField("order", review.order_number || "—");
+      updateField("reviewer", reviewerLabel);
+      const counts = review.defect_counts || {};
+      updateField("pass-count", Utils.formatNumber(counts.pass || 0));
+      updateField("fail-count", Utils.formatNumber(counts.fail || 0));
+      updateField("total-count", Utils.formatNumber(counts.total || 0));
+      if (statusEl) {
+        const decision = (review.decision || "").toLowerCase();
+        const labelText = decision === "pass" ? "PASS" : decision === "fail" ? "FAIL" : "--";
+        statusEl.textContent = labelText;
+        statusEl.classList.toggle("badge-pass", decision === "pass");
+        statusEl.classList.toggle("badge-fail", decision === "fail");
+      }
+      if (fields.types) {
+        const entries = Array.isArray(review.defect_types) ? review.defect_types : [];
+        if (!entries.length) {
+          fields.types.innerHTML = '<span class="badge">No defect details.</span>';
+        } else {
+          fields.types.innerHTML = entries
+            .map(
+              (entry) =>
+                `<span class="badge">${Utils.escapeHtml(entry.class_name || "Unclassified")} · ${Utils.formatNumber(
+                  entry.count || 0
+                )}</span>`
+            )
+            .join("");
+        }
+      }
+    }
+
+    function updateField(key, value) {
+      if (!fields[key]) return;
+      fields[key].textContent = value;
+    }
+
+    function formatReelWindow(start, end) {
+      if (!start && !end) return "Reel time unavailable";
+      if (start && end) {
+        return `${formatTime(start)} → ${formatTime(end)}`;
+      }
+      if (start) {
+        return `Started ${formatTime(start)}`;
+      }
+      return `Ended ${formatTime(end)}`;
+    }
+
+    return { init, refresh };
+  })();
 
   function formatAsDate(value) {
     if (value === null || value === undefined) return "";
@@ -6871,6 +7004,12 @@ function extractRlmMetrics(config) {
           reviewer_name: reviewer,
           comments,
         });
+        if (Filters && typeof Filters.updateReelStatus === "function") {
+          Filters.updateReelStatus(currentReel.reel_id, decision, currentReel.reel_code || "");
+        }
+        if (LastReviewSummary && typeof LastReviewSummary.refresh === "function") {
+          LastReviewSummary.refresh();
+        }
         if (commentsInput) commentsInput.value = "";
         if (Filters && typeof Filters.hasReelSelection === "function" && typeof Filters.removeReel === "function") {
           const isSelected = Filters.hasReelSelection(currentReel.reel_id, currentReel.reel_code || "");
@@ -6967,6 +7106,7 @@ function extractRlmMetrics(config) {
 
   function initializeApp() {
     init();
+    LastReviewSummary.init();
     bindModalControls();
     bindModalZoom();
     bindFootprintExpandButtons();

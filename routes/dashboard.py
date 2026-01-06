@@ -1068,6 +1068,96 @@ def api_filters():
         )
 
 
+@dashboard_bp.route("/api/last-review")
+def api_last_review():
+    with SessionLocal() as session:
+        latest_review = (
+            session.query(ReelReview)
+            .order_by(ReelReview.created_at.desc(), ReelReview.review_id.desc())
+            .first()
+        )
+        if not latest_review:
+            return jsonify({"review": None})
+
+        reel: Optional[Reel] = None
+        if latest_review.reel_id:
+            reel = (
+                session.query(Reel)
+                .options(selectinload(Reel.machine))
+                .filter(Reel.reel_id == latest_review.reel_id)
+                .first()
+            )
+        if not reel and latest_review.reel_code:
+            reel = (
+                session.query(Reel)
+                .options(selectinload(Reel.machine))
+                .filter(
+                    collate(Reel.reel_code, "utf8mb4_unicode_ci")
+                    == collate(latest_review.reel_code, "utf8mb4_unicode_ci")
+                )
+                .order_by(Reel.reel_id.desc())
+                .first()
+            )
+
+        reel_id = reel.reel_id if reel else latest_review.reel_id
+        reel_code = reel.reel_code if reel else latest_review.reel_code
+        machine_name = reel.machine.name if reel and reel.machine else None
+        job_name = reel.job_name if reel else None
+        order_number = reel.order_number if reel else None
+
+        defect_counts = {"pass": 0, "fail": 0, "pending": 0, "total": 0}
+        defect_types: List[Dict[str, object]] = []
+        if reel_id:
+            decision_rows = (
+                session.query(Defect.qc_decision, func.count())
+                .filter(Defect.reel_id == reel_id)
+                .group_by(Defect.qc_decision)
+                .all()
+            )
+            for decision_value, decision_total in decision_rows:
+                normalized = _normalize_decision(decision_value)
+                count_value = int(decision_total or 0)
+                if normalized == "pass":
+                    defect_counts["pass"] += count_value
+                elif normalized == "fail":
+                    defect_counts["fail"] += count_value
+                else:
+                    defect_counts["pending"] += count_value
+            defect_counts["total"] = (
+                defect_counts["pass"] + defect_counts["fail"] + defect_counts["pending"]
+            )
+            type_rows = (
+                session.query(Defect.class_name, func.count())
+                .filter(Defect.reel_id == reel_id)
+                .group_by(Defect.class_name)
+                .order_by(func.count().desc())
+                .limit(6)
+                .all()
+            )
+            defect_types = [
+                {"class_name": class_name or "Unclassified", "count": int(count)}
+                for class_name, count in type_rows
+            ]
+
+        reviewer_label = latest_review.reviewer_id
+        review_payload = {
+            "review_id": latest_review.review_id,
+            "reel_id": reel_id,
+            "reel_code": reel_code,
+            "job_name": job_name,
+            "order_number": order_number,
+            "machine_name": machine_name,
+            "decision": latest_review.decision,
+            "reviewer": reviewer_label,
+            "reviewed_at": _iso(latest_review.created_at),
+            "reel_time_start": _iso(reel.time_start) if reel else None,
+            "reel_time_end": _iso(reel.time_end) if reel else None,
+            "defect_counts": defect_counts,
+            "defect_types": defect_types,
+        }
+        return jsonify({"review": review_payload})
+
+
 @dashboard_bp.route("/api/overview")
 def api_overview():
     with SessionLocal() as session:

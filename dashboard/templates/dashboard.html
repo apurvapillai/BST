@@ -115,10 +115,50 @@
     <!-- Tabs -->
     <div class="tabs" id="tabNav">
       <button class="tab tab-active" data-tab="overview">Overview</button>
-      <button class="tab" data-tab="job">Job Explorer</button>
-      <button class="tab" data-tab="defects">Defect Explorer</button>
-      <button class="tab" data-tab="qc-review">QC Review</button>
+     <button class="tab" data-tab="job">Job Explorer</button>
+     <button class="tab" data-tab="defects">Defect Explorer</button>
+     <button class="tab" data-tab="qc-review">QC Review</button>
     </div>
+    <section class="last-review-bar last-review--empty" id="lastReviewSummary" aria-live="polite">
+      <div class="last-review-bar__primary">
+        <div>
+          <p class="last-review-eyebrow">Most Recent Reel Review</p>
+          <strong class="last-review-bar__title" data-last-review="title">No reviews submitted yet</strong>
+          <span class="last-review-bar__subtitle" data-last-review="timestamp">—</span>
+          <span class="last-review-bar__meta" data-last-review="reel-time">—</span>
+        </div>
+        <span class="last-review-status badge" data-last-review="status">--</span>
+      </div>
+      <div class="last-review-bar__grid">
+        <div>
+          <span>Machine</span>
+          <strong data-last-review="machine">—</strong>
+        </div>
+        <div>
+          <span>Job</span>
+          <strong data-last-review="job">—</strong>
+        </div>
+        <div>
+          <span>Order</span>
+          <strong data-last-review="order">—</strong>
+        </div>
+        <div>
+          <span>Reviewer</span>
+          <strong data-last-review="reviewer">—</strong>
+        </div>
+      </div>
+      <div class="last-review-bar__counts">
+        <span>Pass <strong data-last-review="pass-count">0</strong></span>
+        <span>Fail <strong data-last-review="fail-count">0</strong></span>
+        <span>Total <strong data-last-review="total-count">0</strong></span>
+      </div>
+      <div class="last-review-types">
+        <span class="last-review-types-label">Defect Types</span>
+        <div class="last-review-types-list" data-last-review="types">
+          <span class="badge">No defect details.</span>
+        </div>
+      </div>
+    </section>
     <div class="filter-chips hidden" id="defectLocalChips"></div>
 
     <!-- Overview Tab -->
