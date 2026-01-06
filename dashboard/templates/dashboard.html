@@ -11,10 +11,6 @@
   <div id="imageModal">
     <span class="closeBtn" onclick="closeModal()">&times;</span>
     <div id="modalDecisionBar" class="hidden">
-      <div class="modal-decision-actions">
-        <button type="button" class="defect-decision-btn defect-decision-btn-pass" id="modalDecisionPass">Pass</button>
-        <button type="button" class="defect-decision-btn defect-decision-btn-fail" id="modalDecisionFail">Fail</button>
-      </div>
       <div id="modalDecisionStatus"></div>
     </div>
     <img id="modalImage" alt="Defect preview">
@@ -269,25 +265,21 @@
     <!-- Defect Explorer Tab -->
     <section id="tab-defects" class="tab-content hidden">
       <div class="defect-group defect-group--review">
-        <div class="defect-review-panel" id="defectReviewPanel">
-          <div class="defect-review-header">
-            <div class="defect-review-copy">
-              <h4>Reel Review</h4>
-              <p class="defect-review-status" data-review-status>
-                Select a reel from Job Explorer to start a review.
-              </p>
-              <p class="defect-review-meta" data-review-meta></p>
-            </div>
-            <div class="review-actions-group">
-              <button type="button" class="review-new-btn" data-review-new disabled>Review New Reel</button>
-              <div class="review-controls" data-review-controls>
-                <button class="review-action review-action--pass" data-review-action="pass" disabled>Pass</button>
-                <button class="review-action review-action--fail" data-review-action="fail" disabled>Fail</button>
-              </div>
-            </div>
+      <div class="defect-review-panel" id="defectReviewPanel">
+        <div class="defect-review-header">
+          <div class="defect-review-copy">
+            <h4>Reel Review</h4>
+            <p class="defect-review-status" data-review-status>
+              Select a reel from Job Explorer to start a review.
+            </p>
+            <p class="defect-review-meta" data-review-meta></p>
           </div>
-          <div class="review-form-host" data-review-form-host></div>
+          <p class="defect-review-note">
+            QC decisions are managed in the QC Review tab.
+          </p>
         </div>
+        <div class="review-form-host" data-review-form-host></div>
+      </div>
         <div class="defect-decision-summary" id="defectDecisionSummary">
           <div class="defect-decision-card total">
             <span>Total Defects</span>
@@ -317,14 +309,14 @@
                   <th>Time</th>
                   <th>Order</th>
                   <th>Job</th>
-                  <th>Type</th>
-                  <th>Magnitude</th>
-                  <th>Severity</th>
-                  <th>Position</th>
-                  <th>Image</th>
-                  <th>Pass/Fail</th>
-                </tr>
-              </thead>
+              <th>Type</th>
+              <th>Magnitude</th>
+              <th>Severity</th>
+              <th>Position</th>
+              <th>Image</th>
+              <th>QC Decision</th>
+            </tr>
+          </thead>
               <tbody></tbody>
             </table>
           </div>
@@ -426,13 +418,24 @@
       <div class="qc-review-wrapper">
         <div class="qc-review-card" id="qcReviewPanel">
           <div class="qc-review-header">
-            <div>
-              <h2>QC Review Queue</h2>
-              <p>Review pending defects one image at a time.</p>
+            <div class="qc-review-headline">
+              <p class="qc-review-job" id="qcReviewJob">Select a machine and window to load pending reels.</p>
+              <p class="qc-review-reel" id="qcReviewReel">Reel — Machine</p>
+              <p class="qc-review-time" id="qcReviewDefectTime">—</p>
             </div>
             <div class="qc-review-counter">
               <span id="qcReviewPending">0</span>
-              <span>pending</span>
+              <span>pending defects</span>
+            </div>
+          </div>
+          <div class="qc-review-subheader">
+            <div>
+              <strong>Machine</strong>
+              <p id="qcReviewMachine">—</p>
+            </div>
+            <div class="qc-review-reel-stats">
+              <span>Pending in reel</span>
+              <strong id="qcReviewReelPending">0</strong>
             </div>
           </div>
           <div class="qc-review-body">
@@ -447,63 +450,120 @@
               <button type="button" class="qc-review-retry" data-qc-review-retry>Try again</button>
             </div>
             <div id="qcReviewContent" class="qc-review-content hidden">
-              <div class="qc-review-stage">
-                <div class="qc-review-image">
-                  <div id="qcReviewImagePlaceholder" class="qc-review-image-placeholder hidden">No preview image.</div>
-                  <img id="qcReviewImage" alt="Pending defect" loading="lazy" decoding="async">
+            <div class="qc-review-stage" id="qcReviewStage">
+              <div class="qc-review-details">
+                <p class="qc-review-label" id="qcReviewLabel">—</p>
+                <p class="qc-review-time" id="qcReviewTime">—</p>
+                <dl class="qc-review-meta">
+                  <div>
+                    <dt>Defect ID</dt>
+                    <dd data-qc-field="defect_id">—</dd>
+                  </div>
+                  <div>
+                    <dt>Machine</dt>
+                    <dd data-qc-field="machine_name">—</dd>
+                  </div>
+                  <div>
+                    <dt>Reel Code</dt>
+                    <dd data-qc-field="reel_code">—</dd>
+                  </div>
+                  <div>
+                    <dt>Job</dt>
+                    <dd data-qc-field="job_name">—</dd>
+                  </div>
+                  <div>
+                    <dt>Order</dt>
+                    <dd data-qc-field="order_number">—</dd>
+                  </div>
+                  <div>
+                    <dt>Type</dt>
+                    <dd data-qc-field="class_name">—</dd>
+                  </div>
+                  <div>
+                    <dt>Phase</dt>
+                    <dd data-qc-field="phase">—</dd>
+                  </div>
+                  <div>
+                    <dt>Position</dt>
+                    <dd data-qc-field="format_position">—</dd>
+                  </div>
+                  <div>
+                    <dt>Magnitude</dt>
+                    <dd data-qc-field="magnitude_value">—</dd>
+                  </div>
+                  <div>
+                    <dt>Severity</dt>
+                    <dd data-qc-field="severity_value">—</dd>
+                  </div>
+                </dl>
+              </div>
+              <div class="qc-review-image">
+                <div id="qcReviewImagePlaceholder" class="qc-review-image-placeholder hidden">No preview image.</div>
+                <img id="qcReviewImage" alt="Pending defect" loading="lazy" decoding="async">
+              </div>
+            </div>
+              <div class="qc-review-actions" id="qcDefectActions">
+                <button type="button" class="defect-decision-btn defect-decision-btn-fail" id="qcReviewFail">Fail</button>
+                <button type="button" class="defect-decision-btn defect-decision-btn-pass" id="qcReviewPass">Pass</button>
+              </div>
+              <div id="qcReviewSummary" class="qc-review-summary hidden">
+                <div class="qc-summary-header">
+                  <div>
+                    <h3>Reel Summary</h3>
+                    <p id="qcSummaryNotice">All pending defects reviewed. Submit a reel decision to continue.</p>
+                  </div>
+                  <div class="qc-summary-history" id="qcReelReviewStatus"></div>
                 </div>
-                <div class="qc-review-details">
-                  <p class="qc-review-label" id="qcReviewLabel">—</p>
-                  <p class="qc-review-time" id="qcReviewTime">—</p>
-                  <dl class="qc-review-meta">
-                    <div>
-                      <dt>Defect ID</dt>
-                      <dd data-qc-field="defect_id">—</dd>
-                    </div>
-                    <div>
-                      <dt>Machine</dt>
-                      <dd data-qc-field="machine_name">—</dd>
-                    </div>
-                    <div>
-                      <dt>Reel Code</dt>
-                      <dd data-qc-field="reel_code">—</dd>
-                    </div>
-                    <div>
-                      <dt>Job</dt>
-                      <dd data-qc-field="job_name">—</dd>
-                    </div>
-                    <div>
-                      <dt>Order</dt>
-                      <dd data-qc-field="order_number">—</dd>
-                    </div>
-                    <div>
-                      <dt>Type</dt>
-                      <dd data-qc-field="class_name">—</dd>
-                    </div>
-                    <div>
-                      <dt>Phase</dt>
-                      <dd data-qc-field="phase">—</dd>
-                    </div>
-                    <div>
-                      <dt>Position</dt>
-                      <dd data-qc-field="format_position">—</dd>
-                    </div>
-                    <div>
-                      <dt>Magnitude</dt>
-                      <dd data-qc-field="magnitude_value">—</dd>
-                    </div>
-                    <div>
-                      <dt>Severity</dt>
-                      <dd data-qc-field="severity_value">—</dd>
-                    </div>
-                  </dl>
+                <div class="qc-summary-cards">
+                  <div class="qc-summary-card total">
+                    <span>Total</span>
+                    <strong id="qcSummaryTotal">0</strong>
+                  </div>
+                  <div class="qc-summary-card pass">
+                    <span>Pass</span>
+                    <strong id="qcSummaryPass">0</strong>
+                  </div>
+                  <div class="qc-summary-card fail">
+                    <span>Fail</span>
+                    <strong id="qcSummaryFail">0</strong>
+                  </div>
+                  <div class="qc-summary-card pending">
+                    <span>Pending</span>
+                    <strong id="qcSummaryPending">0</strong>
+                  </div>
+                </div>
+                <div class="qc-summary-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Type</th>
+                        <th>Magnitude</th>
+                        <th>Severity</th>
+                        <th>Position</th>
+                        <th>Decision</th>
+                      </tr>
+                    </thead>
+                    <tbody id="qcSummaryTableBody"></tbody>
+                  </table>
+                </div>
+                <div class="qc-summary-breakdown" id="qcSummaryByType"></div>
+                <div class="qc-reel-review-form">
+                  <div class="qc-reel-review-field">
+                    <label for="qcReelReviewer">Reviewer</label>
+                    <input type="text" id="qcReelReviewer" placeholder="Your name">
+                  </div>
+                  <div class="qc-reel-review-field">
+                    <label for="qcReelComments">Comments</label>
+                    <textarea id="qcReelComments" rows="2" placeholder="Optional notes"></textarea>
+                  </div>
+                  <div class="qc-reel-actions" id="qcReelActions">
+                    <button type="button" class="defect-decision-btn defect-decision-btn-fail" id="qcReelFail">Fail Reel</button>
+                    <button type="button" class="defect-decision-btn defect-decision-btn-pass" id="qcReelPass">Pass Reel</button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-          <div class="qc-review-actions">
-            <button type="button" class="defect-decision-btn defect-decision-btn-fail" id="qcReviewFail">Fail</button>
-            <button type="button" class="defect-decision-btn defect-decision-btn-pass" id="qcReviewPass">Pass</button>
           </div>
         </div>
       </div>

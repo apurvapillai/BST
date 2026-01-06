@@ -155,6 +155,13 @@
     const upper = maxVal + pad;
     return [lower, upper];
   }
+
+  function formatTime(value, fallback = "—") {
+    if (!value) return fallback;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return fallback;
+    return date.toLocaleString();
+  }
   function buildDecisionBadge(decision) {
     const normalized = (decision || "").toLowerCase();
     if (normalized !== "pass" && normalized !== "fail") return "";
@@ -162,26 +169,12 @@
     return `<span class="defect-decision-badge defect-decision-badge-${normalized}">${label}</span>`;
   }
 
-  function buildDecisionButtons(decision) {
+  function buildDecisionCellContent(decision) {
     const normalized = (decision || "").toLowerCase();
-    return `
-      <div class="defect-decision-actions">
-        <button type="button" class="defect-decision-btn defect-decision-btn-pass${
-          normalized === "pass" ? " is-selected" : ""
-        }" data-defect-decision="pass">Pass</button>
-        <button type="button" class="defect-decision-btn defect-decision-btn-fail${
-          normalized === "fail" ? " is-selected" : ""
-        }" data-defect-decision="fail">Fail</button>
-      </div>
-    `;
-  }
-
-  function buildDecisionCellContent(decision, editing) {
-    const normalized = (decision || "").toLowerCase();
-    if (editing || !normalized) {
-      return buildDecisionButtons(normalized);
+    if (normalized === "pass" || normalized === "fail") {
+      return buildDecisionBadge(normalized);
     }
-    return buildDecisionBadge(normalized);
+    return '<span class="defect-decision-badge defect-decision-badge-pending">Pending</span>';
   }
 
   const backgroundImageCache = new Map();
@@ -5421,16 +5414,9 @@ function extractRlmMetrics(config) {
 
     function formatRange(start, end) {
       if (!start && !end) return "N/A";
-      const startStr = start ? formatTime(start) : "N/A";
-      const endStr = end ? formatTime(end) : "N/A";
+      const startStr = formatTime(start, "N/A");
+      const endStr = formatTime(end, "N/A");
       return `${startStr} → ${endStr}`;
-    }
-
-    function formatTime(value) {
-      if (!value) return "N/A";
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime())) return "N/A";
-      return date.toLocaleString();
     }
 
     return { init, activate, onFiltersUpdated };
@@ -5461,6 +5447,7 @@ function extractRlmMetrics(config) {
     let typeOptionCache = new Set();
     const defaultBucketKeys = HEATMAP_BUCKETS.map((bucket) => bucket.key);
     let decisionSummary = null;
+    let lastReelAlertSignature = "";
 
     const state = {
       page: 1,
@@ -5631,7 +5618,9 @@ function extractRlmMetrics(config) {
         renderCharts(data, byType);
         renderFootprints(data);
         renderDecisionSummary(data.decision_summary);
-        renderTable(data.rows || []);
+        const rows = data.rows || [];
+        renderTable(rows);
+        maybeAlertForSelectedReel(rows);
         renderPagination();
       } catch (err) {
         console.error("Defect explorer load failed", err);
@@ -5655,10 +5644,6 @@ function extractRlmMetrics(config) {
       sizeMinInput = Utils.qs("#sizeMin");
       sizeMaxInput = Utils.qs("#sizeMax");
       tableBody = Utils.qs("#defectTable tbody");
-      if (tableBody) {
-        tableBody.addEventListener("click", handleDecisionClick);
-        tableBody.addEventListener("dblclick", handleDecisionDoubleClick);
-      }
       paginationEl = Utils.qs("#defectPagination");
       summaryTotalEl = Utils.qs("[data-defect-total]");
       summaryTypesEl = Utils.qs("#defectSummaryTypes");
@@ -6083,45 +6068,6 @@ function extractRlmMetrics(config) {
       }
     }
 
-    function adjustDecisionSummary(previousDecision, nextDecision) {
-      if (!decisionSummary) {
-        decisionSummary = sanitizeDecisionSummary({});
-      }
-      const summary = { ...decisionSummary };
-      const prev = normalizeDecisionValue(previousDecision);
-      const next = normalizeDecisionValue(nextDecision);
-
-      if (prev === "pass") {
-        summary.pass = Math.max(0, (summary.pass || 0) - 1);
-      } else if (prev === "fail") {
-        summary.fail = Math.max(0, (summary.fail || 0) - 1);
-      } else {
-        summary.unidentified = Math.max(0, (summary.unidentified || 0) - 1);
-      }
-
-      if (next === "pass") {
-        summary.pass = (summary.pass || 0) + 1;
-      } else if (next === "fail") {
-        summary.fail = (summary.fail || 0) + 1;
-      } else {
-        summary.unidentified = (summary.unidentified || 0) + 1;
-      }
-
-      summary.total = Math.max(
-        0,
-        (summary.pass || 0) + (summary.fail || 0) + (summary.unidentified || 0)
-      );
-      decisionSummary = summary;
-      updateDecisionSummaryDisplay();
-    }
-
-    function normalizeDecisionValue(value) {
-      if (!value) return null;
-      const normalized = String(value).trim().toLowerCase();
-      if (normalized === "pass" || normalized === "fail") return normalized;
-      return null;
-    }
-
     function renderTable(rows) {
       if (!tableBody) return;
       if (!rows.length) {
@@ -6153,7 +6099,7 @@ function extractRlmMetrics(config) {
                 }
               </td>
               <td class="defect-decision-cell" data-defect-id="${row.defect_id || ""}" data-decision="${(row.qc_decision || "").toLowerCase()}">
-                ${buildDecisionCellContent(row.qc_decision, !row.qc_decision)}
+                ${buildDecisionCellContent(row.qc_decision)}
               </td>
             </tr>
           `
@@ -6161,52 +6107,38 @@ function extractRlmMetrics(config) {
         .join("");
     }
 
-    async function saveDefectDecision(cell, defectId, decision) {
-      const normalized = (decision || "").toLowerCase();
-      if (!normalized || (normalized !== "pass" && normalized !== "fail")) return;
-      const previousDecision = (cell.dataset.decision || "").toLowerCase();
-      cell.dataset.loading = "true";
-      cell.classList.add("defect-decision-saving");
-      try {
-        const persisted = await persistDefectDecision(defectId, normalized);
-        cell.dataset.decision = persisted;
-        cell.dataset.editing = "false";
-        cell.innerHTML = buildDecisionBadge(persisted);
-        updateDefectImageDecision(defectId, persisted);
-        syncModalAfterDecision(defectId, persisted);
-        adjustDecisionSummary(previousDecision, persisted);
-      } catch (error) {
-        console.error("Failed to update defect decision", error);
-        window.alert(
-          `Failed to update decision: ${
-            error && error.message ? error.message : "Unknown error"
-          }`
-        );
-        cell.dataset.editing = "true";
-        cell.innerHTML = buildDecisionButtons(cell.dataset.decision || normalized);
-      } finally {
-        cell.dataset.loading = "false";
-        cell.classList.remove("defect-decision-saving");
+    function maybeAlertForSelectedReel(rows) {
+      if (!Filters || typeof Filters.getReelIds !== "function") return;
+      const reelIds = Filters.getReelIds();
+      const reelCodes = typeof Filters.getReelCodes === "function" ? Filters.getReelCodes() : [];
+      if ((!reelIds || !reelIds.length) && (!reelCodes || !reelCodes.length)) {
+        lastReelAlertSignature = "";
+        return;
       }
-    }
-
-    function handleDecisionClick(event) {
-      const button = event.target.closest("button[data-defect-decision]");
-      if (!button) return;
-      const cell = button.closest(".defect-decision-cell");
-      if (!cell || cell.dataset.loading === "true") return;
-      const defectId = Number(cell.dataset.defectId);
-      if (!defectId) return;
-      saveDefectDecision(cell, defectId, button.dataset.defectDecision);
-    }
-
-    function handleDecisionDoubleClick(event) {
-      const cell = event.target.closest(".defect-decision-cell");
-      if (!cell || cell.dataset.loading === "true") return;
-      const current = (cell.dataset.decision || "").toLowerCase();
-      if (!current) return;
-      cell.dataset.editing = "true";
-      cell.innerHTML = buildDecisionButtons(current);
+      const normalizedSelection = (reelIds && reelIds.length ? reelIds : reelCodes)
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+        .sort()
+        .join(",");
+      const rowsArray = Array.isArray(rows) ? rows : [];
+      if (!rowsArray.length) {
+        const signature = `empty:${normalizedSelection}`;
+        if (signature !== lastReelAlertSignature) {
+          window.alert("The selected reel has no defects in the current filters.");
+          lastReelAlertSignature = signature;
+        }
+        return;
+      }
+      const hasPending = rowsArray.some((row) => !row.qc_decision);
+      if (!hasPending) {
+        const signature = `complete:${normalizedSelection}`;
+        if (signature !== lastReelAlertSignature) {
+          window.alert("The selected reel has already been fully labeled.");
+          lastReelAlertSignature = signature;
+        }
+        return;
+      }
+      lastReelAlertSignature = "";
     }
 
     function renderPagination() {
@@ -6330,38 +6262,10 @@ function extractRlmMetrics(config) {
       }
     }
 
-    function formatTime(value) {
-      if (!value) return "";
-      const date = new Date(value);
-      return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
-    }
-
     return { init, activate, deactivate, onFiltersUpdated };
   })();
 
   const QcReviewTab = (() => {
-    let panel;
-    let loadingEl;
-    let emptyEl;
-    let errorEl;
-    let errorTextEl;
-    let contentEl;
-    let imageEl;
-    let imagePlaceholderEl;
-    let labelEl;
-    let timeEl;
-    let pendingEl;
-    let passBtn;
-    let failBtn;
-    let retryBtn;
-    const fieldEls = {};
-    let initialized = false;
-    let loading = false;
-    let saving = false;
-    let needsRefresh = true;
-    let currentDefect = null;
-    let filtersListenerAttached = false;
-
     const FIELD_KEYS = [
       "defect_id",
       "machine_name",
@@ -6374,6 +6278,53 @@ function extractRlmMetrics(config) {
       "magnitude_value",
       "severity_value",
     ];
+    let panel;
+    let loadingEl;
+    let emptyEl;
+    let errorEl;
+    let errorTextEl;
+    let contentEl;
+    let imageEl;
+    let imagePlaceholderEl;
+    let labelEl;
+    let timeEl;
+    let headerJobEl;
+    let headerReelEl;
+    let headerTimeEl;
+    let headerMachineEl;
+    let reelPendingEl;
+    let stageEl;
+    let summaryEl;
+    let summaryNoticeEl;
+    let summaryHistoryEl;
+    let summaryTableBody;
+    let summaryByTypeEl;
+    let summaryCountTotalEl;
+    let summaryCountPassEl;
+    let summaryCountFailEl;
+    let summaryCountPendingEl;
+    let pendingEl;
+    let passBtn;
+    let failBtn;
+    let retryBtn;
+    let defectActionsEl;
+    let reelActionsEl;
+    let reelPassBtn;
+    let reelFailBtn;
+    let reviewerInput;
+    let commentsInput;
+    const fieldEls = {};
+    const COMPLETION_FIELDS = ["job_name", "order_number", "reel_code"];
+    let initialized = false;
+    let loading = false;
+    let saving = false;
+    let savingReel = false;
+    let needsRefresh = true;
+    let currentDefect = null;
+    let currentReel = null;
+    let summaryData = null;
+    let pendingInReel = 0;
+    let filtersListenerAttached = false;
 
     function init() {
       if (initialized) return;
@@ -6388,7 +6339,28 @@ function extractRlmMetrics(config) {
       imagePlaceholderEl = Utils.qs("#qcReviewImagePlaceholder");
       labelEl = Utils.qs("#qcReviewLabel");
       timeEl = Utils.qs("#qcReviewTime");
+      headerJobEl = Utils.qs("#qcReviewJob");
+      headerReelEl = Utils.qs("#qcReviewReel");
+      headerTimeEl = Utils.qs("#qcReviewDefectTime");
+      headerMachineEl = Utils.qs("#qcReviewMachine");
+      reelPendingEl = Utils.qs("#qcReviewReelPending");
+      stageEl = Utils.qs("#qcReviewStage");
+      summaryEl = Utils.qs("#qcReviewSummary");
+      summaryNoticeEl = Utils.qs("#qcSummaryNotice");
+      summaryHistoryEl = Utils.qs("#qcReelReviewStatus");
+      summaryTableBody = Utils.qs("#qcSummaryTableBody");
+      summaryByTypeEl = Utils.qs("#qcSummaryByType");
+      summaryCountTotalEl = Utils.qs("#qcSummaryTotal");
+      summaryCountPassEl = Utils.qs("#qcSummaryPass");
+      summaryCountFailEl = Utils.qs("#qcSummaryFail");
+      summaryCountPendingEl = Utils.qs("#qcSummaryPending");
       pendingEl = Utils.qs("#qcReviewPending");
+      defectActionsEl = Utils.qs("#qcDefectActions");
+      reelActionsEl = Utils.qs("#qcReelActions");
+      reelPassBtn = Utils.qs("#qcReelPass");
+      reelFailBtn = Utils.qs("#qcReelFail");
+      reviewerInput = Utils.qs("#qcReelReviewer");
+      commentsInput = Utils.qs("#qcReelComments");
       passBtn = Utils.qs("#qcReviewPass");
       failBtn = Utils.qs("#qcReviewFail");
       retryBtn = Utils.qs("[data-qc-review-retry]");
@@ -6404,6 +6376,15 @@ function extractRlmMetrics(config) {
       if (failBtn) {
         failBtn.addEventListener("click", () => handleDecision("fail"));
       }
+      if (reelPassBtn) {
+        reelPassBtn.addEventListener("click", () => handleReelDecision("pass"));
+      }
+      if (reelFailBtn) {
+        reelFailBtn.addEventListener("click", () => handleReelDecision("fail"));
+      }
+      if (reviewerInput) {
+        reviewerInput.addEventListener("input", syncReelActionState);
+      }
       if (!filtersListenerAttached && Filters && typeof Filters.onChange === "function") {
         Filters.onChange(() => {
           needsRefresh = true;
@@ -6413,38 +6394,76 @@ function extractRlmMetrics(config) {
       initialized = true;
     }
 
-    async function fetchNext(reset = false) {
+    function updateHeaderInfo(reel, defect) {
+      const jobParts = [];
+      if (reel && reel.job_name) jobParts.push(reel.job_name);
+      if (reel && reel.order_number) jobParts.push(reel.order_number);
+      if (headerJobEl) headerJobEl.textContent = jobParts.length ? jobParts.join(" · ") : "Job not selected";
+      if (headerReelEl) {
+        const reelLabel = reel && reel.reel_code ? `Reel ${reel.reel_code}` : reel && reel.reel_id ? `Reel #${reel.reel_id}` : "Reel";
+        const machine = reel && reel.machine_name ? ` · ${reel.machine_name}` : "";
+        headerReelEl.textContent = `${reelLabel}${machine}`;
+      }
+      const timeSource = defect && defect.defect_time ? defect.defect_time : reel && (reel.time_end || reel.time_start);
+      if (headerTimeEl) headerTimeEl.textContent = formatTime(timeSource);
+      if (headerMachineEl) headerMachineEl.textContent = (reel && reel.machine_name) || "—";
+      if (reelPendingEl) reelPendingEl.textContent = Utils.formatNumber(pendingInReel);
+    }
+
+    async function fetchNext(force = false) {
       if (!panel || loading) return;
       loading = true;
-      if (reset) {
-        currentDefect = null;
-      }
       setActionsDisabled(true);
-      setViewState(reset ? "loading" : "content");
+      setReelActionsDisabled(true);
+      setViewState(force ? "loading" : "content");
       try {
-        const data = await Api.get("qc-review", { page: 1, page_size: 1 });
-        const pendingTotal = data && typeof data.pending_total === "number" ? data.pending_total : 0;
-        updatePendingCount(pendingTotal);
-        const nextDefect = Array.isArray(data?.rows) && data.rows.length ? data.rows[0] : null;
-        if (nextDefect) {
-          renderDefect(nextDefect);
-          setViewState("content");
-          setActionsDisabled(false);
-          needsRefresh = false;
-        } else {
-          currentDefect = null;
-          setViewState("empty");
-        }
+        const data = await Api.get("qc-review");
+        applyPayload(data || {});
+        needsRefresh = false;
       } catch (error) {
-        currentDefect = null;
         const message = error && error.message ? error.message : "Failed to load pending defects.";
-        setViewState("error", message);
+        showErrorState(message);
       } finally {
         loading = false;
         if (!currentDefect) {
           setActionsDisabled(true);
         }
+        syncReelActionState();
       }
+    }
+
+    function applyPayload(payload) {
+      const pendingTotal = Number(payload.pending_total || 0);
+      pendingInReel = Number(payload.pending_in_reel || 0);
+      currentReel = payload.reel || null;
+      currentDefect = payload.next_defect || null;
+      summaryData = payload.reel_summary || null;
+      updatePendingCount(pendingTotal);
+      if (!currentReel) {
+        setViewState("empty");
+        syncCompletionHighlights(false);
+        return;
+      }
+      updateHeaderInfo(currentReel, currentDefect);
+      syncCompletionHighlights(pendingInReel === 0);
+      if (currentDefect) {
+        renderDefect(currentDefect);
+        toggleMode("defect");
+        setViewState("content");
+        setActionsDisabled(false);
+        return;
+      }
+      renderSummary(summaryData);
+      toggleMode("summary");
+      setViewState("content");
+    }
+
+    function showErrorState(message) {
+      currentDefect = null;
+      currentReel = null;
+      summaryData = null;
+      syncCompletionHighlights(false);
+      setViewState("error", message);
     }
 
     function updatePendingCount(total) {
@@ -6456,6 +6475,26 @@ function extractRlmMetrics(config) {
       const shouldDisable = disabled || !currentDefect;
       if (passBtn) passBtn.disabled = shouldDisable;
       if (failBtn) failBtn.disabled = shouldDisable;
+    }
+
+    function setReelActionsDisabled(disabled) {
+      if (!reelActionsEl) return;
+      Array.from(reelActionsEl.querySelectorAll("button")).forEach((button) => {
+        button.disabled = disabled;
+      });
+    }
+
+    function toggleMode(mode) {
+      const isSummary = mode === "summary";
+      if (stageEl) stageEl.classList.toggle("hidden", isSummary);
+      if (defectActionsEl) defectActionsEl.classList.toggle("hidden", isSummary);
+      if (summaryEl) summaryEl.classList.toggle("hidden", !isSummary);
+      if (isSummary) {
+        setActionsDisabled(true);
+        syncReelActionState();
+      } else {
+        setReelActionsDisabled(true);
+      }
     }
 
     function setViewState(state, message = "") {
@@ -6504,7 +6543,7 @@ function extractRlmMetrics(config) {
       if (!labelParts.length && defect.reel_code) labelParts.push(defect.reel_code);
       const label = labelParts.length ? labelParts.join(" · ") : `Defect #${defect.defect_id}`;
       if (labelEl) labelEl.textContent = label;
-      if (timeEl) timeEl.textContent = formatTime(defect.defect_time) || "—";
+      if (timeEl) timeEl.textContent = formatTime(defect.defect_time);
 
       if (defect.image_src) {
         const src = urlForStatic(defect.image_src);
@@ -6532,6 +6571,77 @@ function extractRlmMetrics(config) {
       });
     }
 
+    function renderSummary(summary) {
+      if (!summaryEl) return;
+      if (!summary || !Array.isArray(summary.defects) || !summary.defects.length) {
+        if (summaryTableBody) {
+          summaryTableBody.innerHTML = `<tr><td colspan="6">No defect records available for this reel.</td></tr>`;
+        }
+      } else if (summaryTableBody) {
+        summaryTableBody.innerHTML = summary.defects
+          .map((row) => {
+            const decisionBadge = row.qc_decision ? buildDecisionBadge(row.qc_decision) : "<span class=\"defect-decision-badge\">Pending</span>";
+            const position = Number.isFinite(Number(row.format_position))
+              ? `${Utils.formatNumber(row.format_position, 1)} mm`
+              : "--";
+            return `
+              <tr>
+                <td>#${row.defect_id}</td>
+                <td>${Utils.escapeHtml(row.class_name || "—")}</td>
+                <td>${Utils.formatNumber(row.magnitude_value, 3)}</td>
+                <td>${Utils.formatNumber(row.severity_value, 2)}</td>
+                <td>${position}</td>
+                <td>${decisionBadge}</td>
+              </tr>
+            `;
+          })
+          .join("");
+      }
+      if (summaryCountTotalEl) summaryCountTotalEl.textContent = Utils.formatNumber(summary?.counts?.total || 0);
+      if (summaryCountPassEl) summaryCountPassEl.textContent = Utils.formatNumber(summary?.counts?.pass || 0);
+      if (summaryCountFailEl) summaryCountFailEl.textContent = Utils.formatNumber(summary?.counts?.fail || 0);
+      if (summaryCountPendingEl) summaryCountPendingEl.textContent = Utils.formatNumber(summary?.counts?.pending || 0);
+
+      if (summaryByTypeEl) {
+        const entries = Array.isArray(summary?.by_type) ? summary.by_type : [];
+        if (!entries.length) {
+          summaryByTypeEl.innerHTML = "<span class='badge'>No type breakdown available.</span>";
+        } else {
+          summaryByTypeEl.innerHTML = entries
+            .map(
+              (entry) => `
+                <span class="badge">${Utils.escapeHtml(entry.class_name || "Unknown")} · Pass: ${entry.pass} · Fail: ${entry.fail} · Pending: ${entry.pending}</span>
+              `
+            )
+            .join("");
+        }
+      }
+      if (summaryNoticeEl) {
+        summaryNoticeEl.textContent =
+          pendingInReel === 0
+            ? "All defects reviewed. Submit a reel decision to proceed."
+            : "Review remaining defects to enable reel decisions.";
+      }
+      if (summaryHistoryEl) {
+        const latest = summary && summary.latest_review ? summary.latest_review : null;
+        if (latest && latest.decision) {
+          const decisionLabel = latest.decision === "pass" ? "PASS" : "FAIL";
+          const timestamp = formatTime(latest.created_at, "");
+          summaryHistoryEl.textContent = `Latest decision: ${decisionLabel} by ${latest.reviewer_name || latest.reviewer_id || "Reviewer"}${timestamp ? ` on ${timestamp}` : ""}`;
+        } else {
+          summaryHistoryEl.textContent = "";
+        }
+      }
+    }
+
+    function syncCompletionHighlights(isComplete) {
+      COMPLETION_FIELDS.forEach((key) => {
+        const el = fieldEls[key];
+        if (!el) return;
+        el.classList.toggle("qc-field-complete", Boolean(isComplete));
+      });
+    }
+
     async function handleDecision(decision) {
       if (!currentDefect || saving) return;
       saving = true;
@@ -6539,7 +6649,7 @@ function extractRlmMetrics(config) {
       try {
         await persistDefectDecision(currentDefect.defect_id, decision);
         needsRefresh = true;
-        fetchNext(false);
+        await fetchNext(false);
       } catch (error) {
         const message = error && error.message ? error.message : "Failed to update decision.";
         window.alert(message);
@@ -6549,16 +6659,54 @@ function extractRlmMetrics(config) {
       }
     }
 
+    function syncReelActionState() {
+      if (!summaryData || pendingInReel > 0) {
+        setReelActionsDisabled(true);
+        return;
+      }
+      const reviewer = reviewerInput ? reviewerInput.value.trim() : "";
+      const shouldEnable = Boolean(reviewer) && !savingReel;
+      setReelActionsDisabled(!shouldEnable);
+    }
+
+    async function handleReelDecision(decision) {
+      if (!summaryData || pendingInReel > 0 || savingReel || !currentReel) return;
+      const reviewer = reviewerInput ? reviewerInput.value.trim() : "";
+      if (!reviewer) {
+        window.alert("Enter your name before submitting a reel decision.");
+        return;
+      }
+      const comments = commentsInput ? commentsInput.value.trim() : "";
+      savingReel = true;
+      setReelActionsDisabled(true);
+      try {
+        await Api.post(`reel/${currentReel.reel_id}/review`, {
+          decision,
+          reviewer_name: reviewer,
+          comments,
+        });
+        if (commentsInput) commentsInput.value = "";
+        needsRefresh = true;
+        await fetchNext(true);
+      } catch (error) {
+        const message = error && error.message ? error.message : "Failed to submit reel decision.";
+        window.alert(message);
+        setReelActionsDisabled(false);
+      } finally {
+        savingReel = false;
+      }
+    }
+
     function activate() {
       if (!initialized) init();
       if (!panel) return;
-      if (needsRefresh || !currentDefect) {
+      if (needsRefresh || (!currentDefect && pendingInReel === 0)) {
         fetchNext(true);
       }
     }
 
     function deactivate() {
-      // no-op for now
+      // no-op
     }
 
     function onFiltersUpdated() {
@@ -6615,19 +6763,11 @@ function extractRlmMetrics(config) {
   function bindModalControls() {
     const prev = document.getElementById("modalPrevButton");
     const next = document.getElementById("modalNextButton");
-    const passBtn = document.getElementById("modalDecisionPass");
-    const failBtn = document.getElementById("modalDecisionFail");
     if (prev) {
       prev.addEventListener("click", () => cycleModalImage(-1));
     }
     if (next) {
       next.addEventListener("click", () => cycleModalImage(1));
-    }
-    if (passBtn) {
-      passBtn.addEventListener("click", () => handleModalDecisionClick("pass"));
-    }
-    if (failBtn) {
-      failBtn.addEventListener("click", () => handleModalDecisionClick("fail"));
     }
     syncModalDecisionUI(null);
     syncModalMetaBarVisibility();
@@ -6826,47 +6966,14 @@ function extractRlmMetrics(config) {
 
   function syncModalDecisionUI(decision) {
     const normalized = (decision || "").toLowerCase();
-    const passBtn = document.getElementById("modalDecisionPass");
-    const failBtn = document.getElementById("modalDecisionFail");
     const status = document.getElementById("modalDecisionStatus");
-    if (passBtn) {
-      passBtn.classList.toggle("is-selected", normalized === "pass");
-    }
-    if (failBtn) {
-      failBtn.classList.toggle("is-selected", normalized === "fail");
-    }
     if (status) {
       if (normalized === "pass" || normalized === "fail") {
         status.innerHTML = buildDecisionBadge(normalized);
       } else {
-        status.innerHTML = "<span class=\"defect-decision-badge\">Pending</span>";
+        status.innerHTML = '<span class="defect-decision-badge defect-decision-badge-pending">Pending</span>';
       }
     }
-  }
-
-  function updateTableDecisionCell(defectId, decision) {
-    const cell = document.querySelector(`.defect-decision-cell[data-defect-id="${defectId}"]`);
-    if (!cell) return;
-    const normalized = (decision || "").toLowerCase();
-    cell.dataset.decision = normalized;
-    cell.dataset.editing = "false";
-    cell.innerHTML = normalized ? buildDecisionBadge(normalized) : buildDecisionButtons("");
-  }
-
-  function updateDefectImageDecision(defectId, decision) {
-    const img = document.querySelector(
-      `#defectTable tbody td img[data-defect-id="${defectId}"]`
-    );
-    if (!img) return;
-    img.dataset.decision = (decision || "").toLowerCase();
-  }
-
-  function syncModalAfterDecision(defectId, decision) {
-    const modal = document.getElementById("imageModal");
-    if (!modal || !modal.classList.contains("show")) return;
-    if (String(modal.dataset.defectId || "") !== String(defectId)) return;
-    modal.dataset.decision = (decision || "").toLowerCase();
-    syncModalDecisionUI(decision);
   }
 
   async function persistDefectDecision(defectId, decision) {
@@ -6888,33 +6995,6 @@ function extractRlmMetrics(config) {
     modal.dataset.decision = decision;
     syncModalDecisionUI(decision);
     syncModalMetaBarVisibility();
-  }
-
-  async function handleModalDecisionClick(decision) {
-    const modal = document.getElementById("imageModal");
-    if (!modal || !modal.classList.contains("show")) return;
-    const defectId = Number(modal.dataset.defectId);
-    if (!defectId) return;
-    const bar = document.getElementById("modalDecisionBar");
-    if (bar) {
-      bar.classList.add("defect-decision-saving");
-    }
-    try {
-      const persisted = await persistDefectDecision(defectId, decision);
-      modal.dataset.decision = persisted;
-      syncModalDecisionUI(persisted);
-      updateTableDecisionCell(defectId, persisted);
-      updateDefectImageDecision(defectId, persisted);
-    } catch (error) {
-      console.error("Failed to update defect decision", error);
-      window.alert(
-        `Failed to update decision: ${error && error.message ? error.message : "Unknown error"}`
-      );
-    } finally {
-      if (bar) {
-        bar.classList.remove("defect-decision-saving");
-      }
-    }
   }
 
   function cycleModalImage(offset) {
