@@ -95,6 +95,13 @@ body {
   color: #0f172a;
 }
 
+.heatmap-zoom-group {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .heatmap-tool-buttons {
   display: inline-flex;
   border: 1px solid rgba(15, 23, 42, 0.15);
@@ -118,7 +125,7 @@ body {
 }
 
 .heatmap-actions {
-  margin-top: 16px;
+  margin-top: 0;
   display: flex;
   justify-content: flex-end;
   padding: 0 16px 16px;
@@ -136,12 +143,63 @@ body {
   justify-content: flex-end;
 }
 
+.heatmap-zoom-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  background: #0f172a;
+  border-radius: 999px;
+  padding: 4px;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);
+}
+
+.heatmap-zoom-btn {
+  border: none;
+  background: transparent;
+  color: #f8fafc;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.heatmap-zoom-reset {
+  width: auto;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.heatmap-zoom-btn:hover:not(:disabled),
+.heatmap-zoom-btn:focus-visible {
+  background: rgba(255, 255, 255, 0.18);
+  outline: none;
+}
+
+.heatmap-zoom-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .heatmap-canvas {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.heatmap-stage-container {
   position: relative;
   background: #0f172a;
   border: 1px solid rgba(15, 23, 42, 0.08);
   box-shadow: 0 6px 24px rgba(15, 23, 42, 0.08);
   padding: 0;
+  border-radius: 12px;
+  overflow: auto;
 }
 
 .heatmap-stage {
@@ -149,6 +207,9 @@ body {
   min-height: 820px;
   user-select: none;
   touch-action: none;
+  transform-origin: top left;
+  transition: transform 0.15s ease;
+  will-change: transform;
 }
 
 .heatmap-stage--disabled .heatmap-reference {
@@ -336,7 +397,7 @@ body {
 }
 
 .heatmap-empty {
-  margin-top: 12px;
+  margin-top: 0;
   padding: 16px;
   border-radius: 12px;
   background: rgba(248, 250, 252, 0.95);

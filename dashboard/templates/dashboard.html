@@ -611,14 +611,24 @@
                 <button type="button" class="heatmap-tool-btn heatmap-tool-btn-active" data-heatmap-tool="rectangle">Rectangle</button>
                 <button type="button" class="heatmap-tool-btn" data-heatmap-tool="polygon">Polygon</button>
               </div>
+              <div class="heatmap-zoom-group">
+                <span class="heatmap-tools-label">Zoom</span>
+                <div class="heatmap-zoom-controls" aria-label="Heatmap zoom controls">
+                  <button type="button" class="heatmap-zoom-btn" data-heatmap-zoom="in" aria-label="Zoom in">+</button>
+                  <button type="button" class="heatmap-zoom-btn" data-heatmap-zoom="out" aria-label="Zoom out">&minus;</button>
+                  <button type="button" class="heatmap-zoom-btn heatmap-zoom-reset" data-heatmap-zoom="reset">Reset</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
         <div class="heatmap-canvas">
-          <div class="heatmap-stage heatmap-stage--disabled" id="heatmapStage">
-            <img id="heatmapReferenceImage" alt="Reference image" class="heatmap-reference hidden" loading="lazy" decoding="async">
-            <div class="heatmap-regions-layer" id="heatmapRegionsLayer"></div>
-            <div class="heatmap-regions-layer heatmap-regions-layer--draft" id="heatmapDraftLayer"></div>
+          <div class="heatmap-stage-container">
+            <div class="heatmap-stage heatmap-stage--disabled" id="heatmapStage">
+              <img id="heatmapReferenceImage" alt="Reference image" class="heatmap-reference hidden" loading="lazy" decoding="async">
+              <div class="heatmap-regions-layer" id="heatmapRegionsLayer"></div>
+              <div class="heatmap-regions-layer heatmap-regions-layer--draft" id="heatmapDraftLayer"></div>
+            </div>
           </div>
           <div class="heatmap-empty" id="heatmapEmptyNotice">
             Select a job to load its reference image and begin marking important zones.

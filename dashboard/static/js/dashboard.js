@@ -7075,6 +7075,8 @@ function extractRlmMetrics(config) {
     let emptyNoticeEl;
     let imageEl;
     let saveBtn;
+    let zoomButtons = [];
+    let zoomValue = 1;
     let jobName = "";
     let machineId = null;
     let regions = [];
@@ -7088,6 +7090,11 @@ function extractRlmMetrics(config) {
     let polygonDraft = null;
     let drawMode = "rectangle";
     const POLYGON_CLOSE_THRESHOLD = 0.02;
+    const ZOOM_MIN = 0.5;
+    const ZOOM_MAX = 3;
+    const ZOOM_STEP = 0.25;
+    const ZOOM_DEFAULT = 1;
+    const ZOOM_EPS = 0.001;
 
     function init() {
       tabEl = document.getElementById("tab-heatmap");
@@ -7098,6 +7105,7 @@ function extractRlmMetrics(config) {
       emptyNoticeEl = tabEl.querySelector("#heatmapEmptyNotice");
       imageEl = tabEl.querySelector("#heatmapReferenceImage");
       saveBtn = tabEl.querySelector("#heatmapSaveBtn");
+      zoomButtons = Array.from(tabEl.querySelectorAll("[data-heatmap-zoom]"));
       if (imageEl) {
         imageEl.addEventListener("load", handleReferenceImageLoad);
         imageEl.addEventListener("error", () => {
@@ -7116,6 +7124,11 @@ function extractRlmMetrics(config) {
       if (saveBtn) {
         saveBtn.addEventListener("click", handleSave);
       }
+      if (zoomButtons.length) {
+        zoomButtons.forEach((button) => {
+          button.addEventListener("click", () => handleZoomAction(button.dataset.heatmapZoom));
+        });
+      }
       const toolButtons = Array.from(tabEl.querySelectorAll("[data-heatmap-tool]"));
       if (toolButtons.length) {
         toolButtons.forEach((button) => {
@@ -7125,6 +7138,7 @@ function extractRlmMetrics(config) {
         });
         setDrawMode(drawMode);
       }
+      applyZoom();
     }
 
     function activate() {
@@ -7176,10 +7190,70 @@ function extractRlmMetrics(config) {
       }
     }
 
+    function handleZoomAction(action) {
+      if (!action || !jobName || !imageReady) return;
+      if (action === "in") {
+        setZoom(zoomValue + ZOOM_STEP);
+      } else if (action === "out") {
+        setZoom(zoomValue - ZOOM_STEP);
+      } else if (action === "reset") {
+        resetZoom();
+      }
+    }
+
+    function setZoom(value, options = {}) {
+      const force = Boolean(options.force);
+      const clamped = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, value));
+      if (!force && Math.abs(clamped - zoomValue) < ZOOM_EPS) {
+        updateZoomButtons();
+        return;
+      }
+      zoomValue = clamped;
+      applyZoom();
+    }
+
+    function resetZoom() {
+      setZoom(ZOOM_DEFAULT, { force: true });
+    }
+
+    function applyZoom() {
+      if (stageEl) {
+        stageEl.style.transform = `scale(${zoomValue})`;
+        stageEl.dataset.zoomLevel = zoomValue.toFixed(2);
+      }
+      updateZoomButtons();
+    }
+
+    function updateZoomButtons() {
+      if (!zoomButtons.length) return;
+      const interactive = Boolean(jobName && imageReady);
+      zoomButtons.forEach((button) => {
+        const action = button.dataset.heatmapZoom;
+        if (!action) {
+          button.disabled = !interactive;
+          return;
+        }
+        if (!interactive) {
+          button.disabled = true;
+          return;
+        }
+        if (action === "in") {
+          button.disabled = zoomValue >= ZOOM_MAX - ZOOM_EPS;
+        } else if (action === "out") {
+          button.disabled = zoomValue <= ZOOM_MIN + ZOOM_EPS;
+        } else if (action === "reset") {
+          button.disabled = Math.abs(zoomValue - ZOOM_DEFAULT) < ZOOM_EPS;
+        } else {
+          button.disabled = false;
+        }
+      });
+    }
+
     function clearState() {
       regions = [];
       jobName = "";
       imageReady = false;
+      resetZoom();
       cancelPolygonDraft();
       tempRegionEl = null;
       startPoint = null;
@@ -7192,6 +7266,7 @@ function extractRlmMetrics(config) {
       if (overlayLayer) overlayLayer.innerHTML = "";
       if (draftLayer) draftLayer.innerHTML = "";
       updateSaveButtonState();
+      updateZoomButtons();
     }
 
     async function fetchHeatmap(filterState) {
@@ -7211,6 +7286,7 @@ function extractRlmMetrics(config) {
           error && error.message ? error.message : "Failed to load heatmap data. Try another job or refresh.",
           false
         );
+        updateZoomButtons();
       } finally {
         loading = false;
         updateSaveButtonState();
@@ -7218,6 +7294,7 @@ function extractRlmMetrics(config) {
     }
 
     function applyPayload(payload) {
+      resetZoom();
       const reference = payload && payload.reference_image ? payload.reference_image : null;
       if (reference && reference.image_src && imageEl) {
         const src = urlForStatic(reference.image_src);
@@ -7246,6 +7323,7 @@ function extractRlmMetrics(config) {
       regions = Array.isArray(payload?.regions) ? payload.regions.map(normalizeRegion).filter(Boolean) : [];
       renderRegions();
       updateSaveButtonState();
+      updateZoomButtons();
     }
 
     function clamp01(value) {
@@ -7834,6 +7912,7 @@ function extractRlmMetrics(config) {
       if (imageEl) imageEl.classList.remove("hidden");
       setEmptyNotice("", true);
       renderRegions();
+      applyZoom();
     }
 
     function generateRegionId() {
