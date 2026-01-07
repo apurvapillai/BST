@@ -115,9 +115,14 @@ body {
   touch-action: none;
 }
 
-.heatmap-stage--disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
+.heatmap-stage--disabled .heatmap-reference {
+  opacity: 0.45;
+  filter: grayscale(0.7);
+}
+
+.heatmap-stage--disabled .heatmap-regions-layer,
+.heatmap-stage--disabled .heatmap-regions-layer--draft {
+  opacity: 0.4;
 }
 
 .heatmap-stage img {

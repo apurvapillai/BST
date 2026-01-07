@@ -7226,11 +7226,7 @@ function extractRlmMetrics(config) {
             y1: clamp01(region.y1),
           }))
         : [];
-      if (imageReady) {
-        renderRegions();
-      } else if (overlayLayer) {
-        overlayLayer.innerHTML = "";
-      }
+      renderRegions();
       renderRegionList();
       updateSaveButtonState();
     }
@@ -7311,7 +7307,7 @@ function extractRlmMetrics(config) {
     }
 
     function handlePointerDown(event) {
-      if (!imageReady || !jobName) return;
+      if (!jobName) return;
       if (event.button !== 0) return;
       if (event.target.closest("[data-region-id]")) return;
       const point = getRelativePoint(event);
@@ -7391,6 +7387,11 @@ function extractRlmMetrics(config) {
         drawingCancel();
         return;
       }
+      if (isOverlapping(startPoint, endPoint)) {
+        window.alert("The new region overlaps with an existing zone. Please draw a non-overlapping area.");
+        drawingCancel();
+        return;
+      }
       regions.push({
         id: generateRegionId(),
         weight_pct: Math.round(pct),
@@ -7452,6 +7453,21 @@ function extractRlmMetrics(config) {
     function generateRegionId() {
       nextRegionId -= 1;
       return nextRegionId;
+    }
+
+    function isOverlapping(aStart, aEnd) {
+      if (!aStart || !aEnd) return false;
+      const newLeft = Math.min(aStart.x, aEnd.x);
+      const newRight = Math.max(aStart.x, aEnd.x);
+      const newTop = Math.min(aStart.y, aEnd.y);
+      const newBottom = Math.max(aStart.y, aEnd.y);
+      return regions.some((region) => {
+        const left = Math.min(region.x0, region.x1);
+        const right = Math.max(region.x0, region.x1);
+        const top = Math.min(region.y0, region.y1);
+        const bottom = Math.max(region.y0, region.y1);
+        return !(newRight <= left || newLeft >= right || newBottom <= top || newTop >= bottom);
+      });
     }
 
     async function handleSave() {
