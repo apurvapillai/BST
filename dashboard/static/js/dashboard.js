@@ -7074,7 +7074,6 @@ function extractRlmMetrics(config) {
     let draftLayer;
     let emptyNoticeEl;
     let imageEl;
-    let regionListEl;
     let saveBtn;
     let jobName = "";
     let machineId = null;
@@ -7098,7 +7097,6 @@ function extractRlmMetrics(config) {
       draftLayer = tabEl.querySelector("#heatmapDraftLayer");
       emptyNoticeEl = tabEl.querySelector("#heatmapEmptyNotice");
       imageEl = tabEl.querySelector("#heatmapReferenceImage");
-      regionListEl = tabEl.querySelector("#heatmapRegionList");
       saveBtn = tabEl.querySelector("#heatmapSaveBtn");
       if (imageEl) {
         imageEl.addEventListener("load", handleReferenceImageLoad);
@@ -7114,9 +7112,6 @@ function extractRlmMetrics(config) {
       }
       if (overlayLayer) {
         overlayLayer.addEventListener("click", handleOverlayClick);
-      }
-      if (regionListEl) {
-        regionListEl.addEventListener("click", handleRegionListClick);
       }
       if (saveBtn) {
         saveBtn.addEventListener("click", handleSave);
@@ -7196,7 +7191,6 @@ function extractRlmMetrics(config) {
       if (stageEl) stageEl.classList.add("heatmap-stage--disabled");
       if (overlayLayer) overlayLayer.innerHTML = "";
       if (draftLayer) draftLayer.innerHTML = "";
-      renderRegionList();
       updateSaveButtonState();
     }
 
@@ -7217,7 +7211,6 @@ function extractRlmMetrics(config) {
           error && error.message ? error.message : "Failed to load heatmap data. Try another job or refresh.",
           false
         );
-        renderRegionList();
       } finally {
         loading = false;
         updateSaveButtonState();
@@ -7252,7 +7245,6 @@ function extractRlmMetrics(config) {
       }
       regions = Array.isArray(payload?.regions) ? payload.regions.map(normalizeRegion).filter(Boolean) : [];
       renderRegions();
-      renderRegionList();
       updateSaveButtonState();
     }
 
@@ -7546,27 +7538,6 @@ function extractRlmMetrics(config) {
       return { right: "6px", bottom: "6px", transform: "none" };
     }
 
-    function renderRegionList() {
-      if (!regionListEl) return;
-      if (!regions.length) {
-        regionListEl.innerHTML = '<p class="heatmap-placeholder">No regions defined yet.</p>';
-        return;
-      }
-      regionListEl.innerHTML = regions
-        .map(
-          (region, index) => `
-            <div class="heatmap-region-row" data-region-row="${region.id}">
-              <div>
-                <strong>${Utils.formatNumber(region.weight_pct || 0)}%</strong>
-                <span>Zone ${index + 1} · ${region.shape === "polygon" ? "Polygon" : "Rectangle"}</span>
-              </div>
-              <button type="button" data-remove-region="${region.id}">Remove</button>
-            </div>
-          `
-        )
-        .join("");
-    }
-
     function handleOverlayClick(event) {
       const removeBtn = event.target.closest("[data-remove-region]");
       if (removeBtn) {
@@ -7581,13 +7552,6 @@ function extractRlmMetrics(config) {
       }
     }
 
-    function handleRegionListClick(event) {
-      const button = event.target.closest("[data-remove-region]");
-      if (!button) return;
-      const regionId = button.dataset.removeRegion;
-      removeRegion(regionId);
-    }
-
     function promptRegionEdit(regionId) {
       if (!regionId) return;
       const region = regions.find((entry) => String(entry.id) === String(regionId));
@@ -7599,7 +7563,6 @@ function extractRlmMetrics(config) {
       if (!regionId) return;
       regions = regions.filter((region) => String(region.id) !== String(regionId));
       renderRegions();
-      renderRegionList();
       updateSaveButtonState();
     }
 
@@ -7697,7 +7660,6 @@ function extractRlmMetrics(config) {
         onConfirm: (region) => {
           regions.push(region);
           renderRegions();
-          renderRegionList();
           updateSaveButtonState();
         },
       });
@@ -7798,7 +7760,6 @@ function extractRlmMetrics(config) {
         onConfirm: (confirmedRegion) => {
           regions.push(confirmedRegion);
           renderRegions();
-          renderRegionList();
           updateSaveButtonState();
         },
       });
@@ -7946,7 +7907,6 @@ function extractRlmMetrics(config) {
           options.onConfirm(region);
         } else {
           renderRegions();
-          renderRegionList();
           updateSaveButtonState();
         }
       };

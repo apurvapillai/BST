@@ -117,20 +117,23 @@ body {
   color: #fff;
 }
 
-.heatmap-region-pane {
+.heatmap-actions {
   margin-top: 16px;
-  display: grid;
-  grid-template-columns: minmax(240px, 1fr) auto;
-  gap: 16px;
-  align-items: start;
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 16px 16px;
 }
 
-.heatmap-region-list {
-  max-height: 240px;
-  overflow-y: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 10px;
+.heatmap-actions-card {
+  width: 100%;
+  max-width: 420px;
+  background: #fff;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
+  padding: 16px;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .heatmap-canvas {
@@ -304,46 +307,6 @@ body {
 
 .heatmap-empty.hidden {
   display: none;
-}
-
-.heatmap-region-row {
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 10px;
-  padding: 10px 12px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-}
-
-.heatmap-region-row strong {
-  font-size: 15px;
-  color: #0f172a;
-}
-
-.heatmap-region-row span {
-  font-size: 13px;
-  color: #475569;
-}
-
-.heatmap-region-row button {
-  border: none;
-  background: rgba(248, 113, 113, 0.15);
-  color: #b91c1c;
-  border-radius: 8px;
-  padding: 4px 8px;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.heatmap-region-row button:hover {
-  background: rgba(248, 113, 113, 0.3);
-}
-
-.heatmap-placeholder {
-  margin: 0;
-  font-size: 13px;
-  color: #64748b;
 }
 
 .heatmap-save-btn {
