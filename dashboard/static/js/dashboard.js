@@ -7458,19 +7458,20 @@ function extractRlmMetrics(config) {
       const width = Math.abs(region.x1 - region.x0) * 100;
       const height = Math.abs(region.y1 - region.y0) * 100;
       if (width <= 0 || height <= 0) return null;
-      const rect = document.createElement("div");
-      rect.className = `heatmap-region heatmap-region--bucket-${bucket}`;
-      rect.dataset.regionId = region.id;
-      rect.dataset.regionEditable = "true";
-      rect.style.left = `${left}%`;
-      rect.style.top = `${top}%`;
-      rect.style.width = `${width}%`;
-      rect.style.height = `${height}%`;
-      rect.innerHTML = `
-        <span class="heatmap-region__label">${Utils.formatNumber(region.weight_pct || 0)}%</span>
-        <button type="button" class="heatmap-region__remove" data-remove-region="${region.id}" aria-label="Remove region">&times;</button>
-      `;
-      return rect;
+      const wrapper = document.createElement("div");
+      wrapper.className = "heatmap-region";
+      wrapper.dataset.regionId = region.id;
+      wrapper.dataset.regionEditable = "true";
+      wrapper.style.left = `${left}%`;
+      wrapper.style.top = `${top}%`;
+      wrapper.style.width = `${width}%`;
+      wrapper.style.height = `${height}%`;
+
+      const shape = document.createElement("div");
+      shape.className = `heatmap-region__shape heatmap-region--bucket-${bucket}`;
+      wrapper.appendChild(shape);
+      wrapper.appendChild(buildRegionContent(region, width, height));
+      return wrapper;
     }
 
     function createPolygonRegionElement(region) {
@@ -7483,7 +7484,7 @@ function extractRlmMetrics(config) {
       const width = Math.max(0.0001, maxX - minX) * 100;
       const height = Math.max(0.0001, maxY - minY) * 100;
       const container = document.createElement("div");
-      container.className = `heatmap-region heatmap-region--polygon heatmap-region--bucket-${bucket}`;
+      container.className = "heatmap-region heatmap-region--polygon";
       container.dataset.regionId = region.id;
       container.dataset.regionEditable = "true";
       container.style.left = `${minX * 100}%`;
@@ -7497,14 +7498,52 @@ function extractRlmMetrics(config) {
           return `${x}% ${y}%`;
         })
         .join(", ");
+      const shape = document.createElement("div");
+      shape.className = `heatmap-region__shape heatmap-region--bucket-${bucket}`;
       const clipPath = `polygon(${clip})`;
-      container.style.clipPath = clipPath;
-      container.style.webkitClipPath = clipPath;
-      container.innerHTML = `
-        <span class="heatmap-region__label">${Utils.formatNumber(region.weight_pct || 0)}%</span>
-        <button type="button" class="heatmap-region__remove" data-remove-region="${region.id}" aria-label="Remove region">&times;</button>
-      `;
+      shape.style.clipPath = clipPath;
+      shape.style.webkitClipPath = clipPath;
+      container.appendChild(shape);
+      container.appendChild(buildRegionContent(region, width, height));
       return container;
+    }
+
+    function buildRegionContent(region, percentWidth, percentHeight) {
+      const content = document.createElement("div");
+      content.className = "heatmap-region__content";
+      const position = computeLabelPosition(percentWidth, percentHeight);
+      Object.entries(position).forEach(([key, value]) => {
+        content.style[key] = value;
+      });
+      const label = document.createElement("span");
+      label.className = "heatmap-region__label";
+      label.textContent = `${Utils.formatNumber(region.weight_pct || 0)}%`;
+      content.appendChild(label);
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "heatmap-region__remove";
+      removeBtn.dataset.removeRegion = region.id;
+      removeBtn.setAttribute("aria-label", "Remove region");
+      removeBtn.innerHTML = "&times;";
+      content.appendChild(removeBtn);
+      return content;
+    }
+
+    function computeLabelPosition(percentWidth, percentHeight) {
+      const minSize = Math.min(percentWidth, percentHeight);
+      if (minSize >= 30) {
+        return { left: "50%", top: "50%", transform: "translate(-50%, -50%)" };
+      }
+      if (minSize >= 20) {
+        return { right: "6px", top: "6px", transform: "none" };
+      }
+      if (minSize >= 12) {
+        return { left: "6px", top: "6px", transform: "none" };
+      }
+      if (minSize >= 8) {
+        return { left: "6px", bottom: "6px", transform: "none" };
+      }
+      return { right: "6px", bottom: "6px", transform: "none" };
     }
 
     function renderRegionList() {
