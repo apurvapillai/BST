@@ -212,8 +212,9 @@ body {
   position: absolute;
   inset: 0;
   border-radius: 0;
-  border: none;
   pointer-events: none;
+  border: 2px solid transparent;
+  box-sizing: border-box;
 }
 
 .heatmap-region__content {
@@ -269,24 +270,69 @@ body {
 }
 
 .heatmap-region__shape.heatmap-region--bucket-critical {
-  border: none;
   background: rgba(248, 113, 113, 0.28);
+  border-color: #f87171;
 }
 
 .heatmap-region__shape.heatmap-region--bucket-high {
   background: rgba(251, 146, 60, 0.28);
+  border-color: #fb923c;
 }
 
 .heatmap-region__shape.heatmap-region--bucket-elevated {
   background: rgba(250, 204, 21, 0.28);
+  border-color: #facc15;
 }
 
 .heatmap-region__shape.heatmap-region--bucket-moderate {
   background: rgba(134, 239, 172, 0.3);
+  border-color: #4ade80;
 }
 
 .heatmap-region__shape.heatmap-region--bucket-low {
   background: rgba(147, 197, 253, 0.3);
+  border-color: #60a5fa;
+}
+
+.heatmap-region__polygon {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.heatmap-region__polygon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.heatmap-region__polygon polygon {
+  stroke-width: 1.25px;
+  stroke-linejoin: round;
+}
+
+.heatmap-region__polygon polygon.heatmap-region--bucket-critical {
+  fill: rgba(248, 113, 113, 0.28);
+  stroke: #f87171;
+}
+
+.heatmap-region__polygon polygon.heatmap-region--bucket-high {
+  fill: rgba(251, 146, 60, 0.28);
+  stroke: #fb923c;
+}
+
+.heatmap-region__polygon polygon.heatmap-region--bucket-elevated {
+  fill: rgba(250, 204, 21, 0.28);
+  stroke: #facc15;
+}
+
+.heatmap-region__polygon polygon.heatmap-region--bucket-moderate {
+  fill: rgba(134, 239, 172, 0.3);
+  stroke: #4ade80;
+}
+
+.heatmap-region__polygon polygon.heatmap-region--bucket-low {
+  fill: rgba(147, 197, 253, 0.3);
+  stroke: #60a5fa;
 }
 
 .heatmap-empty {

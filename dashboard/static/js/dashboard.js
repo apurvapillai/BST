@@ -7483,19 +7483,23 @@ function extractRlmMetrics(config) {
       container.style.top = `${minY * 100}%`;
       container.style.width = `${width}%`;
       container.style.height = `${height}%`;
-      const clip = region.points
-        .map((pt) => {
-          const x = maxX - minX === 0 ? 0 : ((pt.x - minX) / (maxX - minX)) * 100;
-          const y = maxY - minY === 0 ? 0 : ((pt.y - minY) / (maxY - minY)) * 100;
-          return `${x}% ${y}%`;
-        })
-        .join(", ");
-      const shape = document.createElement("div");
-      shape.className = `heatmap-region__shape heatmap-region--bucket-${bucket}`;
-      const clipPath = `polygon(${clip})`;
-      shape.style.clipPath = clipPath;
-      shape.style.webkitClipPath = clipPath;
-      container.appendChild(shape);
+      const normalizedPoints = region.points.map((pt) => {
+        const x = maxX - minX === 0 ? 0 : ((pt.x - minX) / (maxX - minX)) * 100;
+        const y = maxY - minY === 0 ? 0 : ((pt.y - minY) / (maxY - minY)) * 100;
+        return { x, y };
+      });
+      const polygonPoints = normalizedPoints.map((pt) => `${pt.x.toFixed(2)},${pt.y.toFixed(2)}`).join(" ");
+      const shapeWrapper = document.createElement("div");
+      shapeWrapper.className = "heatmap-region__polygon";
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", "0 0 100 100");
+      svg.setAttribute("preserveAspectRatio", "none");
+      const polygon = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+      polygon.setAttribute("points", polygonPoints);
+      polygon.classList.add(`heatmap-region--bucket-${bucket}`);
+      svg.appendChild(polygon);
+      shapeWrapper.appendChild(svg);
+      container.appendChild(shapeWrapper);
       container.appendChild(buildRegionContent(region, width, height));
       return container;
     }
