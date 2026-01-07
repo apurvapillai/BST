@@ -243,6 +243,7 @@ class HeatmapRegion(Base):
     y0 = Column(DECIMAL(10, 6), nullable=False)
     x1 = Column(DECIMAL(10, 6), nullable=False)
     y1 = Column(DECIMAL(10, 6), nullable=False)
+    coords_json = Column(JSON)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

@@ -697,6 +697,30 @@ def _latest_reference_for_job(session: Session, job_name: str, machine_id: Optio
     }
 
 
+def _serialize_heatmap_region(region: HeatmapRegion) -> Dict[str, object]:
+    coords = region.coords_json if isinstance(region.coords_json, list) else None
+    entry: Dict[str, object] = {
+        "region_id": region.region_id,
+        "job_name": region.job_name,
+        "machine_id": region.machine_id,
+        "weight_pct": region.weight_pct,
+        "x0": _to_float(region.x0),
+        "y0": _to_float(region.y0),
+        "x1": _to_float(region.x1),
+        "y1": _to_float(region.y1),
+    }
+    if coords:
+        entry["shape"] = "polygon"
+        entry["points"] = [
+            {"x": _to_float(point.get("x")), "y": _to_float(point.get("y"))}
+            for point in coords
+            if isinstance(point, dict) and point.get("x") is not None and point.get("y") is not None
+        ]
+    else:
+        entry["shape"] = "rectangle"
+    return entry
+
+
 def _sensitivity_tuple_has_values(values: Optional[Tuple[Optional[float], Optional[float]]]) -> bool:
     if not values:
         return False
@@ -1209,19 +1233,7 @@ def api_heatmap():
                 )
             regions = region_query.order_by(HeatmapRegion.region_id.asc()).all()
             data = {
-                "regions": [
-                    {
-                        "region_id": region.region_id,
-                        "job_name": region.job_name,
-                        "machine_id": region.machine_id,
-                        "weight_pct": region.weight_pct,
-                        "x0": _to_float(region.x0),
-                        "y0": _to_float(region.y0),
-                        "x1": _to_float(region.x1),
-                        "y1": _to_float(region.y1),
-                    }
-                    for region in regions
-                ],
+                "regions": [_serialize_heatmap_region(region) for region in regions],
                 "reference_image": _latest_reference_for_job(session, job_name, machine_id),
             }
             return jsonify(data)
@@ -1249,29 +1261,56 @@ def api_heatmap():
             return max(0.0, min(1.0, number))
 
         for entry in regions_payload:
-            x0 = _clamp01(entry.get("x0"))
-            y0 = _clamp01(entry.get("y0"))
-            x1 = _clamp01(entry.get("x1"))
-            y1 = _clamp01(entry.get("y1"))
+            shape = str(entry.get("shape") or "rectangle").lower()
             weight = entry.get("weight_pct")
             try:
                 weight_value = int(weight)
             except (TypeError, ValueError):
                 weight_value = None
-            if (
-                x0 is None
-                or y0 is None
-                or x1 is None
-                or y1 is None
-                or weight_value is None
-                or weight_value < 0
-                or weight_value > 100
-            ):
+            if weight_value is None or weight_value < 0 or weight_value > 100:
+                continue
+            if shape == "polygon":
+                points_raw = entry.get("points") or []
+                normalized_points: List[Dict[str, float]] = []
+                for point in points_raw:
+                    if not isinstance(point, dict):
+                        continue
+                    x = _clamp01(point.get("x"))
+                    y = _clamp01(point.get("y"))
+                    if x is None or y is None:
+                        continue
+                    normalized_points.append({"x": x, "y": y})
+                if len(normalized_points) < 3:
+                    continue
+                min_x = min(pt["x"] for pt in normalized_points)
+                max_x = max(pt["x"] for pt in normalized_points)
+                min_y = min(pt["y"] for pt in normalized_points)
+                max_y = max(pt["y"] for pt in normalized_points)
+                if (max_x - min_x) < 0.005 or (max_y - min_y) < 0.005:
+                    continue
+                sanitized_regions.append(
+                    {
+                        "shape": "polygon",
+                        "x0": min_x,
+                        "y0": min_y,
+                        "x1": max_x,
+                        "y1": max_y,
+                        "weight_pct": weight_value,
+                        "points": normalized_points,
+                    }
+                )
+                continue
+            x0 = _clamp01(entry.get("x0"))
+            y0 = _clamp01(entry.get("y0"))
+            x1 = _clamp01(entry.get("x1"))
+            y1 = _clamp01(entry.get("y1"))
+            if x0 is None or y0 is None or x1 is None or y1 is None:
                 continue
             if abs(x1 - x0) < 0.005 or abs(y1 - y0) < 0.005:
                 continue
             sanitized_regions.append(
                 {
+                    "shape": "rectangle",
                     "x0": min(x0, x1),
                     "y0": min(y0, y1),
                     "x1": max(x0, x1),
@@ -1298,6 +1337,7 @@ def api_heatmap():
                     y0=entry["y0"],
                     x1=entry["x1"],
                     y1=entry["y1"],
+                    coords_json=entry.get("points") if entry["shape"] == "polygon" else None,
                 )
             )
         session.commit()

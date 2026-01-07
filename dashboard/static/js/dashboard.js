@@ -7086,6 +7086,9 @@ function extractRlmMetrics(config) {
     let startPoint = null;
     let pointerId = null;
     let nextRegionId = -1;
+    let polygonDraft = null;
+    let drawMode = "rectangle";
+    const POLYGON_CLOSE_THRESHOLD = 0.02;
 
     function init() {
       tabEl = document.getElementById("tab-heatmap");
@@ -7117,6 +7120,15 @@ function extractRlmMetrics(config) {
       }
       if (saveBtn) {
         saveBtn.addEventListener("click", handleSave);
+      }
+      const toolButtons = Array.from(tabEl.querySelectorAll("[data-heatmap-tool]"));
+      if (toolButtons.length) {
+        toolButtons.forEach((button) => {
+          button.addEventListener("click", () => {
+            setDrawMode(button.dataset.heatmapTool || "rectangle");
+          });
+        });
+        setDrawMode(drawMode);
       }
     }
 
@@ -7156,10 +7168,27 @@ function extractRlmMetrics(config) {
       fetchHeatmap(filterState);
     }
 
+    function setDrawMode(mode) {
+      const normalized = mode === "polygon" ? "polygon" : "rectangle";
+      drawMode = normalized;
+      if (tabEl) {
+        tabEl
+          .querySelectorAll("[data-heatmap-tool]")
+          .forEach((button) => button.classList.toggle("heatmap-tool-btn-active", button.dataset.heatmapTool === normalized));
+      }
+      if (normalized !== "polygon") {
+        cancelPolygonDraft();
+      }
+    }
+
     function clearState() {
       regions = [];
       jobName = "";
       imageReady = false;
+      cancelPolygonDraft();
+      tempRegionEl = null;
+      startPoint = null;
+      pointerId = null;
       if (imageEl) {
         imageEl.classList.add("hidden");
         imageEl.removeAttribute("src");
@@ -7173,6 +7202,8 @@ function extractRlmMetrics(config) {
 
     async function fetchHeatmap(filterState) {
       if (!tabEl) return;
+      cancelPolygonDraft();
+      drawingCancel();
       loading = true;
       updateSaveButtonState();
       setEmptyNotice("Loading heatmap…", true);
@@ -7219,16 +7250,7 @@ function extractRlmMetrics(config) {
         imageReady = false;
         setEmptyNotice("No reference image is available for this job.", false);
       }
-      regions = Array.isArray(payload?.regions)
-        ? payload.regions.map((region) => ({
-            id: region.region_id || generateRegionId(),
-            weight_pct: Number(region.weight_pct) || 0,
-            x0: clamp01(region.x0),
-            y0: clamp01(region.y0),
-            x1: clamp01(region.x1),
-            y1: clamp01(region.y1),
-          }))
-        : [];
+      regions = Array.isArray(payload?.regions) ? payload.regions.map(normalizeRegion).filter(Boolean) : [];
       renderRegions();
       renderRegionList();
       updateSaveButtonState();
@@ -7240,31 +7262,249 @@ function extractRlmMetrics(config) {
       return Math.min(1, Math.max(0, num));
     }
 
+    function normalizeRegion(region) {
+      const shape = (region.shape || "rectangle").toLowerCase();
+      const weight = Number(region.weight_pct) || 0;
+      if (shape === "polygon" && Array.isArray(region.points)) {
+        const points = region.points
+          .map((pt) => ({
+            x: clamp01(pt.x),
+            y: clamp01(pt.y),
+          }))
+          .filter((pt) => Number.isFinite(pt.x) && Number.isFinite(pt.y));
+        if (points.length < 3) return null;
+        const bounds = boundingBox(points);
+        if (!bounds) return null;
+        return {
+          id: region.region_id || generateRegionId(),
+          shape: "polygon",
+          weight_pct: weight,
+          points,
+          x0: bounds.minX,
+          y0: bounds.minY,
+          x1: bounds.maxX,
+          y1: bounds.maxY,
+        };
+      }
+      const x0 = clamp01(region.x0);
+      const y0 = clamp01(region.y0);
+      const x1 = clamp01(region.x1);
+      const y1 = clamp01(region.y1);
+      if (Math.abs(x1 - x0) < 0.00001 || Math.abs(y1 - y0) < 0.00001) {
+        return null;
+      }
+      return {
+        id: region.region_id || generateRegionId(),
+        shape: "rectangle",
+        weight_pct: weight,
+        x0,
+        y0,
+        x1,
+        y1,
+      };
+    }
+
+    function boundingBox(points) {
+      if (!Array.isArray(points) || !points.length) return null;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      points.forEach((pt) => {
+        minX = Math.min(minX, pt.x);
+        minY = Math.min(minY, pt.y);
+        maxX = Math.max(maxX, pt.x);
+        maxY = Math.max(maxY, pt.y);
+      });
+      if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
+        return null;
+      }
+      return { minX, minY, maxX, maxY };
+    }
+
+    function getPolygonPoints(region) {
+      if (!region) return [];
+      if (region.shape === "polygon" && Array.isArray(region.points) && region.points.length >= 3) {
+        return region.points
+          .map((pt) => ({
+            x: clamp01(pt.x),
+            y: clamp01(pt.y),
+          }))
+          .filter((pt) => Number.isFinite(pt.x) && Number.isFinite(pt.y));
+      }
+      const x0 = clamp01(region.x0);
+      const y0 = clamp01(region.y0);
+      const x1 = clamp01(region.x1);
+      const y1 = clamp01(region.y1);
+      if (![x0, y0, x1, y1].every((val) => Number.isFinite(val))) {
+        return [];
+      }
+      const left = Math.min(x0, x1);
+      const right = Math.max(x0, x1);
+      const top = Math.min(y0, y1);
+      const bottom = Math.max(y0, y1);
+      return [
+        { x: left, y: top },
+        { x: right, y: top },
+        { x: right, y: bottom },
+        { x: left, y: bottom },
+      ];
+    }
+
+    function boxesOverlap(a, b) {
+      if (!a || !b) return false;
+      return !(a.maxX <= b.minX || a.minX >= b.maxX || a.maxY <= b.minY || a.minY >= b.maxY);
+    }
+
+    function polygonsOverlap(polyA, polyB) {
+      for (let i = 0; i < polyA.length; i += 1) {
+        const a1 = polyA[i];
+        const a2 = polyA[(i + 1) % polyA.length];
+        for (let j = 0; j < polyB.length; j += 1) {
+          const b1 = polyB[j];
+          const b2 = polyB[(j + 1) % polyB.length];
+          if (segmentsIntersect(a1, a2, b1, b2)) {
+            return true;
+          }
+        }
+      }
+      if (pointInPolygon(polyA[0], polyB)) return true;
+      if (pointInPolygon(polyB[0], polyA)) return true;
+      return false;
+    }
+
+    function segmentsIntersect(p1, p2, p3, p4) {
+      const o1 = orientation(p1, p2, p3);
+      const o2 = orientation(p1, p2, p4);
+      const o3 = orientation(p3, p4, p1);
+      const o4 = orientation(p3, p4, p2);
+      if (o1 !== o2 && o3 !== o4) return true;
+      if (o1 === 0 && onSegment(p1, p3, p2)) return true;
+      if (o2 === 0 && onSegment(p1, p4, p2)) return true;
+      if (o3 === 0 && onSegment(p3, p1, p4)) return true;
+      if (o4 === 0 && onSegment(p3, p2, p4)) return true;
+      return false;
+    }
+
+    function orientation(p, q, r) {
+      const val = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
+      if (Math.abs(val) < 1e-9) return 0;
+      return val > 0 ? 1 : 2;
+    }
+
+    function onSegment(p, q, r) {
+      return (
+        q.x <= Math.max(p.x, r.x) + 1e-9 &&
+        q.x + 1e-9 >= Math.min(p.x, r.x) &&
+        q.y <= Math.max(p.y, r.y) + 1e-9 &&
+        q.y + 1e-9 >= Math.min(p.y, r.y)
+      );
+    }
+
+    function pointInPolygon(point, polygon) {
+      let inside = false;
+      for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
+        const xi = polygon[i].x;
+        const yi = polygon[i].y;
+        const xj = polygon[j].x;
+        const yj = polygon[j].y;
+        const intersect =
+          yi > point.y !== yj > point.y && point.x < ((xj - xi) * (point.y - yi)) / (yj - yi + 1e-9) + xi;
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    function serializeRegion(region) {
+      if (region.shape === "polygon" && Array.isArray(region.points)) {
+        return {
+          shape: "polygon",
+          weight_pct: region.weight_pct,
+          points: region.points.map((pt) => ({
+            x: clamp01(pt.x),
+            y: clamp01(pt.y),
+          })),
+        };
+      }
+      return {
+        shape: "rectangle",
+        weight_pct: region.weight_pct,
+        x0: clamp01(region.x0),
+        y0: clamp01(region.y0),
+        x1: clamp01(region.x1),
+        y1: clamp01(region.y1),
+      };
+    }
+
     function renderRegions() {
       if (!overlayLayer) return;
       overlayLayer.innerHTML = "";
       regions.forEach((region) => {
-        const rect = document.createElement("div");
-        rect.className = `heatmap-region heatmap-region--bucket-${bucketForWeight(region.weight_pct)}`;
-        rect.dataset.regionId = region.id;
-        rect.dataset.regionEditable = "true";
-        const left = Math.min(region.x0, region.x1) * 100;
-        const top = Math.min(region.y0, region.y1) * 100;
-        const width = Math.abs(region.x1 - region.x0) * 100;
-        const height = Math.abs(region.y1 - region.y0) * 100;
-        rect.style.left = `${left}%`;
-        rect.style.top = `${top}%`;
-        rect.style.width = `${width}%`;
-        rect.style.height = `${height}%`;
-        rect.innerHTML = `
-          <span class="heatmap-region__label">${Utils.formatNumber(region.weight_pct || 0)}%</span>
-          <button type="button" class="heatmap-region__remove" data-remove-region="${region.id}" aria-label="Remove region">&times;</button>
-        `;
-        overlayLayer.appendChild(rect);
+        const element =
+          region.shape === "polygon" ? createPolygonRegionElement(region) : createRectangleRegionElement(region);
+        if (element) {
+          overlayLayer.appendChild(element);
+        }
       });
       if (draftLayer) {
         draftLayer.innerHTML = "";
       }
+    }
+
+    function createRectangleRegionElement(region) {
+      const bucket = bucketForWeight(region.weight_pct);
+      const left = Math.min(region.x0, region.x1) * 100;
+      const top = Math.min(region.y0, region.y1) * 100;
+      const width = Math.abs(region.x1 - region.x0) * 100;
+      const height = Math.abs(region.y1 - region.y0) * 100;
+      if (width <= 0 || height <= 0) return null;
+      const rect = document.createElement("div");
+      rect.className = `heatmap-region heatmap-region--bucket-${bucket}`;
+      rect.dataset.regionId = region.id;
+      rect.dataset.regionEditable = "true";
+      rect.style.left = `${left}%`;
+      rect.style.top = `${top}%`;
+      rect.style.width = `${width}%`;
+      rect.style.height = `${height}%`;
+      rect.innerHTML = `
+        <span class="heatmap-region__label">${Utils.formatNumber(region.weight_pct || 0)}%</span>
+        <button type="button" class="heatmap-region__remove" data-remove-region="${region.id}" aria-label="Remove region">&times;</button>
+      `;
+      return rect;
+    }
+
+    function createPolygonRegionElement(region) {
+      if (!Array.isArray(region.points) || region.points.length < 3) return null;
+      const bucket = bucketForWeight(region.weight_pct);
+      const minX = Math.min(region.x0, region.x1);
+      const maxX = Math.max(region.x0, region.x1);
+      const minY = Math.min(region.y0, region.y1);
+      const maxY = Math.max(region.y0, region.y1);
+      const width = Math.max(0.0001, maxX - minX) * 100;
+      const height = Math.max(0.0001, maxY - minY) * 100;
+      const container = document.createElement("div");
+      container.className = `heatmap-region heatmap-region--polygon heatmap-region--bucket-${bucket}`;
+      container.dataset.regionId = region.id;
+      container.dataset.regionEditable = "true";
+      container.style.left = `${minX * 100}%`;
+      container.style.top = `${minY * 100}%`;
+      container.style.width = `${width}%`;
+      container.style.height = `${height}%`;
+      const clip = region.points
+        .map((pt) => {
+          const x = maxX - minX === 0 ? 0 : ((pt.x - minX) / (maxX - minX)) * 100;
+          const y = maxY - minY === 0 ? 0 : ((pt.y - minY) / (maxY - minY)) * 100;
+          return `${x}% ${y}%`;
+        })
+        .join(", ");
+      const clipPath = `polygon(${clip})`;
+      container.style.clipPath = clipPath;
+      container.style.webkitClipPath = clipPath;
+      container.innerHTML = `
+        <span class="heatmap-region__label">${Utils.formatNumber(region.weight_pct || 0)}%</span>
+        <button type="button" class="heatmap-region__remove" data-remove-region="${region.id}" aria-label="Remove region">&times;</button>
+      `;
+      return container;
     }
 
     function renderRegionList() {
@@ -7279,7 +7519,7 @@ function extractRlmMetrics(config) {
             <div class="heatmap-region-row" data-region-row="${region.id}">
               <div>
                 <strong>${Utils.formatNumber(region.weight_pct || 0)}%</strong>
-                <span>Zone ${index + 1}</span>
+                <span>Zone ${index + 1} · ${region.shape === "polygon" ? "Polygon" : "Rectangle"}</span>
               </div>
               <button type="button" data-remove-region="${region.id}">Remove</button>
             </div>
@@ -7326,6 +7566,10 @@ function extractRlmMetrics(config) {
 
     function handlePointerDown(event) {
       if (!jobName) return;
+      if (drawMode === "polygon") {
+        handlePolygonClick(event);
+        return;
+      }
       if (event.button !== 0) return;
       if (event.target.closest("[data-region-id]")) return;
       const point = getRelativePoint(event);
@@ -7396,6 +7640,7 @@ function extractRlmMetrics(config) {
       }
       const draftRegion = {
         id: generateRegionId(),
+        shape: "rectangle",
         weight_pct: 50,
         x0: clamp01(startPoint.x),
         y0: clamp01(startPoint.y),
@@ -7417,6 +7662,130 @@ function extractRlmMetrics(config) {
           updateSaveButtonState();
         },
       });
+    }
+
+    function handlePolygonClick(event) {
+      if (event.button !== 0) return;
+      if (event.target.closest("[data-region-id]")) return;
+      const point = getRelativePoint(event);
+      if (!point) return;
+      if (!polygonDraft) {
+        startPolygonDraft(point);
+        return;
+      }
+      if (isCloseToFirstPoint(point) && polygonDraft.points.length >= 3) {
+        finalizePolygonDraft();
+        return;
+      }
+      polygonDraft.points.push(point);
+      updatePolygonDraftElement();
+    }
+
+    function startPolygonDraft(point) {
+      polygonDraft = {
+        points: [point],
+        previewPoint: null,
+        element: createPolygonDraftElement(),
+        polyline: null,
+      };
+      if (polygonDraft.element) {
+        polygonDraft.polyline = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+        polygonDraft.element.appendChild(polygonDraft.polyline);
+      }
+      if (draftLayer) {
+        draftLayer.innerHTML = "";
+        if (polygonDraft.element) {
+          draftLayer.appendChild(polygonDraft.element);
+        }
+      }
+      updatePolygonDraftElement();
+      if (stageEl) {
+        stageEl.addEventListener("pointermove", handlePolygonPointerMove);
+      }
+      document.addEventListener("keydown", handlePolygonKeyDown);
+    }
+
+    function handlePolygonPointerMove(event) {
+      if (!polygonDraft) return;
+      polygonDraft.previewPoint = getRelativePoint(event);
+      updatePolygonDraftElement();
+    }
+
+    function handlePolygonKeyDown(event) {
+      if (event.key === "Escape") {
+        cancelPolygonDraft();
+      }
+    }
+
+    function updatePolygonDraftElement() {
+      if (!polygonDraft || !polygonDraft.polyline) return;
+      const points = [...polygonDraft.points];
+      if (polygonDraft.previewPoint) {
+        points.push(polygonDraft.previewPoint);
+      }
+      const attr = points.map((pt) => `${(pt.x * 100).toFixed(2)} ${(pt.y * 100).toFixed(2)}`).join(" ");
+      polygonDraft.polyline.setAttribute("points", attr);
+    }
+
+    function isCloseToFirstPoint(point) {
+      if (!polygonDraft || !polygonDraft.points.length) return false;
+      const first = polygonDraft.points[0];
+      const distance = Math.hypot(point.x - first.x, point.y - first.y);
+      return distance <= POLYGON_CLOSE_THRESHOLD;
+    }
+
+    function finalizePolygonDraft() {
+      if (!polygonDraft || polygonDraft.points.length < 3) return;
+      const points = polygonDraft.points.slice();
+      cancelPolygonDraft(true);
+      const bounds = boundingBox(points);
+      if (!bounds) return;
+      const region = {
+        id: generateRegionId(),
+        shape: "polygon",
+        weight_pct: 50,
+        points,
+        x0: bounds.minX,
+        y0: bounds.minY,
+        x1: bounds.maxX,
+        y1: bounds.maxY,
+      };
+      if (isRegionOverlapping(region)) {
+        showToast("The new region overlaps with an existing zone. Please draw a non-overlapping area.", "error");
+        return;
+      }
+      openRegionModal(region, {
+        mode: "create",
+        onConfirm: (confirmedRegion) => {
+          regions.push(confirmedRegion);
+          renderRegions();
+          renderRegionList();
+          updateSaveButtonState();
+        },
+      });
+    }
+
+    function cancelPolygonDraft(finalizing = false) {
+      if (!polygonDraft) return;
+      if (polygonDraft.element && polygonDraft.element.parentElement) {
+        polygonDraft.element.remove();
+      }
+      polygonDraft = null;
+      if (stageEl) {
+        stageEl.removeEventListener("pointermove", handlePolygonPointerMove);
+      }
+      document.removeEventListener("keydown", handlePolygonKeyDown);
+      if (!finalizing && draftLayer) {
+        draftLayer.innerHTML = "";
+      }
+    }
+
+    function createPolygonDraftElement() {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", "0 0 100 100");
+      svg.setAttribute("preserveAspectRatio", "none");
+      svg.classList.add("heatmap-polygon-draft");
+      return svg;
     }
 
     function updateDraftRegion(x0, y0, x1, y1) {
@@ -7470,17 +7839,18 @@ function extractRlmMetrics(config) {
 
     function isRegionOverlapping(candidate) {
       if (!candidate) return false;
-      const newLeft = Math.min(candidate.x0, candidate.x1);
-      const newRight = Math.max(candidate.x0, candidate.x1);
-      const newTop = Math.min(candidate.y0, candidate.y1);
-      const newBottom = Math.max(candidate.y0, candidate.y1);
+      const candidatePoints = getPolygonPoints(candidate);
+      if (!candidatePoints.length) return false;
+      const candidateBox = boundingBox(candidatePoints);
+      if (!candidateBox) return false;
       return regions.some((region) => {
         if (String(region.id) === String(candidate.id)) return false;
-        const left = Math.min(region.x0, region.x1);
-        const right = Math.max(region.x0, region.x1);
-        const top = Math.min(region.y0, region.y1);
-        const bottom = Math.max(region.y0, region.y1);
-        return !(newRight <= left || newLeft >= right || newBottom <= top || newTop >= bottom);
+        const regionPoints = getPolygonPoints(region);
+        if (!regionPoints.length) return false;
+        const regionBox = boundingBox(regionPoints);
+        if (!regionBox) return false;
+        if (!boxesOverlap(candidateBox, regionBox)) return false;
+        return polygonsOverlap(candidatePoints, regionPoints);
       });
     }
 
@@ -7495,13 +7865,7 @@ function extractRlmMetrics(config) {
         await Api.post("heatmap", {
           job_name: jobName,
           machine_id: machineId,
-          regions: regions.map((region) => ({
-            weight_pct: region.weight_pct,
-            x0: region.x0,
-            y0: region.y0,
-            x1: region.x1,
-            y1: region.y1,
-          })),
+          regions: regions.map(serializeRegion),
         });
         showToast("Heatmap saved.", "success");
         fetchHeatmap(Filters.getState ? Filters.getState() : {});
@@ -7528,6 +7892,9 @@ function extractRlmMetrics(config) {
       input.value = Number(region.weight_pct) || 0;
       input.focus();
       input.select();
+      setTimeout(() => {
+        input.select();
+      }, 0);
       const performSave = () => {
         const pct = Number(input.value);
         if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
@@ -7535,7 +7902,7 @@ function extractRlmMetrics(config) {
           return;
         }
         region.weight_pct = Math.round(pct);
-        cleanup();
+        cleanup(false);
         if (typeof options.onConfirm === "function") {
           options.onConfirm(region);
         } else {
@@ -7544,12 +7911,14 @@ function extractRlmMetrics(config) {
           updateSaveButtonState();
         }
       };
-      const cleanup = () => {
+      const cleanup = (triggerCancelOrEvent = true) => {
+        const triggerCancel =
+          typeof triggerCancelOrEvent === "boolean" ? triggerCancelOrEvent : true;
         modal.classList.add("hidden");
         saveButton.removeEventListener("click", performSave);
         cancelButtons.forEach((btn) => btn.removeEventListener("click", cleanup));
         modal.removeEventListener("keydown", handleKeyPress);
-        if (typeof options.onCancel === "function") {
+        if (triggerCancel && typeof options.onCancel === "function") {
           options.onCancel();
         }
       };
