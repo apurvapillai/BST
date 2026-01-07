@@ -136,7 +136,6 @@ body {
 .heatmap-canvas {
   position: relative;
   background: #0f172a;
-  border-radius: 14px;
   border: 1px solid rgba(15, 23, 42, 0.08);
   box-shadow: 0 6px 24px rgba(15, 23, 42, 0.08);
   padding: 0;
@@ -163,6 +162,7 @@ body {
   width: 100%;
   height: auto;
   display: block;
+  border-radius: 0;
 }
 
 .heatmap-reference.hidden {
