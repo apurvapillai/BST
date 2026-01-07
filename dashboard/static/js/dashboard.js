@@ -7182,7 +7182,10 @@ function extractRlmMetrics(config) {
       } catch (error) {
         if (overlayLayer) overlayLayer.innerHTML = "";
         regions = [];
-        setEmptyNotice(error && error.message ? error.message : "Failed to load heatmap data.", false);
+        setEmptyNotice(
+          error && error.message ? error.message : "Failed to load heatmap data. Try another job or refresh.",
+          false
+        );
         renderRegionList();
       } finally {
         loading = false;
@@ -7244,6 +7247,7 @@ function extractRlmMetrics(config) {
         const rect = document.createElement("div");
         rect.className = `heatmap-region heatmap-region--bucket-${bucketForWeight(region.weight_pct)}`;
         rect.dataset.regionId = region.id;
+        rect.dataset.regionEditable = "true";
         const left = Math.min(region.x0, region.x1) * 100;
         const top = Math.min(region.y0, region.y1) * 100;
         const width = Math.abs(region.x1 - region.x0) * 100;
@@ -7286,9 +7290,16 @@ function extractRlmMetrics(config) {
 
     function handleOverlayClick(event) {
       const removeBtn = event.target.closest("[data-remove-region]");
-      if (!removeBtn) return;
-      const regionId = removeBtn.dataset.removeRegion;
-      removeRegion(regionId);
+      if (removeBtn) {
+        const regionId = removeBtn.dataset.removeRegion;
+        removeRegion(regionId);
+        return;
+      }
+      const regionEl = event.target.closest("[data-region-id][data-region-editable]");
+      if (regionEl) {
+        const regionId = regionEl.dataset.regionId;
+        promptRegionEdit(regionId);
+      }
     }
 
     function handleRegionListClick(event) {
@@ -7296,6 +7307,13 @@ function extractRlmMetrics(config) {
       if (!button) return;
       const regionId = button.dataset.removeRegion;
       removeRegion(regionId);
+    }
+
+    function promptRegionEdit(regionId) {
+      if (!regionId) return;
+      const region = regions.find((entry) => String(entry.id) === String(regionId));
+      if (!region) return;
+      openRegionModal(region);
     }
 
     function removeRegion(regionId) {
@@ -7376,34 +7394,29 @@ function extractRlmMetrics(config) {
         drawingCancel();
         return;
       }
-      const valueInput = window.prompt("Importance percentage (0-100)", "50");
-      if (valueInput === null) {
-        drawingCancel();
-        return;
-      }
-      const pct = Number(valueInput);
-      if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
-        window.alert("Enter a value between 0 and 100.");
-        drawingCancel();
-        return;
-      }
-      if (isOverlapping(startPoint, endPoint)) {
-        window.alert("The new region overlaps with an existing zone. Please draw a non-overlapping area.");
-        drawingCancel();
-        return;
-      }
-      regions.push({
+      const draftRegion = {
         id: generateRegionId(),
-        weight_pct: Math.round(pct),
+        weight_pct: 50,
         x0: clamp01(startPoint.x),
         y0: clamp01(startPoint.y),
         x1: clamp01(endPoint.x),
         y1: clamp01(endPoint.y),
-      });
+      };
+      if (isRegionOverlapping(draftRegion)) {
+        showToast("The new region overlaps with an existing zone. Please draw a non-overlapping area.", "error");
+        drawingCancel();
+        return;
+      }
       drawingCancel();
-      renderRegions();
-      renderRegionList();
-      updateSaveButtonState();
+      openRegionModal(draftRegion, {
+        mode: "create",
+        onConfirm: (region) => {
+          regions.push(region);
+          renderRegions();
+          renderRegionList();
+          updateSaveButtonState();
+        },
+      });
     }
 
     function updateDraftRegion(x0, y0, x1, y1) {
@@ -7455,13 +7468,14 @@ function extractRlmMetrics(config) {
       return nextRegionId;
     }
 
-    function isOverlapping(aStart, aEnd) {
-      if (!aStart || !aEnd) return false;
-      const newLeft = Math.min(aStart.x, aEnd.x);
-      const newRight = Math.max(aStart.x, aEnd.x);
-      const newTop = Math.min(aStart.y, aEnd.y);
-      const newBottom = Math.max(aStart.y, aEnd.y);
+    function isRegionOverlapping(candidate) {
+      if (!candidate) return false;
+      const newLeft = Math.min(candidate.x0, candidate.x1);
+      const newRight = Math.max(candidate.x0, candidate.x1);
+      const newTop = Math.min(candidate.y0, candidate.y1);
+      const newBottom = Math.max(candidate.y0, candidate.y1);
       return regions.some((region) => {
+        if (String(region.id) === String(candidate.id)) return false;
         const left = Math.min(region.x0, region.x1);
         const right = Math.max(region.x0, region.x1);
         const top = Math.min(region.y0, region.y1);
@@ -7472,7 +7486,7 @@ function extractRlmMetrics(config) {
 
     async function handleSave() {
       if (!jobName) {
-        window.alert("Select a job before saving.");
+        showToast("Select a job before saving.", "error");
         return;
       }
       loading = true;
@@ -7489,19 +7503,87 @@ function extractRlmMetrics(config) {
             y1: region.y1,
           })),
         });
-        window.alert("Heatmap saved.");
+        showToast("Heatmap saved.", "success");
         fetchHeatmap(Filters.getState ? Filters.getState() : {});
       } catch (error) {
         const message = error && error.message ? error.message : "Failed to save heatmap.";
-        window.alert(message);
+        showToast(message, "error");
       } finally {
         loading = false;
         updateSaveButtonState();
       }
     }
 
+    function openRegionModal(region, options = {}) {
+      const modal = document.getElementById("heatmapModal");
+      const input = document.getElementById("heatmapModalInput");
+      const saveButton = modal ? modal.querySelector("[data-heatmap-modal-save]") : null;
+      const cancelButtons = modal ? Array.from(modal.querySelectorAll("[data-heatmap-modal-cancel]")) : [];
+      if (!modal || !input || !saveButton) return;
+      modal.classList.remove("hidden");
+      const titleEl = modal.querySelector("#heatmapModalTitle");
+      if (titleEl) {
+        titleEl.textContent = options && options.mode === "create" ? "New Region Weight" : "Update Region Weight";
+      }
+      input.value = Number(region.weight_pct) || 0;
+      input.focus();
+      input.select();
+      const performSave = () => {
+        const pct = Number(input.value);
+        if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+          showToast("Enter a value between 0 and 100.", "error");
+          return;
+        }
+        region.weight_pct = Math.round(pct);
+        cleanup();
+        if (typeof options.onConfirm === "function") {
+          options.onConfirm(region);
+        } else {
+          renderRegions();
+          renderRegionList();
+          updateSaveButtonState();
+        }
+      };
+      const cleanup = () => {
+        modal.classList.add("hidden");
+        saveButton.removeEventListener("click", performSave);
+        cancelButtons.forEach((btn) => btn.removeEventListener("click", cleanup));
+        modal.removeEventListener("keydown", handleKeyPress);
+        if (typeof options.onCancel === "function") {
+          options.onCancel();
+        }
+      };
+      const handleKeyPress = (event) => {
+        if (event.key === "Escape") {
+          cleanup();
+        } else if (event.key === "Enter") {
+          event.preventDefault();
+          performSave();
+        }
+      };
+      saveButton.addEventListener("click", performSave);
+      cancelButtons.forEach((btn) => btn.addEventListener("click", cleanup));
+      modal.addEventListener("keydown", handleKeyPress);
+    }
+
     return { init, activate, deactivate, onFiltersUpdated };
   })();
+
+  function showToast(message, type = "success", timeout = 7000) {
+    const container = document.getElementById("toastContainer");
+    if (!container) {
+      window.alert(message);
+      return;
+    }
+    const toast = document.createElement("div");
+    toast.className = `toast toast--${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+    setTimeout(() => {
+      toast.classList.add("toast--hide");
+      setTimeout(() => toast.remove(), 300);
+    }, timeout);
+  }
 
   function urlForStatic(path) {
     if (!path) return "";

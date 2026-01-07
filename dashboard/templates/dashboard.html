@@ -626,8 +626,25 @@
       </div>
     </section>
 
+    <div class="heatmap-modal hidden" id="heatmapModal" role="dialog" aria-modal="true" aria-labelledby="heatmapModalTitle">
+      <div class="heatmap-modal__dialog">
+        <h3 id="heatmapModalTitle">Update Region Weight</h3>
+        <p>Set the importance level for this zone (0–100).</p>
+        <input type="number" min="0" max="100" id="heatmapModalInput" class="heatmap-modal__input">
+        <div class="heatmap-modal__actions">
+          <button type="button" class="button-secondary" data-heatmap-modal-cancel>Cancel</button>
+          <button type="button" class="button-primary" data-heatmap-modal-save>Save</button>
+        </div>
+        <button type="button" class="heatmap-modal__close" aria-label="Close" data-heatmap-modal-cancel>&times;</button>
+      </div>
+    </div>
+
   </div>
 
   <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 </body>
 </html>
+      </div>
+    </div>
+
+    <div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="true"></div>
