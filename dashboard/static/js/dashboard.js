@@ -1142,6 +1142,17 @@
     let updating = false;
     let initialized = false;
     let refreshOptionsQueued = false;
+    let readyResolve = null;
+    const readyPromise = new Promise((resolve) => {
+      readyResolve = resolve;
+    });
+
+    function markReady() {
+      if (readyResolve) {
+        readyResolve();
+        readyResolve = null;
+      }
+    }
 
     const scheduleEmit = Utils.debounce(() => emit(false), FETCH_DEBOUNCE_MS);
     let firstEmit = true;
@@ -1181,6 +1192,7 @@
         updateDependentFilters();
         emit(true);
         initialized = true;
+        markReady();
       });
     }
 
@@ -1902,6 +1914,7 @@
     return {
       init,
       getState,
+      ready: () => readyPromise,
       onChange,
       set,
       setMany,
@@ -7077,6 +7090,9 @@ function extractRlmMetrics(config) {
     let saveBtn;
     let zoomButtons = [];
     let zoomValue = 1;
+    let currentReferenceSrc = "";
+    let referenceLoader = null;
+    let prefetchedKey = "";
     let jobName = "";
     let machineId = null;
     let regions = [];
@@ -7139,6 +7155,14 @@ function extractRlmMetrics(config) {
         setDrawMode(drawMode);
       }
       applyZoom();
+      maybePrefetchHeatmap();
+      if (Filters && typeof Filters.onChange === "function") {
+        Filters.onChange(() => {
+          if (!active) {
+            maybePrefetchHeatmap();
+          }
+        });
+      }
     }
 
     function activate() {
@@ -7149,7 +7173,10 @@ function extractRlmMetrics(config) {
         Filters.setFieldDisabled("order", true, { lock: true });
         Filters.setFieldDisabled("reel", true, { lock: true });
       }
-      loadFromFilters();
+      waitForFiltersReady().then(() => {
+        if (!active) return;
+        loadFromFilters();
+      });
     }
 
     function deactivate() {
@@ -7163,6 +7190,17 @@ function extractRlmMetrics(config) {
     function onFiltersUpdated() {
       if (!active) return;
       loadFromFilters();
+    }
+
+    function waitForFiltersReady() {
+      if (!Filters || typeof Filters.ready !== "function") {
+        return Promise.resolve();
+      }
+      try {
+        return Filters.ready();
+      } catch (err) {
+        return Promise.resolve();
+      }
     }
 
     function loadFromFilters() {
@@ -7224,6 +7262,23 @@ function extractRlmMetrics(config) {
       updateZoomButtons();
     }
 
+    function maybePrefetchHeatmap() {
+      if (active) return;
+      const filterState = Filters.getState ? Filters.getState() : {};
+      const job = (filterState.job || "").trim();
+      if (!job) {
+        prefetchedKey = "";
+        return;
+      }
+      const machine = filterState.machine_id || "";
+      const key = `${job}::${machine}`;
+      if (prefetchedKey === key) return;
+      prefetchedKey = key;
+      jobName = job;
+      machineId = machine || null;
+      fetchHeatmap(filterState);
+    }
+
     function updateZoomButtons() {
       if (!zoomButtons.length) return;
       const interactive = Boolean(jobName && imageReady);
@@ -7249,6 +7304,52 @@ function extractRlmMetrics(config) {
       });
     }
 
+    function cancelReferenceLoader() {
+      if (!referenceLoader) return;
+      referenceLoader.onload = null;
+      referenceLoader.onerror = null;
+      referenceLoader = null;
+    }
+
+    function loadReferenceImage(src) {
+      currentReferenceSrc = src || "";
+      if (!imageEl) return;
+      cancelReferenceLoader();
+      if (!src) {
+        imageReady = false;
+        imageEl.classList.add("hidden");
+        imageEl.removeAttribute("src");
+        if (stageEl) stageEl.classList.add("heatmap-stage--disabled");
+        return;
+      }
+      imageReady = false;
+      imageEl.classList.add("hidden");
+      if (stageEl) stageEl.classList.add("heatmap-stage--disabled");
+      const loader = new Image();
+      referenceLoader = loader;
+      loader.decoding = "async";
+      loader.onload = () => {
+        if (referenceLoader !== loader) return;
+        referenceLoader = null;
+        if (imageEl.getAttribute("src") !== src) {
+          imageEl.src = src;
+        }
+        handleReferenceImageLoad();
+      };
+      loader.onerror = () => {
+        if (referenceLoader !== loader) return;
+        referenceLoader = null;
+        imageReady = false;
+        if (imageEl) {
+          imageEl.classList.add("hidden");
+          imageEl.removeAttribute("src");
+        }
+        if (stageEl) stageEl.classList.add("heatmap-stage--disabled");
+        setEmptyNotice("Failed to load the reference image for this job.", false);
+      };
+      loader.src = src;
+    }
+
     function clearState() {
       regions = [];
       jobName = "";
@@ -7262,6 +7363,8 @@ function extractRlmMetrics(config) {
         imageEl.classList.add("hidden");
         imageEl.removeAttribute("src");
       }
+      currentReferenceSrc = "";
+      cancelReferenceLoader();
       if (stageEl) stageEl.classList.add("heatmap-stage--disabled");
       if (overlayLayer) overlayLayer.innerHTML = "";
       if (draftLayer) draftLayer.innerHTML = "";
@@ -7273,6 +7376,7 @@ function extractRlmMetrics(config) {
       if (!tabEl) return;
       cancelPolygonDraft();
       drawingCancel();
+      cancelReferenceLoader();
       loading = true;
       updateSaveButtonState();
       setEmptyNotice("Loading heatmap…", true);
@@ -7296,28 +7400,11 @@ function extractRlmMetrics(config) {
     function applyPayload(payload) {
       resetZoom();
       const reference = payload && payload.reference_image ? payload.reference_image : null;
-      if (reference && reference.image_src && imageEl) {
-        const src = urlForStatic(reference.image_src);
-        if (imageEl.getAttribute("src") !== src) {
-          imageReady = false;
-          imageEl.classList.add("hidden");
-          if (stageEl) stageEl.classList.add("heatmap-stage--disabled");
-          imageEl.src = src;
-          if (imageEl.complete && imageEl.naturalWidth > 0) {
-            handleReferenceImageLoad();
-          }
-        } else {
-          imageReady = true;
-          imageEl.classList.remove("hidden");
-          if (stageEl) stageEl.classList.remove("heatmap-stage--disabled");
-        }
+      if (reference && reference.image_src) {
+        loadReferenceImage(urlForStatic(reference.image_src));
         setEmptyNotice("", true);
       } else {
-        if (imageEl) {
-          imageEl.classList.add("hidden");
-          imageEl.removeAttribute("src");
-        }
-        imageReady = false;
+        loadReferenceImage("");
         setEmptyNotice("No reference image is available for this job.", false);
       }
       regions = Array.isArray(payload?.regions) ? payload.regions.map(normalizeRegion).filter(Boolean) : [];
