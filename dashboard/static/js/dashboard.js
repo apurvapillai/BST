@@ -6431,6 +6431,15 @@ function extractRlmMetrics(config) {
     let lastReviewEl;
     let lastReviewStatusEl;
     const lastReviewFields = {};
+    let defectCategorySelect;
+    let statusToggleBtn;
+    let statusPanel;
+    let statusWindowEl;
+    let statusMachineEl;
+    let statusJobEl;
+    let statusListEl;
+    let statusPanelExpanded = false;
+    const statusCountEls = {};
 
     function init() {
       if (initialized) return;
@@ -6466,6 +6475,17 @@ function extractRlmMetrics(config) {
       noReelNoticeEl = Utils.qs("#qcNoReelNotice");
       noReelNoticeTextEl = Utils.qs("#qcNoReelNoticeText");
       nextReelBtn = Utils.qs("#qcReviewNextReel");
+      statusToggleBtn = Utils.qs("#qcStatusToggle");
+      statusPanel = Utils.qs("#qcStatusPanel");
+      statusWindowEl = Utils.qs("#qcStatusWindow");
+      statusMachineEl = Utils.qs("#qcStatusMachine");
+      statusJobEl = Utils.qs("#qcStatusJob");
+      statusListEl = Utils.qs("#qcStatusList");
+      statusCountEls.total = Utils.qs("#qcStatusTotal");
+      statusCountEls.pending = Utils.qs("#qcStatusPending");
+      statusCountEls.ready = Utils.qs("#qcStatusReady");
+      statusCountEls.reviewed = Utils.qs("#qcStatusReviewed");
+      statusCountEls.clean = Utils.qs("#qcStatusClean");
       lastReviewEl = Utils.qs("#qcLastReviewSummary");
       if (lastReviewEl) {
         lastReviewStatusEl = lastReviewEl.querySelector("[data-last-review='status']");
@@ -6494,6 +6514,7 @@ function extractRlmMetrics(config) {
       passBtn = Utils.qs("#qcReviewPass");
       failBtn = Utils.qs("#qcReviewFail");
       retryBtn = Utils.qs("[data-qc-review-retry]");
+      defectCategorySelect = Utils.qs("#qcDefectCategory");
       FIELD_KEYS.forEach((key) => {
         fieldEls[key] = Utils.qs(`[data-qc-field='${key}']`);
       });
@@ -6519,6 +6540,13 @@ function extractRlmMetrics(config) {
         summaryTableBody.addEventListener("click", handleSummaryActionClick);
         summaryTableListenerAttached = true;
       }
+      if (defectCategorySelect) {
+        defectCategorySelect.addEventListener("change", () => {
+          if (currentDefect) {
+            currentDefect.defect_category = getDefectCategoryValue();
+          }
+        });
+      }
       if (!filtersListenerAttached && Filters && typeof Filters.onChange === "function") {
         Filters.onChange(() => {
           needsRefresh = true;
@@ -6531,7 +6559,13 @@ function extractRlmMetrics(config) {
           fetchNext(true);
         });
       }
+      if (statusToggleBtn && statusPanel) {
+        statusToggleBtn.addEventListener("click", toggleStatusPanel);
+        statusToggleBtn.disabled = true;
+      }
       initialized = true;
+      setDefectCategoryValue("");
+      setCategoryControlDisabled(true);
     }
 
     function updateHeaderInfo(reel, defect) {
@@ -6584,6 +6618,11 @@ function extractRlmMetrics(config) {
       currentReel = payload.reel || null;
       currentDefect = payload.next_defect || null;
       summaryData = payload.reel_summary || null;
+      updateStatusOverview(payload.reel_overview || null);
+      if (!currentDefect) {
+        setDefectCategoryValue("");
+        setCategoryControlDisabled(true);
+      }
       updatePendingCount(pendingTotal);
       if (!currentReel) {
         setViewState("empty");
@@ -6621,6 +6660,9 @@ function extractRlmMetrics(config) {
       currentReel = null;
       summaryData = null;
       syncCompletionHighlights(false);
+      setDefectCategoryValue("");
+      setCategoryControlDisabled(true);
+      setActionsDisabled(true);
       setViewState("error", message);
       hideNoReelNotice();
     }
@@ -6651,6 +6693,7 @@ function extractRlmMetrics(config) {
       const shouldDisable = disabled || !currentDefect;
       if (passBtn) passBtn.disabled = shouldDisable;
       if (failBtn) failBtn.disabled = shouldDisable;
+      setCategoryControlDisabled(shouldDisable);
     }
 
     function setReelActionsDisabled(disabled) {
@@ -6658,6 +6701,137 @@ function extractRlmMetrics(config) {
       Array.from(reelActionsEl.querySelectorAll("button")).forEach((button) => {
         button.disabled = disabled;
       });
+    }
+
+    function getDefectCategoryValue() {
+      if (!defectCategorySelect) return "";
+      return defectCategorySelect.value || "";
+    }
+
+    function setDefectCategoryValue(value) {
+      if (!defectCategorySelect) return;
+      defectCategorySelect.value = value || "";
+    }
+
+    function setCategoryControlDisabled(disabled) {
+      if (!defectCategorySelect) return;
+      defectCategorySelect.disabled = disabled;
+    }
+
+    function toggleStatusPanel() {
+      if (!statusPanel || !statusToggleBtn || statusToggleBtn.disabled) return;
+      statusPanelExpanded = !statusPanelExpanded;
+      statusPanel.classList.toggle("hidden", !statusPanelExpanded);
+      statusToggleBtn.setAttribute("aria-expanded", String(statusPanelExpanded));
+      statusToggleBtn.textContent = statusPanelExpanded ? "Hide reel statuses" : "Show reel statuses";
+    }
+
+    function updateStatusOverview(overview) {
+      if (!statusPanel || !statusToggleBtn) return;
+      const hasData = Boolean(overview);
+      if (statusToggleBtn) {
+        statusToggleBtn.disabled = !hasData;
+        if (!hasData && statusPanelExpanded) {
+          statusPanelExpanded = false;
+          statusPanel.classList.add("hidden");
+          statusToggleBtn.setAttribute("aria-expanded", "false");
+          statusToggleBtn.textContent = "Show reel statuses";
+        }
+      }
+      if (!hasData) {
+        if (statusWindowEl) statusWindowEl.textContent = "—";
+        if (statusMachineEl) statusMachineEl.textContent = "—";
+        if (statusJobEl) statusJobEl.textContent = "—";
+        Object.values(statusCountEls).forEach((el) => {
+          if (el) el.textContent = "0";
+        });
+        renderStatusRows([]);
+        return;
+      }
+      const windowDisplay = formatOverviewWindow(overview.window);
+      if (statusWindowEl) statusWindowEl.textContent = windowDisplay || "—";
+      if (statusMachineEl) statusMachineEl.textContent = overview.machine_name || "—";
+      if (statusJobEl) statusJobEl.textContent = overview.job_name || "—";
+      const counts = overview.counts || {};
+      Object.entries(statusCountEls).forEach(([key, el]) => {
+        if (!el) return;
+        el.textContent = Utils.formatNumber(counts[key] || 0);
+      });
+      renderStatusRows(overview.reels || []);
+    }
+
+    function renderStatusRows(rows) {
+      if (!statusListEl) return;
+      const pendingRows = Array.isArray(rows) ? rows.filter((row) => row.status === "pending") : [];
+      if (!pendingRows.length) {
+        statusListEl.innerHTML = '<div class="qc-status-empty">No reels are waiting for labeling in this range.</div>';
+        return;
+      }
+      const html = pendingRows
+        .map((row) => {
+          const reelLabel = row.reel_code ? Utils.escapeHtml(`Reel ${row.reel_code}`) : `Reel #${row.reel_id}`;
+          const windowText = formatOverviewWindow({ start: row.start, end: row.end }) || "—";
+          const statusText = statusLabel(row.status);
+          const pillClass = statusClass(row.status);
+          let detail = "";
+          if (Number(row.pending_defects || 0) > 0) {
+            detail = ` · ${Utils.formatNumber(row.pending_defects)} pending`;
+          }
+          if (row.decision && row.decision !== row.status) {
+            detail += ` · last ${row.decision.toUpperCase()}`;
+          }
+          return `
+            <div class="qc-status-row">
+              <div><strong>${reelLabel}</strong></div>
+              <div>${windowText}</div>
+              <div>
+                <span class="qc-status-pill ${pillClass}">${statusText}</span>${detail}
+              </div>
+            </div>
+          `;
+        })
+        .join("");
+      statusListEl.innerHTML = html;
+    }
+
+    function statusLabel(status) {
+      switch (status) {
+        case "pending":
+          return "Pending labeling";
+        case "ready":
+          return "Ready for review";
+        case "reviewed":
+          return "Reviewed";
+        case "clean":
+          return "No defects";
+        default:
+          return "Unknown";
+      }
+    }
+
+    function statusClass(status) {
+      switch (status) {
+        case "pending":
+          return "qc-status-pill--pending";
+        case "ready":
+          return "qc-status-pill--ready";
+        case "reviewed":
+          return "qc-status-pill--reviewed";
+        case "clean":
+          return "qc-status-pill--clean";
+        default:
+          return "";
+      }
+    }
+
+    function formatOverviewWindow(range) {
+      if (!range) return "";
+      const start = range.start ? formatTime(range.start) : null;
+      const end = range.end ? formatTime(range.end) : null;
+      if (start && end) return `${start} → ${end}`;
+      if (start) return `Starts ${start}`;
+      if (end) return `Ends ${end}`;
+      return "";
     }
 
     function toggleMode(mode) {
@@ -6745,6 +6919,11 @@ function extractRlmMetrics(config) {
         if (!el) return;
         el.textContent = formatFieldValue(key, defect[key]);
       });
+      setDefectCategoryValue(defect.defect_category || "");
+      setCategoryControlDisabled(false);
+      if (currentDefect) {
+        currentDefect.defect_category = defect.defect_category || "";
+      }
     }
 
     function renderSummary(summary) {
@@ -6852,8 +7031,14 @@ function extractRlmMetrics(config) {
     }
 
     async function handleSummaryDefectDecision(defectId, decision, triggerButton) {
+      const summaryRow = Array.isArray(summaryData?.defects)
+        ? summaryData.defects.find((row) => Number(row.defect_id) === Number(defectId))
+        : null;
+      const existingCategory = summaryRow && summaryRow.defect_category ? summaryRow.defect_category : undefined;
       try {
-        await persistDefectDecision(defectId, decision);
+        await persistDefectDecision(defectId, decision, {
+          category: existingCategory,
+        });
         applySummaryDecisionLocal(defectId, decision);
       } catch (error) {
         const message = error && error.message ? error.message : "Failed to update decision.";
@@ -6916,7 +7101,9 @@ function extractRlmMetrics(config) {
       saving = true;
       setActionsDisabled(true);
       try {
-        await persistDefectDecision(currentDefect.defect_id, decision);
+        await persistDefectDecision(currentDefect.defect_id, decision, {
+          category: getDefectCategoryValue(),
+        });
         needsRefresh = true;
         await fetchNext(false, { lockToReel: true });
       } catch (error) {
@@ -7717,8 +7904,25 @@ function extractRlmMetrics(config) {
       const regionEl = event.target.closest("[data-region-id][data-region-editable]");
       if (regionEl) {
         const regionId = regionEl.dataset.regionId;
+        if (!regionId) return;
+        const clickedContent = event.target.closest(".heatmap-region__content");
+        if (!clickedContent && !isEventInsideRegion(regionId, event)) {
+          return;
+        }
         promptRegionEdit(regionId);
       }
+    }
+
+    function isEventInsideRegion(regionId, event) {
+      if (!regionId) return false;
+      const region = regions.find((entry) => String(entry.id) === String(regionId));
+      if (!region) return false;
+      if (region.shape !== "polygon") return true;
+      const polygonPoints = getPolygonPoints(region);
+      if (!polygonPoints.length) return true;
+      const point = getRelativePoint(event);
+      if (!point) return false;
+      return pointInPolygon(point, polygonPoints);
     }
 
     function promptRegionEdit(regionId) {
@@ -7742,7 +7946,14 @@ function extractRlmMetrics(config) {
         return;
       }
       if (event.button !== 0) return;
-      if (event.target.closest("[data-region-id]")) return;
+      const regionCover = event.target.closest("[data-region-id][data-region-editable]");
+      if (regionCover) {
+        const regionId = regionCover.dataset.regionId;
+        const clickedContent = event.target.closest(".heatmap-region__content");
+        if (regionId && (clickedContent || isEventInsideRegion(regionId, event))) {
+          return;
+        }
+      }
       const point = getRelativePoint(event);
       if (!point) return;
       drawingCancel();
@@ -8384,12 +8595,19 @@ function extractRlmMetrics(config) {
     }
   }
 
-  async function persistDefectDecision(defectId, decision) {
+  async function persistDefectDecision(defectId, decision, options = {}) {
     const normalized = (decision || "").toLowerCase();
     if (!defectId || (normalized !== "pass" && normalized !== "fail")) {
       throw new Error("Decision must be 'pass' or 'fail'.");
     }
-    await Api.post(`defects/${defectId}/decision`, { decision: normalized });
+    const payload = { decision: normalized };
+    if (Object.prototype.hasOwnProperty.call(options || {}, "category")) {
+      const rawCategory = options.category;
+      const trimmed =
+        rawCategory === null || rawCategory === undefined ? "" : String(rawCategory).trim();
+      payload.defect_category = trimmed ? trimmed : null;
+    }
+    await Api.post(`defects/${defectId}/decision`, payload);
     return normalized;
   }
 

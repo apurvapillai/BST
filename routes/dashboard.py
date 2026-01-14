@@ -721,6 +721,113 @@ def _serialize_heatmap_region(region: HeatmapRegion) -> Dict[str, object]:
     return entry
 
 
+def _reel_status_overview(
+    session: Session,
+    filters: Dict[str, Any],
+    base_query,
+    pending_query,
+    latest_review_subq,
+):
+    reels = (
+        _apply_reel_filters(session.query(Reel), filters)
+        .options(selectinload(Reel.machine))
+        .order_by(Reel.time_start.asc())
+        .all()
+    )
+    if not reels:
+        return None
+    reel_ids = [reel.reel_id for reel in reels if reel.reel_id]
+    if not reel_ids:
+        return None
+    pending_counts = {
+        reel_id: count
+        for reel_id, count in (
+            pending_query.with_entities(Defect.reel_id, func.count())
+            .group_by(Defect.reel_id)
+            .all()
+        )
+    }
+    defect_reel_ids = {
+        result.reel_id
+        for result in base_query.with_entities(Defect.reel_id).distinct()
+    }
+    latest_reviews = (
+        session.query(Reel.reel_id, ReelReview.decision)
+        .join(
+            latest_review_subq,
+            collate(Reel.reel_code, "utf8mb4_unicode_ci")
+            == collate(latest_review_subq.c.reel_code, "utf8mb4_unicode_ci"),
+        )
+        .join(ReelReview, ReelReview.review_id == latest_review_subq.c.max_id)
+        .filter(Reel.reel_id.in_(reel_ids))
+        .all()
+    )
+    review_map = {
+        row.reel_id: (row.decision or "").strip().lower() for row in latest_reviews
+    }
+    window_start = min(
+        (reel.time_start for reel in reels if reel.time_start), default=None
+    )
+    window_end = max((reel.time_end for reel in reels if reel.time_end), default=None)
+    counts = {
+        "total": len(reels),
+        "pending": 0,
+        "ready": 0,
+        "reviewed": 0,
+        "clean": 0,
+    }
+    status_order = {"pending": 0, "ready": 1, "reviewed": 2, "clean": 3}
+    rows: List[Dict[str, Any]] = []
+    for reel in reels:
+        if reel.reel_id is None:
+            continue
+        pending_total = pending_counts.get(reel.reel_id, 0)
+        decision = review_map.get(reel.reel_id)
+        has_defects = reel.reel_id in defect_reel_ids
+        if pending_total:
+            status = "pending"
+            counts["pending"] += 1
+        elif decision in {"pass", "fail"}:
+            status = "reviewed"
+            counts["reviewed"] += 1
+        elif not has_defects:
+            status = "clean"
+            counts["clean"] += 1
+        else:
+            status = "ready"
+            counts["ready"] += 1
+        rows.append(
+            {
+                "reel_id": reel.reel_id,
+                "reel_code": reel.reel_code,
+                "job_name": reel.job_name,
+                "status": status,
+                "decision": decision,
+                "pending_defects": pending_total,
+                "start": _iso(reel.time_start),
+                "end": _iso(reel.time_end),
+                "status_order": status_order.get(status, 99),
+            }
+        )
+    rows.sort(key=lambda row: (row["status_order"], row["start"] or ""))
+    machine_name = None
+    for reel in reels:
+        if reel.machine and reel.machine.name:
+            machine_name = reel.machine.name
+            break
+    overview_rows = rows
+    return {
+        "job_name": filters.get("job") or (reels[0].job_name if reels else None),
+        "machine_name": machine_name,
+        "window": {
+            "start": _iso(window_start),
+            "end": _iso(window_end),
+        },
+        "counts": counts,
+        "reels": overview_rows,
+    }
+
+
 def _sensitivity_tuple_has_values(values: Optional[Tuple[Optional[float], Optional[float]]]) -> bool:
     if not values:
         return False
@@ -2554,6 +2661,7 @@ def api_reel_summary(reel_id: int):
                 "magnitude_value": _to_float(defect.magnitude_value),
                 "severity_value": _to_float(defect.severity_value),
                 "coords": defect.coords_json or [],
+                "defect_category": defect.defect_category,
             }
             for defect in sorted(reel.defects or [], key=lambda x: x.defect_time or datetime.min)
         ]
@@ -2926,6 +3034,7 @@ def api_defects():
                         "format_length": format_length,
                         "format_width": format_width,
                         "qc_decision": (defect.qc_decision or "").lower() or None,
+                        "defect_category": defect.defect_category,
                     }
                 )
 
@@ -3150,6 +3259,7 @@ def api_qc_review():
         pending_filter = or_(Defect.qc_decision.is_(None), Defect.qc_decision == "")
         pending_query = base_query.filter(pending_filter)
         pending_total = pending_query.count()
+        reel_overview = _reel_status_overview(session, filters, base_query, pending_query, latest_review_subq)
 
         def build_reel_context(reel_id: int):
             reel = (
@@ -3218,6 +3328,7 @@ def api_qc_review():
                         "defect_time": _iso(defect.defect_time),
                         "qc_decision": decision,
                         "has_image": has_image,
+                        "defect_category": defect.defect_category,
                     }
                 )
 
@@ -3267,6 +3378,7 @@ def api_qc_review():
                     "coords": coords_payload,
                     "format_length": _to_float(reel.format_length),
                     "format_width": _to_float(reel.format_width),
+                    "defect_category": next_defect_row.defect_category,
                 }
 
             reel_summary = {
@@ -3312,6 +3424,7 @@ def api_qc_review():
                         "reel": context["reel"],
                         "next_defect": context["next_defect"],
                         "reel_summary": context["reel_summary"],
+                        "reel_overview": reel_overview,
                     }
                 )
 
@@ -3324,6 +3437,7 @@ def api_qc_review():
                     "reel": None,
                     "next_defect": None,
                     "reel_summary": None,
+                    "reel_overview": reel_overview,
                 }
             )
 
@@ -3345,6 +3459,7 @@ def api_qc_review():
                     "reel": None,
                     "next_defect": None,
                     "reel_summary": None,
+                    "reel_overview": reel_overview,
                 }
             )
 
@@ -3358,6 +3473,7 @@ def api_qc_review():
                     "reel": None,
                     "next_defect": None,
                     "reel_summary": None,
+                    "reel_overview": reel_overview,
                 }
             )
 
@@ -3369,6 +3485,7 @@ def api_qc_review():
                 "reel": context["reel"],
                 "next_defect": context["next_defect"],
                 "reel_summary": context["reel_summary"],
+                "reel_overview": reel_overview,
             }
         )
 
@@ -3383,12 +3500,24 @@ def api_defect_decision(defect_id: int):
         if decision not in {"pass", "fail"}:
             return jsonify({"error": "Decision must be 'pass' or 'fail'."}), 400
 
+    update_category = "defect_category" in payload
+    defect_category: Optional[str] = None
+    if update_category:
+        raw_category = payload.get("defect_category")
+        if raw_category is None:
+            defect_category = None
+        else:
+            value = str(raw_category).strip()
+            defect_category = value or None
+
     with SessionLocal() as session:
         defect = session.query(Defect).filter(Defect.defect_id == defect_id).first()
         if not defect:
             return jsonify({"error": "Defect not found."}), 404
 
         defect.qc_decision = decision
+        if update_category:
+            defect.defect_category = defect_category
         session.commit()
         return jsonify(
             {

@@ -456,6 +456,59 @@
           </div>
         </div>
       </div>
+      <div class="qc-status-overview">
+        <button type="button" class="qc-status-toggle" id="qcStatusToggle" aria-expanded="false">
+          Show reel statuses
+        </button>
+        <div class="qc-status-panel hidden" id="qcStatusPanel" aria-live="polite">
+          <div class="qc-status-meta">
+            <div>
+              <span>Job Window</span>
+              <strong id="qcStatusWindow">—</strong>
+            </div>
+            <div>
+              <span>Machine</span>
+              <strong id="qcStatusMachine">—</strong>
+            </div>
+            <div>
+              <span>Job</span>
+              <strong id="qcStatusJob">—</strong>
+            </div>
+          </div>
+          <div class="qc-status-counts">
+            <div class="qc-status-card total">
+              <span>Total Reels</span>
+              <strong id="qcStatusTotal">0</strong>
+            </div>
+            <div class="qc-status-card pending">
+              <span>Pending Labeling</span>
+              <strong id="qcStatusPending">0</strong>
+            </div>
+            <div class="qc-status-card ready">
+              <span>Ready for Final Review</span>
+              <strong id="qcStatusReady">0</strong>
+            </div>
+            <div class="qc-status-card reviewed">
+              <span>Reviewed</span>
+              <strong id="qcStatusReviewed">0</strong>
+            </div>
+            <div class="qc-status-card clean">
+              <span>No Defects</span>
+              <strong id="qcStatusClean">0</strong>
+            </div>
+          </div>
+          <div class="qc-status-list">
+            <div class="qc-status-list-header">
+              <span>Reel</span>
+              <span>Window</span>
+              <span>Status</span>
+            </div>
+            <div class="qc-status-list-body" id="qcStatusList">
+              <div class="qc-status-empty">Reel summary unavailable for this filter set.</div>
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="qc-review-wrapper">
         <div class="qc-review-card" id="qcReviewPanel">
           <div class="qc-review-header">
@@ -525,8 +578,20 @@
               </div>
             </div>
               <div class="qc-review-actions" id="qcDefectActions">
-                <button type="button" class="defect-decision-btn defect-decision-btn-fail" id="qcReviewFail">Fail</button>
-                <button type="button" class="defect-decision-btn defect-decision-btn-pass" id="qcReviewPass">Pass</button>
+                <div class="qc-defect-category">
+                  <label for="qcDefectCategory">Defect Category</label>
+                  <select id="qcDefectCategory">
+                    <option value="">No Category</option>
+                    <option value="Category 1">Category 1</option>
+                    <option value="Category 2">Category 2</option>
+                    <option value="Category 3">Category 3</option>
+                    <option value="Category 4">Category 4</option>
+                  </select>
+                </div>
+                <div class="qc-decision-buttons">
+                  <button type="button" class="defect-decision-btn defect-decision-btn-fail" id="qcReviewFail">Fail</button>
+                  <button type="button" class="defect-decision-btn defect-decision-btn-pass" id="qcReviewPass">Pass</button>
+                </div>
               </div>
               <div id="qcReviewSummary" class="qc-review-summary hidden">
                 <div class="qc-summary-header">
