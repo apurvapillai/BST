@@ -989,10 +989,41 @@ body {
   font-size: 15px;
   color: #0f172a;
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .qc-jobs-table-wrapper {
   overflow-x: auto;
+}
+
+.qc-jobs-table-wrapper.hidden {
+  display: none;
+}
+
+.qc-jobs-toggle {
+  border: none;
+  background: rgba(15, 23, 42, 0.06);
+  color: #0f172a;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.qc-jobs-toggle[aria-expanded="true"] {
+  background: rgba(37, 99, 235, 0.15);
+  color: #1d4ed8;
+}
+
+.qc-jobs-toggle:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.6);
+  outline-offset: 2px;
 }
 
 .qc-jobs-table {
@@ -2497,6 +2528,16 @@ body {
   color: #92400e;
 }
 
+.defect-decision-badge-uncertain {
+  background-color: rgba(96, 165, 250, 0.25);
+  color: #1d4ed8;
+}
+
+.defect-decision-badge-info {
+  background-color: rgba(147, 197, 253, 0.35);
+  color: #1d4ed8;
+}
+
 .defect-decision-saving {
   opacity: 0.6;
   pointer-events: none;
@@ -3533,6 +3574,27 @@ body {
 .button-secondary {
   background: rgba(148, 163, 184, 0.2);
   color: #0f172a;
+}
+
+.qc-review-counter {
+  min-width: 140px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.1);
+  color: #1d4ed8;
+  font-weight: 600;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.qc-review-counter span:first-child {
+  font-size: 22px;
+  line-height: 1.1;
 }
 
 .qc-review-details {

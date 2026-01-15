@@ -419,8 +419,9 @@
       <div class="qc-jobs-table-card" aria-live="polite">
         <div class="qc-job-header">
           <strong>Job statuses in current window</strong>
+          <button type="button" class="qc-jobs-toggle" id="qcJobsToggleBtn" aria-expanded="false">Show</button>
         </div>
-        <div class="qc-jobs-table-wrapper">
+        <div class="qc-jobs-table-wrapper hidden" id="qcJobsTableWrapper">
           <table class="qc-jobs-table">
             <thead>
               <tr>
@@ -444,6 +445,10 @@
               <p class="qc-review-job" id="qcReviewJob">Select a machine and window to load pending reels.</p>
               <p class="qc-review-reel" id="qcReviewReel">Reel — Machine</p>
               <p class="qc-review-time" id="qcReviewDefectTime">—</p>
+            </div>
+            <div class="qc-review-counter hidden" id="qcImagePendingCounter" aria-live="polite">
+              <span id="qcImagePendingValue">0</span>
+              <span>photo pending</span>
             </div>
           </div>
           <div class="qc-review-subheader">
@@ -618,7 +623,7 @@
                 <div class="qc-reel-review-form">
                   <div class="qc-reel-review-field">
                     <label for="qcReelReviewer">Reviewer</label>
-                    <input type="text" id="qcReelReviewer" placeholder="Your name">
+                    <input type="text" id="qcReelReviewer" placeholder="Your name" value="Valeria Morales">
                   </div>
                   <div class="qc-reel-review-field">
                     <label for="qcReelComments">Comments</label>

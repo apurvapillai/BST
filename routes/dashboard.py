@@ -131,7 +131,7 @@ def _normalize_decision(value: Optional[str]) -> Optional[str]:
     if not value:
         return None
     normalized = str(value).strip().lower()
-    if normalized in {"pass", "fail"}:
+    if normalized in {"pass", "fail", "uncertain"}:
         return normalized
     return None
 
@@ -161,7 +161,7 @@ def _qc_decision_from_severity(score: Optional[int]) -> Optional[str]:
         return None
     if score <= 2:
         return "pass"
-    if score >= 4:
+    if score >= 3:
         return "fail"
     return None
 
@@ -3656,7 +3656,10 @@ def api_defect_decision(defect_id: int):
         defect.severity_score = severity_score
         defect.severity_confidence = severity_confidence
         defect.severity_uncertain = uncertain_flag
-        defect.qc_decision = _qc_decision_from_severity(severity_score)
+        if uncertain_flag:
+            defect.qc_decision = "uncertain"
+        else:
+            defect.qc_decision = _qc_decision_from_severity(severity_score)
         if update_category:
             defect.defect_category = defect_category
         session.commit()

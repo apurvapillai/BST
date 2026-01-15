@@ -177,15 +177,23 @@
   }
   function buildDecisionBadge(decision) {
     const normalized = (decision || "").toLowerCase();
-    if (normalized !== "pass" && normalized !== "fail") return "";
-    const label = normalized === "pass" ? "Pass" : "Fail";
-    return `<span class="defect-decision-badge defect-decision-badge-${normalized}">${label}</span>`;
+    if (normalized === "pass" || normalized === "fail") {
+      const label = normalized === "pass" ? "Pass" : "Fail";
+      return `<span class="defect-decision-badge defect-decision-badge-${normalized}">${label}</span>`;
+    }
+    if (normalized === "uncertain") {
+      return '<span class="defect-decision-badge defect-decision-badge-uncertain">Uncertain</span>';
+    }
+    return "";
   }
 
   function buildDecisionCellContent(decision) {
     const normalized = (decision || "").toLowerCase();
     if (normalized === "pass" || normalized === "fail") {
       return buildDecisionBadge(normalized);
+    }
+    if (normalized === "uncertain") {
+      return '<span class="defect-decision-badge defect-decision-badge-uncertain">Uncertain</span>';
     }
     return '<span class="defect-decision-badge defect-decision-badge-pending">Pending</span>';
   }
@@ -6424,6 +6432,8 @@ function extractRlmMetrics(config) {
     let imageEl;
     let imagePlaceholderEl;
     let rotateImageBtn;
+    let imagePendingCounterEl;
+    let imagePendingValueEl;
     let labelEl;
     let timeEl;
     let headerJobEl;
@@ -6445,6 +6455,8 @@ function extractRlmMetrics(config) {
     let noReelNoticeEl;
     let noReelNoticeTextEl;
     let nextReelBtn;
+    let jobsToggleBtn;
+    let jobsTableWrapper;
     let severityButtons = [];
     let severityValue = null;
     let confidenceButtons = [];
@@ -6462,13 +6474,11 @@ function extractRlmMetrics(config) {
     let initialized = false;
     let loading = false;
     let saving = false;
-    let summarySaving = false;
     let savingReel = false;
     let needsRefresh = true;
     let currentDefect = null;
     let currentReel = null;
     let summaryData = null;
-    let summaryTableListenerAttached = false;
     let lastNoReelAlert = "";
     let filtersListenerAttached = false;
     let lastReviewEl;
@@ -6502,6 +6512,8 @@ function extractRlmMetrics(config) {
       imageEl = Utils.qs("#qcReviewImage");
       imagePlaceholderEl = Utils.qs("#qcReviewImagePlaceholder");
       rotateImageBtn = Utils.qs("#qcImageRotateBtn");
+      imagePendingCounterEl = Utils.qs("#qcImagePendingCounter");
+      imagePendingValueEl = Utils.qs("#qcImagePendingValue");
       labelEl = Utils.qs("#qcReviewLabel");
       timeEl = Utils.qs("#qcReviewTime");
       headerJobEl = Utils.qs("#qcReviewJob");
@@ -6524,6 +6536,8 @@ function extractRlmMetrics(config) {
       noReelNoticeTextEl = Utils.qs("#qcNoReelNoticeText");
       nextReelBtn = Utils.qs("#qcReviewNextReel");
       jobsTableBody = Utils.qs("#qcJobsTableBody");
+      jobsToggleBtn = Utils.qs("#qcJobsToggleBtn");
+      jobsTableWrapper = Utils.qs("#qcJobsTableWrapper");
       jobSwitchModal = Utils.qs("#jobSwitchModal");
       jobSwitchModalMessage = Utils.qs("#jobSwitchModalMessage");
       jobSwitchModalConfirm = Utils.qs("#jobSwitchModalConfirm");
@@ -6621,9 +6635,13 @@ function extractRlmMetrics(config) {
           });
         });
       }
-      if (summaryTableBody && !summaryTableListenerAttached) {
-        summaryTableBody.addEventListener("click", handleSummaryActionClick);
-        summaryTableListenerAttached = true;
+      if (jobsToggleBtn && jobsTableWrapper) {
+        jobsToggleBtn.addEventListener("click", () => {
+          const isExpanded = jobsToggleBtn.getAttribute("aria-expanded") === "true";
+          jobsToggleBtn.setAttribute("aria-expanded", String(!isExpanded));
+          jobsToggleBtn.textContent = !isExpanded ? "Hide" : "Show";
+          jobsTableWrapper.classList.toggle("hidden", isExpanded);
+        });
       }
       if (defectCategorySelect) {
         defectCategorySelect.addEventListener("change", () => {
@@ -6718,6 +6736,7 @@ function extractRlmMetrics(config) {
       currentDefect = payload.next_defect || null;
       summaryData = payload.reel_summary || null;
       const hasPending = Boolean(payload && payload.has_pending);
+      updateImagePendingCounter(summaryData);
       if (!currentDefect) {
         setDefectCategoryValue("");
         resetSeverityControls();
@@ -6725,6 +6744,7 @@ function extractRlmMetrics(config) {
       if (!currentReel) {
         setViewState("empty");
         syncCompletionHighlights(false);
+        updateImagePendingCounter(null);
         if (hasPending) {
           showNoReelNotice("This reel has no pending defects. Click Next Reel to continue.", true);
           if (lastNoReelAlert !== "pending") {
@@ -6754,6 +6774,7 @@ function extractRlmMetrics(config) {
       renderSummary(summaryData);
       setRotateButtonState(false);
       resetImageRotation();
+      updateImagePendingCounter(summaryData);
       toggleMode("summary");
       setViewState("content");
       resetSeverityControls();
@@ -6770,6 +6791,7 @@ function extractRlmMetrics(config) {
       hideNoReelNotice();
       setRotateButtonState(false);
       resetImageRotation();
+      updateImagePendingCounter(null);
     }
 
     function showNoReelNotice(message, showButton) {
@@ -7197,6 +7219,28 @@ function extractRlmMetrics(config) {
       }
     }
 
+    function countPendingImageDefects(summary) {
+      if (!summary || !Array.isArray(summary.defects)) return 0;
+      return summary.defects.filter((row) => {
+        if (row.has_image === false) return false;
+        const decision = (row.qc_decision || "").toLowerCase();
+        if (decision === "pass" || decision === "fail" || decision === "uncertain") return false;
+        return true;
+      }).length;
+    }
+
+    function updateImagePendingCounter(summary) {
+      if (!imagePendingCounterEl || !imagePendingValueEl) return;
+      if (!summary || !Array.isArray(summary.defects)) {
+        imagePendingCounterEl.classList.add("hidden");
+        imagePendingValueEl.textContent = "0";
+        return;
+      }
+      const count = countPendingImageDefects(summary);
+      imagePendingValueEl.textContent = Utils.formatNumber(count);
+      imagePendingCounterEl.classList.toggle("hidden", false);
+    }
+
     function renderSummary(summary) {
       summaryData = summary || null;
       if (!summaryEl) return;
@@ -7207,22 +7251,14 @@ function extractRlmMetrics(config) {
       } else if (summaryTableBody) {
         summaryTableBody.innerHTML = summary.defects
           .map((row) => {
-            const decisionBadge = row.qc_decision
-              ? buildDecisionBadge(row.qc_decision)
-              : '<span class="defect-decision-badge defect-decision-badge-pending">Pending</span>';
+            const decisionBadge = buildDecisionBadge(row.qc_decision);
             const position = Number.isFinite(Number(row.format_position))
               ? `${Utils.formatNumber(row.format_position, 1)} mm`
               : "--";
             const hasImage = row.has_image !== false;
-            const canManualReview = !hasImage && !row.qc_decision;
-            const decisionCell = canManualReview
-              ? `
-                  <div class="qc-summary-actions">
-                    <button type="button" data-summary-action="pass" data-defect-id="${row.defect_id}">Pass</button>
-                    <button type="button" data-summary-action="fail" data-defect-id="${row.defect_id}">Reject</button>
-                  </div>
-                `
-              : decisionBadge;
+            const decisionCell = hasImage
+              ? decisionBadge || '<span class="defect-decision-badge defect-decision-badge-pending">Pending</span>'
+              : '<span class="defect-decision-badge defect-decision-badge-info">No Image</span>';
             return `
               <tr>
                 <td>#${row.defect_id}</td>
@@ -7241,6 +7277,7 @@ function extractRlmMetrics(config) {
       if (summaryCountFailEl) summaryCountFailEl.textContent = Utils.formatNumber(summary?.counts?.fail || 0);
       if (summaryCountPendingEl) summaryCountPendingEl.textContent = Utils.formatNumber(summary?.counts?.pending || 0);
       if (summaryCountNoImageEl) summaryCountNoImageEl.textContent = Utils.formatNumber(summary?.no_image_total || 0);
+      updateImagePendingCounter(summary);
 
       if (summaryByTypeEl) {
         const entries = Array.isArray(summary?.by_type) ? summary.by_type : [];
@@ -7280,48 +7317,6 @@ function extractRlmMetrics(config) {
           summaryHistoryEl.textContent = `Latest decision: ${decisionLabel} by ${latest.reviewer_name || latest.reviewer_id || "Reviewer"}${timestamp ? ` on ${timestamp}` : ""}`;
         } else {
           summaryHistoryEl.textContent = "";
-        }
-      }
-    }
-
-    function handleSummaryActionClick(event) {
-      const button = event.target.closest("button[data-summary-action]");
-      if (!button || summarySaving) return;
-      event.preventDefault();
-      const action = (button.dataset.summaryAction || "").toLowerCase();
-      if (action !== "pass" && action !== "fail") return;
-      const defectId = Number(button.dataset.defectId);
-      if (!defectId) return;
-      summarySaving = true;
-      button.disabled = true;
-      button.classList.add("is-loading");
-      handleSummaryDefectDecision(defectId, action, button);
-    }
-
-    async function handleSummaryDefectDecision(defectId, decision, triggerButton) {
-      const summaryRow = Array.isArray(summaryData?.defects)
-        ? summaryData.defects.find((row) => Number(row.defect_id) === Number(defectId))
-        : null;
-      const existingCategory = summaryRow && summaryRow.defect_category ? summaryRow.defect_category : undefined;
-      const severity = decision === "pass" ? 1 : 4;
-      try {
-        await saveDefectLabel(defectId, {
-          severity,
-          confidence: 2,
-          uncertain: false,
-          category: existingCategory,
-        });
-        applySummaryDecisionLocal(defectId, decision);
-      } catch (error) {
-        const message = error && error.message ? error.message : "Failed to update decision.";
-        window.alert(message);
-        if (triggerButton) {
-          triggerButton.disabled = false;
-        }
-      } finally {
-        summarySaving = false;
-        if (triggerButton) {
-          triggerButton.classList.remove("is-loading");
         }
       }
     }
@@ -7366,6 +7361,7 @@ function extractRlmMetrics(config) {
       target.qc_decision = next;
       renderSummary(summaryData);
       syncReelActionState();
+      updateImagePendingCounter(summaryData);
     }
 
     async function handleSeveritySave() {
