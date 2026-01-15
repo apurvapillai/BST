@@ -6423,6 +6423,7 @@ function extractRlmMetrics(config) {
     let contentEl;
     let imageEl;
     let imagePlaceholderEl;
+    let rotateImageBtn;
     let labelEl;
     let timeEl;
     let headerJobEl;
@@ -6476,6 +6477,7 @@ function extractRlmMetrics(config) {
     let defectCategorySelect;
     let categoryButtons = [];
     let jobsTableBody;
+    let imageRotation = 0;
     let jobOverviewCache = [];
     let shouldRefreshJobOverview = true;
     let jobOverviewRequestId = 0;
@@ -6493,6 +6495,7 @@ function extractRlmMetrics(config) {
       contentEl = Utils.qs("#qcReviewContent");
       imageEl = Utils.qs("#qcReviewImage");
       imagePlaceholderEl = Utils.qs("#qcReviewImagePlaceholder");
+      rotateImageBtn = Utils.qs("#qcImageRotateBtn");
       labelEl = Utils.qs("#qcReviewLabel");
       timeEl = Utils.qs("#qcReviewTime");
       headerJobEl = Utils.qs("#qcReviewJob");
@@ -6577,6 +6580,14 @@ function extractRlmMetrics(config) {
       }
       if (reviewerInput) {
         reviewerInput.addEventListener("input", syncReelActionState);
+      }
+      if (rotateImageBtn) {
+        rotateImageBtn.disabled = true;
+        rotateImageBtn.addEventListener("click", () => {
+          if (rotateImageBtn.disabled) return;
+          imageRotation = (imageRotation + 90) % 360;
+          applyImageRotation();
+        });
       }
       if (categoryButtons.length) {
         categoryButtons.forEach((button) => {
@@ -6687,6 +6698,8 @@ function extractRlmMetrics(config) {
           showNoReelNotice("No reels require review right now.", false);
           lastNoReelAlert = "";
         }
+        setRotateButtonState(false);
+        resetImageRotation();
         resetSeverityControls();
         return;
       }
@@ -6702,6 +6715,8 @@ function extractRlmMetrics(config) {
         return;
       }
       renderSummary(summaryData);
+      setRotateButtonState(false);
+      resetImageRotation();
       toggleMode("summary");
       setViewState("content");
       resetSeverityControls();
@@ -6716,6 +6731,8 @@ function extractRlmMetrics(config) {
       resetSeverityControls();
       setViewState("error", message);
       hideNoReelNotice();
+      setRotateButtonState(false);
+      resetImageRotation();
     }
 
     function showNoReelNotice(message, showButton) {
@@ -6790,6 +6807,21 @@ function extractRlmMetrics(config) {
       if (defectCategorySelect) {
         defectCategorySelect.disabled = disabled;
       }
+    }
+
+    function resetImageRotation() {
+      imageRotation = 0;
+      applyImageRotation();
+    }
+
+    function applyImageRotation() {
+      if (!imageEl) return;
+      imageEl.style.transform = `rotate(${imageRotation}deg)`;
+    }
+
+    function setRotateButtonState(enabled) {
+      if (!rotateImageBtn) return;
+      rotateImageBtn.disabled = !enabled;
     }
 
     function resetSeverityControls() {
@@ -7002,14 +7034,18 @@ function extractRlmMetrics(config) {
         if (imagePlaceholderEl) {
           imagePlaceholderEl.classList.add("hidden");
         }
+        setRotateButtonState(true);
+        resetImageRotation();
       } else {
         if (imageEl) {
           imageEl.removeAttribute("src");
           imageEl.classList.add("hidden");
+          resetImageRotation();
         }
         if (imagePlaceholderEl) {
           imagePlaceholderEl.classList.remove("hidden");
         }
+        setRotateButtonState(false);
       }
 
       FIELD_KEYS.forEach((key) => {

@@ -451,11 +451,11 @@
               <strong>Machine</strong>
               <p id="qcReviewMachine">—</p>
             </div>
-          </div>
-          <div class="qc-review-body">
-            <div id="qcReviewLoading" class="qc-review-placeholder hidden">
-              <p>Loading next defect…</p>
             </div>
+            <div class="qc-review-body">
+              <div id="qcReviewLoading" class="qc-review-placeholder hidden">
+                <p>Loading next defect…</p>
+              </div>
             <div id="qcReviewEmpty" class="qc-review-placeholder hidden">
               <p>No pending defects match the current filters.</p>
             </div>
@@ -492,7 +492,9 @@
                 </dl>
               </div>
               <div class="qc-review-image qc-review-image--defect">
-                <div class="qc-review-image-header">Defect</div>
+                <button type="button" class="qc-image-rotate-btn" id="qcImageRotateBtn" aria-label="Rotate image">
+                  ⟲
+                </button>
                 <div id="qcReviewImagePlaceholder" class="qc-review-image-placeholder hidden">No preview image.</div>
                 <img id="qcReviewImage" alt="Pending defect" loading="lazy" decoding="async">
               </div>
