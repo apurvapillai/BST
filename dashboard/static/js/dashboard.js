@@ -6459,6 +6459,8 @@ function extractRlmMetrics(config) {
     let statusJobEl;
     let statusListEl;
     let jobsListEl;
+    let jobsLabelEl;
+    let jobsHintEl;
     let statusPanelExpanded = false;
     let recentPanelExpanded = false;
     let jobsPanelExpanded = false;
@@ -6503,6 +6505,8 @@ function extractRlmMetrics(config) {
       jobsToggleBtn = Utils.qs("#qcJobToggle");
       jobsPanel = Utils.qs("#qcJobsPanel");
       jobsListEl = Utils.qs("#qcJobsList");
+      jobsLabelEl = Utils.qs("#qcSelectedJobLabel");
+      jobsHintEl = Utils.qs("#qcSelectedJobHint");
       statusPanel = Utils.qs("#qcStatusPanel");
       statusWindowEl = Utils.qs("#qcStatusWindow");
       statusMachineEl = Utils.qs("#qcStatusMachine");
@@ -6915,6 +6919,9 @@ function extractRlmMetrics(config) {
         jobsPanel && jobsPanel.classList.add("hidden");
         statusToggleBtn.setAttribute("aria-expanded", String(nextState));
         statusToggleBtn.textContent = nextState ? "Hide reel statuses" : "Reel statuses";
+        statusToggleBtn.classList.toggle("qc-status-toggle--active", nextState);
+        if (jobsToggleBtn) jobsToggleBtn.classList.remove("qc-status-toggle--active");
+        if (recentToggleBtn) recentToggleBtn.classList.remove("qc-status-toggle--active");
         if (recentToggleBtn) {
           recentToggleBtn.setAttribute("aria-expanded", "false");
           recentToggleBtn.textContent = "Recent reel";
@@ -6936,6 +6943,9 @@ function extractRlmMetrics(config) {
         jobsPanel && jobsPanel.classList.add("hidden");
         recentToggleBtn.setAttribute("aria-expanded", String(nextState));
         recentToggleBtn.textContent = nextState ? "Hide recent reel" : "Recent reel";
+        recentToggleBtn.classList.toggle("qc-status-toggle--active", nextState);
+        if (jobsToggleBtn) jobsToggleBtn.classList.remove("qc-status-toggle--active");
+        if (statusToggleBtn) statusToggleBtn.classList.remove("qc-status-toggle--active");
         if (statusToggleBtn) {
           statusToggleBtn.setAttribute("aria-expanded", "false");
           statusToggleBtn.textContent = "Reel statuses";
@@ -6955,6 +6965,9 @@ function extractRlmMetrics(config) {
         if (lastReviewEl) lastReviewEl.classList.add("hidden");
         jobsToggleBtn.setAttribute("aria-expanded", String(nextState));
         jobsToggleBtn.textContent = nextState ? "Hide job statuses" : "Job statuses";
+        jobsToggleBtn.classList.toggle("qc-status-toggle--active", nextState);
+        if (statusToggleBtn) statusToggleBtn.classList.remove("qc-status-toggle--active");
+        if (recentToggleBtn) recentToggleBtn.classList.remove("qc-status-toggle--active");
         if (statusToggleBtn) {
           statusToggleBtn.setAttribute("aria-expanded", "false");
           statusToggleBtn.textContent = "Reel statuses";
@@ -7006,6 +7019,10 @@ function extractRlmMetrics(config) {
           if (jobsPanel) jobsPanel.classList.add("hidden");
           jobsToggleBtn.setAttribute("aria-expanded", "false");
           jobsToggleBtn.textContent = "Job statuses";
+          jobsToggleBtn.classList.remove("qc-status-toggle--active");
+        }
+        if (!hasJobs) {
+          jobsToggleBtn.classList.remove("qc-status-toggle--active");
         }
       }
       if (!hasData) {
@@ -7032,6 +7049,28 @@ function extractRlmMetrics(config) {
       });
       renderStatusRows(overview.reels || []);
       renderJobOverview(jobs);
+      if (jobs.length && !statusPanelExpanded && !recentPanelExpanded && !jobsPanelExpanded) {
+        jobsPanelExpanded = true;
+        if (jobsPanel) jobsPanel.classList.remove("hidden");
+        statusPanel.classList.add("hidden");
+        if (lastReviewEl) lastReviewEl.classList.add("hidden");
+        if (jobsToggleBtn) {
+          jobsToggleBtn.setAttribute("aria-expanded", "true");
+          jobsToggleBtn.textContent = "Hide job statuses";
+          jobsToggleBtn.classList.add("qc-status-toggle--active");
+        }
+        if (statusToggleBtn) {
+          statusToggleBtn.setAttribute("aria-expanded", "false");
+          statusToggleBtn.textContent = "Reel statuses";
+          statusToggleBtn.classList.remove("qc-status-toggle--active");
+        }
+        if (recentToggleBtn) {
+          recentToggleBtn.setAttribute("aria-expanded", "false");
+          recentToggleBtn.textContent = "Recent reel";
+          recentToggleBtn.classList.remove("qc-status-toggle--active");
+        }
+        overviewContainer && overviewContainer.classList.remove("hidden");
+      }
       syncOverviewContainerVisibility();
     }
 
@@ -7071,20 +7110,36 @@ function extractRlmMetrics(config) {
 
     function renderJobOverview(rows) {
       if (!jobsListEl) return;
-      if (!rows || !rows.length) {
+      const list = Array.isArray(rows) ? rows : [];
+      const filtersState = Filters && typeof Filters.getState === "function" ? Filters.getState() : {};
+      const selectedJob = (filtersState.job || "").trim();
+      const selectedEntry = selectedJob ? list.find((row) => (row.job_name || "") === selectedJob) : null;
+      if (jobsLabelEl) {
+        if (!selectedJob) {
+          jobsLabelEl.textContent = "No job selected";
+        } else {
+          jobsLabelEl.textContent = `Selected job: ${selectedJob}`;
+        }
+      }
+      if (jobsHintEl) {
+        if (!selectedJob) {
+          jobsHintEl.textContent = "";
+        } else if (!selectedEntry) {
+          jobsHintEl.textContent = "Selected job is outside this window.";
+        } else if (selectedEntry.status === "complete") {
+          jobsHintEl.textContent = "This job is complete. Pick another job to review.";
+        } else {
+          jobsHintEl.textContent = "";
+        }
+      }
+      if (!list.length) {
         jobsListEl.innerHTML = '<div class="qc-status-empty">No jobs in this window.</div>';
         return;
       }
-      const sorted = [...rows].sort((a, b) => {
-        const aPending = Number(a.pending_reels || 0);
-        const bPending = Number(b.pending_reels || 0);
-        if (aPending === bPending) {
-          return (a.job_name || "").localeCompare(b.job_name || "");
-        }
-        return bPending - aPending;
-      });
-      const html = sorted
+      const html = list
         .map((row) => {
+          const isSelected = selectedJob && row.job_name === selectedJob;
+          const selectedClass = isSelected ? " qc-job-card--selected" : "";
           const pending = Number(row.pending_reels || 0);
           const reviewed = Number(row.reviewed_reels || 0);
           const total = Number(row.total_reels || 0);
@@ -7093,7 +7148,7 @@ function extractRlmMetrics(config) {
           const label = status === "pending" ? "Needs attention" : "Complete";
           const jobLabel = row.job_name ? Utils.escapeHtml(row.job_name) : "Unassigned Job";
           return `
-            <div class="qc-job-card">
+            <div class="qc-job-card${selectedClass}">
               <div class="qc-job-meta">
                 <h4>${jobLabel}</h4>
                 <span class="qc-job-pill ${pillClass}">${label}</span>

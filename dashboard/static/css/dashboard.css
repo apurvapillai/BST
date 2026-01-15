@@ -976,19 +976,25 @@ body {
 
 .qc-status-toggle {
   border: 1px solid rgba(148, 163, 184, 0.6);
-  background: #bae6fd;
-  color: #0c4a6e;
+  background: #e2e8f0;
+  color: #0f172a;
   font-weight: 600;
   padding: 8px 16px;
   border-radius: 12px;
   cursor: pointer;
-  box-shadow: 0 6px 16px rgba(14, 116, 144, 0.2);
+  box-shadow: 0 6px 16px rgba(148, 163, 184, 0.2);
   transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s;
 }
 
 .qc-status-toggle:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 10px 20px rgba(14, 116, 144, 0.3);
+  box-shadow: 0 10px 20px rgba(148, 163, 184, 0.35);
+}
+
+.qc-status-toggle.qc-status-toggle--active {
+  background: #fecaca;
+  color: #7f1d1d;
+  box-shadow: 0 10px 22px rgba(127, 29, 29, 0.25);
 }
 
 .qc-status-toggle:disabled {
@@ -1003,6 +1009,26 @@ body {
   background: #fff;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
   padding: 18px 22px;
+}
+
+.qc-job-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.qc-job-header strong {
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.qc-job-header span {
+  font-size: 13px;
+  color: #dc2626;
 }
 
 .qc-jobs-panel {
@@ -1021,6 +1047,11 @@ body {
   border-radius: 12px;
   padding: 12px 14px;
   background: #f8fafc;
+}
+
+.qc-job-card.qc-job-card--selected {
+  background: #e0f2fe;
+  border-color: #38bdf8;
 }
 
 .qc-job-card h4 {
