@@ -136,6 +136,45 @@ def _normalize_decision(value: Optional[str]) -> Optional[str]:
     return None
 
 
+SEVERITY_LABELS = {
+    0: "0 · Perfect",
+    1: "1 · Tiny cosmetic, ship",
+    2: "2 · Noticeable but ship",
+    3: "3 · Borderline / spec dependent",
+    4: "4 · Reject",
+    5: "5 · Severe reject",
+}
+
+
+def _normalize_int(value: Optional[object]) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number
+
+
+def _qc_decision_from_severity(score: Optional[int]) -> Optional[str]:
+    if score is None:
+        return None
+    if score <= 2:
+        return "pass"
+    if score >= 4:
+        return "fail"
+    return None
+
+
+def _severity_label(score: Optional[int], uncertain: bool = False) -> str:
+    if uncertain and score is None:
+        return "Uncertain"
+    label = SEVERITY_LABELS.get(score)
+    if label:
+        return label
+    return "Unlabeled"
+
+
 def _serialize_review(review: Optional[ReelReview]) -> Optional[Dict[str, object]]:
     if not review:
         return None
@@ -810,6 +849,28 @@ def _reel_status_overview(
             }
         )
     rows.sort(key=lambda row: (row["status_order"], row["start"] or ""))
+    job_summary: Dict[str, Dict[str, object]] = {}
+    for row in rows:
+        job_key = row.get("job_name") or "Unassigned Job"
+        summary = job_summary.get(job_key) or {"job_name": job_key, "total": 0, "reviewed": 0, "pending": 0}
+        summary["total"] = int(summary["total"]) + 1
+        status_value = row.get("status")
+        if status_value in {"reviewed", "clean"}:
+            summary["reviewed"] = int(summary["reviewed"]) + 1
+        else:
+            summary["pending"] = int(summary["pending"]) + 1
+        job_summary[job_key] = summary
+    job_rows = [
+        {
+            "job_name": entry["job_name"],
+            "total_reels": entry["total"],
+            "reviewed_reels": entry["reviewed"],
+            "pending_reels": entry["pending"],
+            "status": "pending" if entry["pending"] else "complete",
+        }
+        for entry in job_summary.values()
+    ]
+    job_rows.sort(key=lambda entry: (-int(entry["pending_reels"] or 0), entry["job_name"]))
     machine_name = None
     for reel in reels:
         if reel.machine and reel.machine.name:
@@ -825,7 +886,87 @@ def _reel_status_overview(
         },
         "counts": counts,
         "reels": overview_rows,
+        "jobs": job_rows,
     }
+
+
+def _job_status_summary(
+    session: Session,
+    filters: Dict[str, Any],
+    pending_filter,
+    latest_review_subq,
+):
+    scope_filters = dict(filters)
+    scope_filters["job"] = None
+    scope_filters["order"] = None
+    reels = (
+        _apply_reel_filters(session.query(Reel), scope_filters)
+        .order_by(Reel.time_start.asc())
+        .all()
+    )
+    if not reels:
+        return []
+    reel_ids = [reel.reel_id for reel in reels if reel.reel_id]
+    if not reel_ids:
+        return []
+    pending_counts = {
+        reel_id: count
+        for reel_id, count in (
+            session.query(Defect.reel_id, func.count())
+            .filter(Defect.reel_id.in_(reel_ids))
+            .filter(pending_filter)
+            .group_by(Defect.reel_id)
+            .all()
+        )
+    }
+    defect_reel_ids = {
+        row.reel_id
+        for row in (
+            session.query(Defect.reel_id)
+            .filter(Defect.reel_id.in_(reel_ids))
+            .distinct()
+            .all()
+        )
+    }
+    latest_reviews = (
+        session.query(Reel.reel_id, ReelReview.decision)
+        .join(
+            latest_review_subq,
+            collate(Reel.reel_code, "utf8mb4_unicode_ci")
+            == collate(latest_review_subq.c.reel_code, "utf8mb4_unicode_ci"),
+        )
+        .join(ReelReview, ReelReview.review_id == latest_review_subq.c.max_id)
+        .filter(Reel.reel_id.in_(reel_ids))
+        .all()
+    )
+    review_map = {row.reel_id: (row.decision or "").strip().lower() for row in latest_reviews}
+    job_summary: Dict[str, Dict[str, int]] = defaultdict(lambda: {"total": 0, "reviewed": 0, "pending": 0})
+    for reel in reels:
+        if reel.reel_id is None:
+            continue
+        job_key = reel.job_name or "Unassigned Job"
+        job_summary[job_key]["total"] += 1
+        pending_total = pending_counts.get(reel.reel_id, 0)
+        decision = review_map.get(reel.reel_id)
+        has_defects = reel.reel_id in defect_reel_ids
+        if pending_total:
+            job_summary[job_key]["pending"] += 1
+        elif decision in {"pass", "fail"} or not has_defects:
+            job_summary[job_key]["reviewed"] += 1
+        else:
+            job_summary[job_key]["pending"] += 1
+    rows = [
+        {
+            "job_name": name,
+            "total_reels": data["total"],
+            "reviewed_reels": data["reviewed"],
+            "pending_reels": data["pending"],
+            "status": "pending" if data["pending"] else "complete",
+        }
+        for name, data in job_summary.items()
+    ]
+    rows.sort(key=lambda entry: (-entry["pending_reels"], entry["job_name"]))
+    return rows
 
 
 def _sensitivity_tuple_has_values(values: Optional[Tuple[Optional[float], Optional[float]]]) -> bool:
@@ -1156,6 +1297,8 @@ def api_filters():
                 "value": job_name or "",
                 "label": job_name or "",
                 "status": _job_status(job_name),
+                "total_reels": job_stats.get(job_name, {}).get("defect_total", 0),
+                "reviewed_reels": job_stats.get(job_name, {}).get("defect_completed", 0),
             }
             for job_name, _ in jobs
         ]
@@ -1227,6 +1370,9 @@ def api_filters():
                 "jobs": job_entries,
                 "orders": order_entries,
                 "reel_codes": reel_options,
+                "job_overview": {
+                    "jobs": job_entries,
+                },
             }
         )
 
@@ -2662,6 +2808,9 @@ def api_reel_summary(reel_id: int):
                 "severity_value": _to_float(defect.severity_value),
                 "coords": defect.coords_json or [],
                 "defect_category": defect.defect_category,
+                "severity_score": _normalize_int(defect.severity_score),
+                "severity_confidence": _normalize_int(defect.severity_confidence),
+                "severity_uncertain": bool(defect.severity_uncertain),
             }
             for defect in sorted(reel.defects or [], key=lambda x: x.defect_time or datetime.min)
         ]
@@ -3035,6 +3184,9 @@ def api_defects():
                         "format_width": format_width,
                         "qc_decision": (defect.qc_decision or "").lower() or None,
                         "defect_category": defect.defect_category,
+                        "severity_score": _normalize_int(defect.severity_score),
+                        "severity_confidence": _normalize_int(defect.severity_confidence),
+                        "severity_uncertain": bool(defect.severity_uncertain),
                     }
                 )
 
@@ -3256,10 +3408,15 @@ def api_qc_review():
             ~Defect.reel_id.in_(session.query(finalized_reels_subq.c.reel_id))
         )
 
-        pending_filter = or_(Defect.qc_decision.is_(None), Defect.qc_decision == "")
+        pending_filter = and_(
+            Defect.severity_score.is_(None),
+            or_(Defect.severity_uncertain.is_(None), Defect.severity_uncertain.is_(False)),
+            or_(Defect.qc_decision.is_(None), Defect.qc_decision == ""),
+        )
         pending_query = base_query.filter(pending_filter)
         pending_total = pending_query.count()
         reel_overview = _reel_status_overview(session, filters, base_query, pending_query, latest_review_subq)
+        job_overview = _job_status_summary(session, filters, pending_filter, latest_review_subq)
 
         def build_reel_context(reel_id: int):
             reel = (
@@ -3329,6 +3486,12 @@ def api_qc_review():
                         "qc_decision": decision,
                         "has_image": has_image,
                         "defect_category": defect.defect_category,
+                        "severity_score": _normalize_int(defect.severity_score),
+                        "severity_confidence": _normalize_int(defect.severity_confidence),
+                        "severity_uncertain": bool(defect.severity_uncertain),
+                        "severity_label": _severity_label(
+                            _normalize_int(defect.severity_score), bool(defect.severity_uncertain)
+                        ),
                     }
                 )
 
@@ -3379,6 +3542,12 @@ def api_qc_review():
                     "format_length": _to_float(reel.format_length),
                     "format_width": _to_float(reel.format_width),
                     "defect_category": next_defect_row.defect_category,
+                    "severity_score": _normalize_int(next_defect_row.severity_score),
+                    "severity_confidence": _normalize_int(next_defect_row.severity_confidence),
+                    "severity_uncertain": bool(next_defect_row.severity_uncertain),
+                    "severity_label": _severity_label(
+                        _normalize_int(next_defect_row.severity_score), bool(next_defect_row.severity_uncertain)
+                    ),
                 }
 
             reel_summary = {
@@ -3438,6 +3607,7 @@ def api_qc_review():
                     "next_defect": None,
                     "reel_summary": None,
                     "reel_overview": reel_overview,
+                    "job_overview": job_overview,
                 }
             )
 
@@ -3460,6 +3630,7 @@ def api_qc_review():
                     "next_defect": None,
                     "reel_summary": None,
                     "reel_overview": reel_overview,
+                    "job_overview": job_overview,
                 }
             )
 
@@ -3474,6 +3645,7 @@ def api_qc_review():
                     "next_defect": None,
                     "reel_summary": None,
                     "reel_overview": reel_overview,
+                    "job_overview": job_overview,
                 }
             )
 
@@ -3486,6 +3658,7 @@ def api_qc_review():
                 "next_defect": context["next_defect"],
                 "reel_summary": context["reel_summary"],
                 "reel_overview": reel_overview,
+                "job_overview": job_overview,
             }
         )
 
@@ -3493,12 +3666,23 @@ def api_qc_review():
 @dashboard_bp.route("/api/defects/<int:defect_id>/decision", methods=["POST"])
 def api_defect_decision(defect_id: int):
     payload = request.get_json(silent=True) or {}
-    raw_decision = payload.get("decision")
-    decision: Optional[str] = None
-    if raw_decision is not None:
-        decision = str(raw_decision).strip().lower()
-        if decision not in {"pass", "fail"}:
-            return jsonify({"error": "Decision must be 'pass' or 'fail'."}), 400
+    raw_severity = payload.get("severity")
+    severity_score = _normalize_int(raw_severity)
+    if raw_severity is not None and severity_score is None:
+        return jsonify({"error": "Severity must be a number between 0 and 5."}), 400
+    if severity_score is not None and not (0 <= severity_score <= 5):
+        return jsonify({"error": "Severity must be between 0 and 5."}), 400
+    raw_confidence = payload.get("confidence")
+    severity_confidence = None
+    if raw_confidence is not None:
+        severity_confidence = _normalize_int(raw_confidence)
+        if severity_confidence is None or not (1 <= severity_confidence <= 3):
+            return jsonify({"error": "Confidence must be 1 (low), 2 (medium), or 3 (high)."}), 400
+    uncertain_flag = bool(payload.get("uncertain"))
+    if not uncertain_flag and severity_score is None:
+        return jsonify({"error": "Select a severity or mark the defect as uncertain."}), 400
+    if severity_score is not None and severity_confidence is None:
+        return jsonify({"error": "Select a confidence level for the chosen severity."}), 400
 
     update_category = "defect_category" in payload
     defect_category: Optional[str] = None
@@ -3515,13 +3699,18 @@ def api_defect_decision(defect_id: int):
         if not defect:
             return jsonify({"error": "Defect not found."}), 404
 
-        defect.qc_decision = decision
+        defect.severity_score = severity_score
+        defect.severity_confidence = severity_confidence
+        defect.severity_uncertain = uncertain_flag
+        defect.qc_decision = _qc_decision_from_severity(severity_score)
         if update_category:
             defect.defect_category = defect_category
         session.commit()
         return jsonify(
             {
                 "defect_id": defect.defect_id,
-                "decision": decision,
+                "severity": severity_score,
+                "confidence": severity_confidence,
+                "uncertain": uncertain_flag,
             }
         )

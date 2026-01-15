@@ -416,50 +416,18 @@
     </section>
 
     <section id="tab-qc-review" class="tab-content hidden">
-      <div class="last-review last-review--empty" id="qcLastReviewSummary" aria-live="polite">
-        <div class="last-review-header">
-          <div>
-            <p class="last-review-eyebrow">Most Recent Reel Review</p>
-            <h2 class="last-review-title" data-last-review="title">No reviews submitted yet</h2>
-            <p class="last-review-subtitle" data-last-review="timestamp">—</p>
-            <p class="last-review-window" data-last-review="reel-time">—</p>
-          </div>
-          <span class="last-review-status badge" data-last-review="status">--</span>
-        </div>
-        <div class="last-review-meta">
-          <div>
-            <span>Machine</span>
-            <strong data-last-review="machine">—</strong>
-          </div>
-          <div>
-            <span>Job</span>
-            <strong data-last-review="job">—</strong>
-          </div>
-          <div>
-            <span>Order</span>
-            <strong data-last-review="order">—</strong>
-          </div>
-          <div>
-            <span>Reviewer</span>
-            <strong data-last-review="reviewer">—</strong>
-          </div>
-        </div>
-        <div class="last-review-counts">
-          <span>Pass <strong data-last-review="pass-count">0</strong></span>
-          <span>Fail <strong data-last-review="fail-count">0</strong></span>
-          <span>Total <strong data-last-review="total-count">0</strong></span>
-        </div>
-        <div class="last-review-types">
-          <span class="last-review-types-label">Defect Types</span>
-          <div class="last-review-types-list" data-last-review="types">
-            <span class="badge">No defect details.</span>
-          </div>
-        </div>
-      </div>
-      <div class="qc-status-overview">
-        <button type="button" class="qc-status-toggle" id="qcStatusToggle" aria-expanded="false">
-          Show reel statuses
+      <div class="qc-overview-toggles">
+        <button type="button" class="qc-status-toggle" id="qcRecentToggle" aria-expanded="false">
+          Recent reel
         </button>
+        <button type="button" class="qc-status-toggle" id="qcJobToggle" aria-expanded="false">
+          Job statuses
+        </button>
+        <button type="button" class="qc-status-toggle" id="qcStatusToggle" aria-expanded="false">
+          Reel statuses
+        </button>
+      </div>
+      <div class="qc-status-overview hidden" id="qcOverviewPanel">
         <div class="qc-status-panel hidden" id="qcStatusPanel" aria-live="polite">
           <div class="qc-status-meta">
             <div>
@@ -505,6 +473,49 @@
             </div>
             <div class="qc-status-list-body" id="qcStatusList">
               <div class="qc-status-empty">Reel summary unavailable for this filter set.</div>
+            </div>
+          </div>
+        </div>
+        <div class="qc-jobs-panel hidden" id="qcJobsPanel" aria-live="polite">
+          <div class="qc-jobs-list" id="qcJobsList"></div>
+        </div>
+        <div class="last-review last-review--empty hidden" id="qcLastReviewSummary" aria-live="polite">
+          <div class="last-review-header">
+            <div>
+              <p class="last-review-eyebrow">Most Recent Reel Review</p>
+              <h2 class="last-review-title" data-last-review="title">No reviews submitted yet</h2>
+              <p class="last-review-subtitle" data-last-review="timestamp">—</p>
+              <p class="last-review-window" data-last-review="reel-time">—</p>
+            </div>
+            <span class="last-review-status badge" data-last-review="status">--</span>
+          </div>
+          <div class="last-review-meta">
+            <div>
+              <span>Machine</span>
+              <strong data-last-review="machine">—</strong>
+            </div>
+            <div>
+              <span>Job</span>
+              <strong data-last-review="job">—</strong>
+            </div>
+            <div>
+              <span>Order</span>
+              <strong data-last-review="order">—</strong>
+            </div>
+            <div>
+              <span>Reviewer</span>
+              <strong data-last-review="reviewer">—</strong>
+            </div>
+          </div>
+          <div class="last-review-counts">
+            <span>Pass <strong data-last-review="pass-count">0</strong></span>
+            <span>Fail <strong data-last-review="fail-count">0</strong></span>
+            <span>Total <strong data-last-review="total-count">0</strong></span>
+          </div>
+          <div class="last-review-types">
+            <span class="last-review-types-label">Defect Types</span>
+            <div class="last-review-types-list" data-last-review="types">
+              <span class="badge">No defect details.</span>
             </div>
           </div>
         </div>
@@ -578,19 +589,72 @@
               </div>
             </div>
               <div class="qc-review-actions" id="qcDefectActions">
-                <div class="qc-defect-category">
-                  <label for="qcDefectCategory">Defect Category</label>
-                  <select id="qcDefectCategory">
-                    <option value="">No Category</option>
-                    <option value="Category 1">Category 1</option>
-                    <option value="Category 2">Category 2</option>
-                    <option value="Category 3">Category 3</option>
-                    <option value="Category 4">Category 4</option>
-                  </select>
-                </div>
-                <div class="qc-decision-buttons">
-                  <button type="button" class="defect-decision-btn defect-decision-btn-fail" id="qcReviewFail">Fail</button>
-                  <button type="button" class="defect-decision-btn defect-decision-btn-pass" id="qcReviewPass">Pass</button>
+                <div class="qc-severity-panel">
+                  <div class="qc-severity-header">
+                    <label class="qc-uncertain-toggle">
+                      <input type="checkbox" id="qcUncertainToggle">
+                      <span>
+                        <strong>Mark as uncertain</strong>
+                        <small>I can’t confidently score this</small>
+                      </span>
+                    </label>
+                    <div class="qc-defect-category">
+                      <label>Defect Category (optional)</label>
+                      <div class="qc-category-options" id="qcCategoryOptions">
+                        <button type="button" data-category-value="">None</button>
+                        <button type="button" data-category-value="Category 1">Category 1</button>
+                        <button type="button" data-category-value="Category 2">Category 2</button>
+                        <button type="button" data-category-value="Category 3">Category 3</button>
+                        <button type="button" data-category-value="Category 4">Category 4</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="qc-severity-scale">
+                    <label>Severity (0–5)</label>
+                    <div class="qc-severity-options" id="qcSeverityScale">
+                      <button type="button" data-severity-value="0">
+                        <span class="qc-severity-value">0</span>
+                        <span class="qc-severity-label">Perfect</span>
+                      </button>
+                      <button type="button" data-severity-value="1">
+                        <span class="qc-severity-value">1</span>
+                        <span class="qc-severity-label">Tiny cosmetic</span>
+                      </button>
+                      <button type="button" data-severity-value="2">
+                        <span class="qc-severity-value">2</span>
+                        <span class="qc-severity-label">Noticeable</span>
+                      </button>
+                      <button type="button" data-severity-value="3">
+                        <span class="qc-severity-value">3</span>
+                        <span class="qc-severity-label">Borderline</span>
+                      </button>
+                      <button type="button" data-severity-value="4">
+                        <span class="qc-severity-value">4</span>
+                        <span class="qc-severity-label">Reject</span>
+                      </button>
+                      <button type="button" data-severity-value="5">
+                        <span class="qc-severity-value">5</span>
+                        <span class="qc-severity-label">Severe Reject</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="qc-confidence-scale">
+                    <label>Confidence (1–3)</label>
+                    <div class="qc-confidence-options" id="qcConfidenceOptions">
+                      <button type="button" data-confidence-value="1">
+                        <span class="qc-confidence-value">1</span>
+                        <span class="qc-confidence-label">Low · needs review</span>
+                      </button>
+                      <button type="button" data-confidence-value="2">
+                        <span class="qc-confidence-value">2</span>
+                        <span class="qc-confidence-label">Medium</span>
+                      </button>
+                      <button type="button" data-confidence-value="3">
+                        <span class="qc-confidence-value">3</span>
+                        <span class="qc-confidence-label">High</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
               <div id="qcReviewSummary" class="qc-review-summary hidden">

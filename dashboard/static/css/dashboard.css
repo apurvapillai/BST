@@ -962,33 +962,110 @@ body {
   opacity: 0.7;
 }
 
-.qc-status-overview {
-  margin: 18px 0 24px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  border-radius: 12px;
+.qc-overview-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 18px 0;
+  justify-content: flex-end;
   background: #fff;
+  padding: 12px 18px;
+  border-radius: 14px;
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
-  padding: 16px 20px;
 }
 
 .qc-status-toggle {
-  border: none;
-  background: #1f7aec;
-  color: #fff;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  background: #bae6fd;
+  color: #0c4a6e;
   font-weight: 600;
   padding: 8px 16px;
-  border-radius: 999px;
+  border-radius: 12px;
   cursor: pointer;
-  transition: background 0.15s ease;
+  box-shadow: 0 6px 16px rgba(14, 116, 144, 0.2);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s;
 }
 
 .qc-status-toggle:hover:not(:disabled) {
-  background: #1861c8;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(14, 116, 144, 0.3);
 }
 
 .qc-status-toggle:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
+}
+
+.qc-status-overview {
+  margin-bottom: 24px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+  padding: 18px 22px;
+}
+
+.qc-jobs-panel {
+  margin-top: 18px;
+}
+
+.qc-jobs-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.qc-job-card {
+  flex: 1 1 220px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: #f8fafc;
+}
+
+.qc-job-card h4 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  color: #0f172a;
+}
+
+.qc-job-count,
+.qc-job-pending {
+  margin: 4px 0;
+  font-size: 13px;
+  color: #475569;
+}
+
+.qc-job-pending {
+  font-weight: 600;
+  color: #9f1239;
+}
+
+.qc-job-meta {
+  font-size: 13px;
+  color: #475569;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.qc-job-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.qc-job-pill--complete {
+  background: rgba(34, 197, 94, 0.2);
+  color: #166534;
+}
+
+.qc-job-pill--pending {
+  background: rgba(249, 115, 22, 0.2);
+  color: #9a3412;
 }
 
 .qc-status-panel {
@@ -3501,47 +3578,186 @@ body {
 
 .qc-review-actions {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: 12px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 18px;
   margin-top: 18px;
+}
+
+.qc-severity-panel {
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 12px;
+  padding: 16px;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.qc-severity-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: stretch;
+}
+
+.qc-uncertain-toggle,
+.qc-defect-category {
+  flex: 1 1 250px;
 }
 
 .qc-defect-category {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 200px;
-  margin-right: auto;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
 }
 
-.qc-defect-category select {
-  border: 1px solid #cbd5f5;
+.qc-category-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.qc-category-options button {
+  border: 1px solid rgba(59, 130, 246, 0.3);
   border-radius: 10px;
   padding: 8px 12px;
-  font-size: 14px;
-  color: #0f172a;
   background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.qc-decision-buttons {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+.qc-category-options button.active {
+  border-color: #1f7aec;
+  background: rgba(31, 122, 236, 0.08);
+  box-shadow: 0 0 0 2px rgba(31, 122, 236, 0.2);
 }
 
-.qc-review-actions .defect-decision-btn {
-  min-width: 120px;
-  font-size: 15px;
-  padding: 10px 22px;
-}
-
-.qc-review-actions .defect-decision-btn:disabled {
-  opacity: 0.45;
+.qc-category-options button:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
 }
+
+.qc-severity-scale label {
+  font-weight: 600;
+  display: block;
+  margin-bottom: 10px;
+  color: #0f172a;
+}
+
+.qc-severity-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.qc-severity-options button {
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 10px;
+  padding: 10px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.qc-severity-options button.active {
+  border-color: #1f7aec;
+  background: rgba(31, 122, 236, 0.08);
+  box-shadow: 0 0 0 2px rgba(31, 122, 236, 0.2);
+}
+
+.qc-severity-options button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.qc-severity-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.qc-severity-label {
+  display: block;
+  font-size: 13px;
+  color: #475569;
+}
+
+.qc-uncertain-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  background: rgba(248, 113, 113, 0.12);
+  color: #9f1239;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.qc-uncertain-toggle input {
+  width: 20px;
+  height: 20px;
+}
+
+.qc-uncertain-toggle small {
+  display: block;
+  font-weight: 400;
+  color: #9f1239;
+}
+
+.qc-confidence-scale label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #0f172a;
+}
+
+.qc-confidence-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.qc-confidence-options button {
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 10px;
+  padding: 10px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.qc-confidence-options button.active {
+  border-color: #1f7aec;
+  background: rgba(31, 122, 236, 0.08);
+  box-shadow: 0 0 0 2px rgba(31, 122, 236, 0.2);
+}
+
+.qc-confidence-options button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.qc-confidence-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.qc-confidence-label {
+  display: block;
+  font-size: 13px;
+  color: #475569;
+}
+
 
 .qc-review-summary {
   margin-top: 18px;

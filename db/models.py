@@ -106,6 +106,9 @@ class Defect(Base):
     coords_json = Column(JSON)
     qc_decision = Column(String(16), index=True)
     defect_category = Column(String(64))
+    severity_score = Column(Integer)
+    severity_confidence = Column(Integer)
+    severity_uncertain = Column(Boolean, default=False)
 
     reel = relationship("Reel", back_populates="defects")
 

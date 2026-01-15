@@ -114,6 +114,19 @@
     placeholder: null,
     stage: null,
   };
+  const SEVERITY_DESCRIPTIONS = {
+    0: "Perfect",
+    1: "Tiny cosmetic · ship",
+    2: "Noticeable · ship",
+    3: "Borderline / spec dependent",
+    4: "Reject",
+    5: "Severe reject",
+  };
+  const CONFIDENCE_DESCRIPTIONS = {
+    1: "Low",
+    2: "Medium",
+    3: "High",
+  };
 
   function isMobileViewport() {
     return window.matchMedia("(max-width: 1024px)").matches;
@@ -6404,8 +6417,11 @@ function extractRlmMetrics(config) {
     let noReelNoticeEl;
     let noReelNoticeTextEl;
     let nextReelBtn;
-    let passBtn;
-    let failBtn;
+    let severityButtons = [];
+    let severityValue = null;
+    let confidenceButtons = [];
+    let confidenceValue = null;
+    let uncertainToggle;
     let retryBtn;
     let defectActionsEl;
     let reelActionsEl;
@@ -6432,13 +6448,20 @@ function extractRlmMetrics(config) {
     let lastReviewStatusEl;
     const lastReviewFields = {};
     let defectCategorySelect;
+    let categoryButtons = [];
     let statusToggleBtn;
+    let recentToggleBtn;
+    let jobsToggleBtn;
     let statusPanel;
+    let jobsPanel;
     let statusWindowEl;
     let statusMachineEl;
     let statusJobEl;
     let statusListEl;
+    let jobsListEl;
     let statusPanelExpanded = false;
+    let recentPanelExpanded = false;
+    let jobsPanelExpanded = false;
     const statusCountEls = {};
 
     function init() {
@@ -6476,6 +6499,10 @@ function extractRlmMetrics(config) {
       noReelNoticeTextEl = Utils.qs("#qcNoReelNoticeText");
       nextReelBtn = Utils.qs("#qcReviewNextReel");
       statusToggleBtn = Utils.qs("#qcStatusToggle");
+      recentToggleBtn = Utils.qs("#qcRecentToggle");
+      jobsToggleBtn = Utils.qs("#qcJobToggle");
+      jobsPanel = Utils.qs("#qcJobsPanel");
+      jobsListEl = Utils.qs("#qcJobsList");
       statusPanel = Utils.qs("#qcStatusPanel");
       statusWindowEl = Utils.qs("#qcStatusWindow");
       statusMachineEl = Utils.qs("#qcStatusMachine");
@@ -6511,21 +6538,47 @@ function extractRlmMetrics(config) {
       reelFailBtn = Utils.qs("#qcReelFail");
       reviewerInput = Utils.qs("#qcReelReviewer");
       commentsInput = Utils.qs("#qcReelComments");
-      passBtn = Utils.qs("#qcReviewPass");
-      failBtn = Utils.qs("#qcReviewFail");
+      severityButtons = Array.from(document.querySelectorAll("#qcSeverityScale [data-severity-value]"));
+      confidenceButtons = Array.from(document.querySelectorAll("#qcConfidenceOptions [data-confidence-value]"));
+      uncertainToggle = Utils.qs("#qcUncertainToggle");
       retryBtn = Utils.qs("[data-qc-review-retry]");
       defectCategorySelect = Utils.qs("#qcDefectCategory");
+      categoryButtons = Array.from(document.querySelectorAll("#qcCategoryOptions [data-category-value]"));
       FIELD_KEYS.forEach((key) => {
         fieldEls[key] = Utils.qs(`[data-qc-field='${key}']`);
       });
       if (retryBtn) {
         retryBtn.addEventListener("click", () => fetchNext(true));
       }
-      if (passBtn) {
-        passBtn.addEventListener("click", () => handleDecision("pass"));
+      if (severityButtons.length) {
+        severityButtons.forEach((button) => {
+          button.addEventListener("click", () => {
+            if (button.disabled) return;
+            const value = Number(button.dataset.severityValue);
+            setSeverityValue(Number.isFinite(value) ? value : null);
+          });
+        });
       }
-      if (failBtn) {
-        failBtn.addEventListener("click", () => handleDecision("fail"));
+      if (confidenceButtons.length) {
+        confidenceButtons.forEach((button) => {
+          button.addEventListener("click", async () => {
+            if (button.disabled) return;
+            const value = Number(button.dataset.confidenceValue);
+            setConfidenceValue(Number.isFinite(value) ? value : null);
+            await maybeAutoSaveSeverity();
+          });
+        });
+      }
+      if (uncertainToggle) {
+        uncertainToggle.addEventListener("change", async () => {
+          if (uncertainToggle.checked) {
+            setSeverityValue(null);
+            setConfidenceValue(null);
+            await handleSeveritySave();
+          } else {
+            syncSeverityControlState();
+          }
+        });
       }
       if (reelPassBtn) {
         reelPassBtn.addEventListener("click", () => handleReelDecision("pass"));
@@ -6535,6 +6588,15 @@ function extractRlmMetrics(config) {
       }
       if (reviewerInput) {
         reviewerInput.addEventListener("input", syncReelActionState);
+      }
+      if (categoryButtons.length) {
+        categoryButtons.forEach((button) => {
+          button.addEventListener("click", () => {
+            if (button.disabled) return;
+            const value = button.dataset.categoryValue || "";
+            setDefectCategoryValue(value);
+          });
+        });
       }
       if (summaryTableBody && !summaryTableListenerAttached) {
         summaryTableBody.addEventListener("click", handleSummaryActionClick);
@@ -6560,12 +6622,20 @@ function extractRlmMetrics(config) {
         });
       }
       if (statusToggleBtn && statusPanel) {
-        statusToggleBtn.addEventListener("click", toggleStatusPanel);
+        statusToggleBtn.addEventListener("click", () => togglePanel("status"));
         statusToggleBtn.disabled = true;
+      }
+      if (recentToggleBtn && lastReviewEl) {
+        recentToggleBtn.addEventListener("click", () => togglePanel("recent"));
+        recentToggleBtn.disabled = true;
+      }
+      if (jobsToggleBtn && jobsPanel) {
+        jobsToggleBtn.addEventListener("click", () => togglePanel("jobs"));
+        jobsToggleBtn.disabled = true;
       }
       initialized = true;
       setDefectCategoryValue("");
-      setCategoryControlDisabled(true);
+      resetSeverityControls();
     }
 
     function updateHeaderInfo(reel, defect) {
@@ -6585,13 +6655,15 @@ function extractRlmMetrics(config) {
     }
 
     async function fetchNext(force = false, options = {}) {
-      const { lockToReel = false } = options;
+      const { lockToReel = false, suppressLoader = false } = options;
       if (!panel || loading) return;
       hideNoReelNotice();
       loading = true;
-      setActionsDisabled(true);
+      setSeverityControlsDisabled(true);
       setReelActionsDisabled(true);
-      setViewState(force ? "loading" : "content");
+      if (!suppressLoader || force) {
+        setViewState(force ? "loading" : "content");
+      }
       try {
         const params = {};
         if (lockToReel && currentReel && currentReel.reel_id) {
@@ -6606,7 +6678,7 @@ function extractRlmMetrics(config) {
       } finally {
         loading = false;
         if (!currentDefect) {
-          setActionsDisabled(true);
+          setSeverityControlsDisabled(true);
         }
         syncReelActionState();
       }
@@ -6618,10 +6690,10 @@ function extractRlmMetrics(config) {
       currentReel = payload.reel || null;
       currentDefect = payload.next_defect || null;
       summaryData = payload.reel_summary || null;
-      updateStatusOverview(payload.reel_overview || null);
+      updateStatusOverview(payload.reel_overview || null, payload.job_overview || []);
       if (!currentDefect) {
         setDefectCategoryValue("");
-        setCategoryControlDisabled(true);
+        resetSeverityControls();
       }
       updatePendingCount(pendingTotal);
       if (!currentReel) {
@@ -6637,6 +6709,7 @@ function extractRlmMetrics(config) {
           showNoReelNotice("No reels require review right now.", false);
           lastNoReelAlert = "";
         }
+        resetSeverityControls();
         return;
       }
       hideNoReelNotice();
@@ -6647,12 +6720,13 @@ function extractRlmMetrics(config) {
         renderDefect(currentDefect);
         toggleMode("defect");
         setViewState("content");
-        setActionsDisabled(false);
+        setSeverityControlsDisabled(false);
         return;
       }
       renderSummary(summaryData);
       toggleMode("summary");
       setViewState("content");
+      resetSeverityControls();
     }
 
     function showErrorState(message) {
@@ -6661,8 +6735,7 @@ function extractRlmMetrics(config) {
       summaryData = null;
       syncCompletionHighlights(false);
       setDefectCategoryValue("");
-      setCategoryControlDisabled(true);
-      setActionsDisabled(true);
+      resetSeverityControls();
       setViewState("error", message);
       hideNoReelNotice();
     }
@@ -6689,11 +6762,20 @@ function extractRlmMetrics(config) {
       noReelNoticeEl.classList.add("hidden");
     }
 
-    function setActionsDisabled(disabled) {
-      const shouldDisable = disabled || !currentDefect;
-      if (passBtn) passBtn.disabled = shouldDisable;
-      if (failBtn) failBtn.disabled = shouldDisable;
-      setCategoryControlDisabled(shouldDisable);
+    function setSeverityControlsDisabled(disabled) {
+      if (disabled || !currentDefect) {
+        severityButtons.forEach((button) => {
+          button.disabled = true;
+          button.classList.remove("active");
+        });
+        confidenceButtons.forEach((button) => {
+          button.disabled = true;
+          button.classList.remove("active");
+        });
+        if (uncertainToggle) uncertainToggle.disabled = true;
+        return;
+      }
+      syncSeverityControlState();
     }
 
     function setReelActionsDisabled(disabled) {
@@ -6704,38 +6786,226 @@ function extractRlmMetrics(config) {
     }
 
     function getDefectCategoryValue() {
-      if (!defectCategorySelect) return "";
-      return defectCategorySelect.value || "";
+      if (categoryButtons.length) {
+        const active = categoryButtons.find((button) => button.classList.contains("active"));
+        return active ? active.dataset.categoryValue || "" : "";
+      }
+      if (defectCategorySelect) {
+        return defectCategorySelect.value || "";
+      }
+      return "";
     }
 
     function setDefectCategoryValue(value) {
-      if (!defectCategorySelect) return;
-      defectCategorySelect.value = value || "";
+      const normalized = value || "";
+      if (categoryButtons.length) {
+        categoryButtons.forEach((button) => {
+          button.classList.toggle("active", button.dataset.categoryValue === normalized);
+        });
+      } else if (defectCategorySelect) {
+        defectCategorySelect.value = normalized;
+      }
     }
 
     function setCategoryControlDisabled(disabled) {
-      if (!defectCategorySelect) return;
-      defectCategorySelect.disabled = disabled;
+      if (categoryButtons.length) {
+        categoryButtons.forEach((button) => {
+          button.disabled = disabled;
+        });
+        return;
+      }
+      if (defectCategorySelect) {
+        defectCategorySelect.disabled = disabled;
+      }
     }
 
-    function toggleStatusPanel() {
-      if (!statusPanel || !statusToggleBtn || statusToggleBtn.disabled) return;
-      statusPanelExpanded = !statusPanelExpanded;
-      statusPanel.classList.toggle("hidden", !statusPanelExpanded);
-      statusToggleBtn.setAttribute("aria-expanded", String(statusPanelExpanded));
-      statusToggleBtn.textContent = statusPanelExpanded ? "Hide reel statuses" : "Show reel statuses";
+    function resetSeverityControls() {
+      severityValue = null;
+      confidenceValue = null;
+      if (uncertainToggle) uncertainToggle.checked = false;
+      severityButtons.forEach((button) => {
+        button.classList.remove("active");
+      });
+      confidenceButtons.forEach((button) => button.classList.remove("active"));
+      setCategoryControlDisabled(true);
+      syncSeverityControlState();
     }
 
-    function updateStatusOverview(overview) {
+    function setSeverityValue(value) {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) {
+        severityValue = null;
+      } else {
+        severityValue = Number(value);
+      }
+      severityButtons.forEach((button) => {
+        const btnValue = Number(button.dataset.severityValue);
+        button.classList.toggle("active", severityValue === btnValue);
+      });
+      syncSeverityControlState();
+      maybeAutoSaveSeverity();
+    }
+
+    function setConfidenceValue(value) {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) {
+        confidenceValue = null;
+      } else {
+        confidenceValue = Number(value);
+      }
+      confidenceButtons.forEach((button) => {
+        const btnValue = Number(button.dataset.confidenceValue);
+        button.classList.toggle("active", confidenceValue === btnValue);
+      });
+      syncSeverityControlState();
+      maybeAutoSaveSeverity();
+    }
+
+    function getConfidenceValue() {
+      return Number.isFinite(confidenceValue) ? confidenceValue : null;
+    }
+
+    function syncSeverityControlState() {
+      const hasDefect = Boolean(currentDefect);
+      const uncertain = uncertainToggle ? uncertainToggle.checked : false;
+      const hasSeverity = severityValue !== null && Number.isFinite(severityValue);
+      const hasConfidence = confidenceValue !== null && Number.isFinite(confidenceValue);
+      const enableSave = hasDefect && !saving && (uncertain || (hasSeverity && hasConfidence));
+      severityButtons.forEach((button) => {
+        button.disabled = !hasDefect || saving || uncertain;
+      });
+      confidenceButtons.forEach((button) => {
+        button.disabled = !hasDefect || saving || uncertain || !hasSeverity;
+      });
+      if (uncertain && (severityValue !== null || confidenceValue !== null)) {
+        severityValue = null;
+        confidenceValue = null;
+        severityButtons.forEach((button) => button.classList.remove("active"));
+        confidenceButtons.forEach((button) => button.classList.remove("active"));
+      }
+      if (uncertainToggle) {
+        uncertainToggle.disabled = !hasDefect || saving;
+      }
+      if (!enableSave) return;
+    }
+
+    async function maybeAutoSaveSeverity() {
+      if (!currentDefect || saving) return;
+      const uncertain = uncertainToggle ? Boolean(uncertainToggle.checked) : false;
+      const hasSeverity = severityValue !== null && Number.isFinite(severityValue);
+      const hasConfidence = confidenceValue !== null && Number.isFinite(confidenceValue);
+      if (uncertain || (hasSeverity && hasConfidence)) {
+        await handleSeveritySave();
+      }
+    }
+
+    function togglePanel(target) {
+      const showStatus = target === "status";
+      const showRecent = target === "recent";
+      const showJobs = target === "jobs";
+      if (showStatus && (!statusPanel || !statusToggleBtn || statusToggleBtn.disabled)) return;
+      if (showRecent && (!recentToggleBtn || !lastReviewEl || recentToggleBtn.disabled)) return;
+      if (showJobs && (!jobsToggleBtn || !jobsPanel || jobsToggleBtn.disabled)) return;
+      const overviewContainer = document.getElementById("qcOverviewPanel");
+      if (showStatus) {
+        const nextState = !statusPanelExpanded;
+        statusPanelExpanded = nextState;
+        recentPanelExpanded = false;
+        jobsPanelExpanded = false;
+        statusPanel.classList.toggle("hidden", !nextState);
+        if (lastReviewEl) lastReviewEl.classList.add("hidden");
+        jobsPanel && jobsPanel.classList.add("hidden");
+        statusToggleBtn.setAttribute("aria-expanded", String(nextState));
+        statusToggleBtn.textContent = nextState ? "Hide reel statuses" : "Reel statuses";
+        if (recentToggleBtn) {
+          recentToggleBtn.setAttribute("aria-expanded", "false");
+          recentToggleBtn.textContent = "Recent reel";
+        }
+        if (jobsToggleBtn) {
+          jobsToggleBtn.setAttribute("aria-expanded", "false");
+          jobsToggleBtn.textContent = "Job statuses";
+        }
+        syncOverviewContainerVisibility();
+      } else if (showRecent) {
+        const nextState = !recentPanelExpanded;
+        recentPanelExpanded = nextState;
+        statusPanelExpanded = false;
+        jobsPanelExpanded = false;
+        if (lastReviewEl) {
+          lastReviewEl.classList.toggle("hidden", !nextState);
+        }
+        statusPanel.classList.add("hidden");
+        jobsPanel && jobsPanel.classList.add("hidden");
+        recentToggleBtn.setAttribute("aria-expanded", String(nextState));
+        recentToggleBtn.textContent = nextState ? "Hide recent reel" : "Recent reel";
+        if (statusToggleBtn) {
+          statusToggleBtn.setAttribute("aria-expanded", "false");
+          statusToggleBtn.textContent = "Reel statuses";
+        }
+        if (jobsToggleBtn) {
+          jobsToggleBtn.setAttribute("aria-expanded", "false");
+          jobsToggleBtn.textContent = "Job statuses";
+        }
+        syncOverviewContainerVisibility();
+      } else if (showJobs) {
+        const nextState = !jobsPanelExpanded;
+        jobsPanelExpanded = nextState;
+        statusPanelExpanded = false;
+        recentPanelExpanded = false;
+        jobsPanel.classList.toggle("hidden", !nextState);
+        statusPanel.classList.add("hidden");
+        if (lastReviewEl) lastReviewEl.classList.add("hidden");
+        jobsToggleBtn.setAttribute("aria-expanded", String(nextState));
+        jobsToggleBtn.textContent = nextState ? "Hide job statuses" : "Job statuses";
+        if (statusToggleBtn) {
+          statusToggleBtn.setAttribute("aria-expanded", "false");
+          statusToggleBtn.textContent = "Reel statuses";
+        }
+        if (recentToggleBtn) {
+          recentToggleBtn.setAttribute("aria-expanded", "false");
+          recentToggleBtn.textContent = "Recent reel";
+        }
+        syncOverviewContainerVisibility();
+      }
+    }
+
+    function syncOverviewContainerVisibility() {
+      const overviewContainer = document.getElementById("qcOverviewPanel");
+      if (!overviewContainer) return;
+      const shouldShow = statusPanelExpanded || recentPanelExpanded || jobsPanelExpanded;
+      overviewContainer.classList.toggle("hidden", !shouldShow);
+    }
+
+    function updateStatusOverview(overview, jobRows) {
       if (!statusPanel || !statusToggleBtn) return;
       const hasData = Boolean(overview);
+      const jobs = Array.isArray(jobRows) ? jobRows : [];
+      const overviewContainer = document.getElementById("qcOverviewPanel");
       if (statusToggleBtn) {
         statusToggleBtn.disabled = !hasData;
         if (!hasData && statusPanelExpanded) {
           statusPanelExpanded = false;
           statusPanel.classList.add("hidden");
           statusToggleBtn.setAttribute("aria-expanded", "false");
-          statusToggleBtn.textContent = "Show reel statuses";
+          statusToggleBtn.textContent = "Reel statuses";
+        }
+      }
+      if (recentToggleBtn) {
+        const hasRecent = Boolean(lastReviewEl);
+        recentToggleBtn.disabled = !hasRecent;
+        if (!hasRecent && recentPanelExpanded) {
+          recentPanelExpanded = false;
+          if (lastReviewEl) lastReviewEl.classList.add("hidden");
+          recentToggleBtn.setAttribute("aria-expanded", "false");
+          recentToggleBtn.textContent = "Recent reel";
+        }
+      }
+      if (jobsToggleBtn) {
+        const hasJobs = jobs.length > 0;
+        jobsToggleBtn.disabled = !hasJobs;
+        if (!hasJobs && jobsPanelExpanded) {
+          jobsPanelExpanded = false;
+          if (jobsPanel) jobsPanel.classList.add("hidden");
+          jobsToggleBtn.setAttribute("aria-expanded", "false");
+          jobsToggleBtn.textContent = "Job statuses";
         }
       }
       if (!hasData) {
@@ -6746,6 +7016,9 @@ function extractRlmMetrics(config) {
           if (el) el.textContent = "0";
         });
         renderStatusRows([]);
+        renderJobOverview(jobs);
+        overviewContainer && overviewContainer.classList.add("hidden");
+        syncOverviewContainerVisibility();
         return;
       }
       const windowDisplay = formatOverviewWindow(overview.window);
@@ -6758,6 +7031,8 @@ function extractRlmMetrics(config) {
         el.textContent = Utils.formatNumber(counts[key] || 0);
       });
       renderStatusRows(overview.reels || []);
+      renderJobOverview(jobs);
+      syncOverviewContainerVisibility();
     }
 
     function renderStatusRows(rows) {
@@ -6792,6 +7067,44 @@ function extractRlmMetrics(config) {
         })
         .join("");
       statusListEl.innerHTML = html;
+    }
+
+    function renderJobOverview(rows) {
+      if (!jobsListEl) return;
+      if (!rows || !rows.length) {
+        jobsListEl.innerHTML = '<div class="qc-status-empty">No jobs in this window.</div>';
+        return;
+      }
+      const sorted = [...rows].sort((a, b) => {
+        const aPending = Number(a.pending_reels || 0);
+        const bPending = Number(b.pending_reels || 0);
+        if (aPending === bPending) {
+          return (a.job_name || "").localeCompare(b.job_name || "");
+        }
+        return bPending - aPending;
+      });
+      const html = sorted
+        .map((row) => {
+          const pending = Number(row.pending_reels || 0);
+          const reviewed = Number(row.reviewed_reels || 0);
+          const total = Number(row.total_reels || 0);
+          const status = row.status === "pending" ? "pending" : "complete";
+          const pillClass = status === "pending" ? "qc-job-pill--pending" : "qc-job-pill--complete";
+          const label = status === "pending" ? "Needs attention" : "Complete";
+          const jobLabel = row.job_name ? Utils.escapeHtml(row.job_name) : "Unassigned Job";
+          return `
+            <div class="qc-job-card">
+              <div class="qc-job-meta">
+                <h4>${jobLabel}</h4>
+                <span class="qc-job-pill ${pillClass}">${label}</span>
+              </div>
+              <p class="qc-job-count">Reviewed ${Utils.formatNumber(reviewed)} / ${Utils.formatNumber(total)} reels</p>
+              <p class="qc-job-pending">${Utils.formatNumber(pending)} pending</p>
+            </div>
+          `;
+        })
+        .join("");
+      jobsListEl.innerHTML = html;
     }
 
     function statusLabel(status) {
@@ -6840,7 +7153,7 @@ function extractRlmMetrics(config) {
       if (defectActionsEl) defectActionsEl.classList.toggle("hidden", isSummary);
       if (summaryEl) summaryEl.classList.toggle("hidden", !isSummary);
       if (isSummary) {
-        setActionsDisabled(true);
+        setSeverityControlsDisabled(true);
         syncReelActionState();
       } else {
         setReelActionsDisabled(true);
@@ -6921,6 +7234,25 @@ function extractRlmMetrics(config) {
       });
       setDefectCategoryValue(defect.defect_category || "");
       setCategoryControlDisabled(false);
+      const isUncertain = Boolean(defect.severity_uncertain);
+      if (uncertainToggle) {
+        uncertainToggle.checked = isUncertain;
+      }
+      if (isUncertain) {
+        setSeverityValue(null);
+        setConfidenceValue(null);
+      } else {
+        setSeverityValue(
+          defect.severity_score !== null && defect.severity_score !== undefined
+            ? Number(defect.severity_score)
+            : null
+        );
+        setConfidenceValue(
+          defect.severity_confidence !== null && defect.severity_confidence !== undefined
+            ? Number(defect.severity_confidence)
+            : null
+        );
+      }
       if (currentDefect) {
         currentDefect.defect_category = defect.defect_category || "";
       }
@@ -6947,8 +7279,8 @@ function extractRlmMetrics(config) {
             const decisionCell = canManualReview
               ? `
                   <div class="qc-summary-actions">
-                    <button type="button" data-summary-action="pass" data-defect-id="${row.defect_id}">Pass</button>
-                    <button type="button" data-summary-action="fail" data-defect-id="${row.defect_id}">Fail</button>
+                    <button type="button" data-summary-action="pass" data-defect-id="${row.defect_id}">Ship</button>
+                    <button type="button" data-summary-action="fail" data-defect-id="${row.defect_id}">Reject</button>
                   </div>
                 `
               : decisionBadge;
@@ -7035,8 +7367,12 @@ function extractRlmMetrics(config) {
         ? summaryData.defects.find((row) => Number(row.defect_id) === Number(defectId))
         : null;
       const existingCategory = summaryRow && summaryRow.defect_category ? summaryRow.defect_category : undefined;
+      const severity = decision === "pass" ? 1 : 4;
       try {
-        await persistDefectDecision(defectId, decision, {
+        await saveDefectLabel(defectId, {
+          severity,
+          confidence: 2,
+          uncertain: false,
           category: existingCategory,
         });
         applySummaryDecisionLocal(defectId, decision);
@@ -7096,22 +7432,37 @@ function extractRlmMetrics(config) {
       syncReelActionState();
     }
 
-    async function handleDecision(decision) {
+    async function handleSeveritySave() {
       if (!currentDefect || saving) return;
+      const uncertain = uncertainToggle ? Boolean(uncertainToggle.checked) : false;
+      const hasSeverity = severityValue !== null && Number.isFinite(severityValue);
+      if (!uncertain && !hasSeverity) {
+        window.alert("Select a severity value or mark the defect as uncertain.");
+        return;
+      }
+      const confidence = hasSeverity ? getConfidenceValue() : null;
+      if (hasSeverity && !confidence) {
+        window.alert("Choose a confidence level before saving.");
+        return;
+      }
       saving = true;
-      setActionsDisabled(true);
+      setSeverityControlsDisabled(true);
       try {
-        await persistDefectDecision(currentDefect.defect_id, decision, {
+        await saveDefectLabel(currentDefect.defect_id, {
+          severity: hasSeverity ? severityValue : null,
+          confidence: hasSeverity ? confidence : null,
+          uncertain,
           category: getDefectCategoryValue(),
         });
         needsRefresh = true;
-        await fetchNext(false, { lockToReel: true });
+        await fetchNext(false, { lockToReel: true, suppressLoader: true });
       } catch (error) {
-        const message = error && error.message ? error.message : "Failed to update decision.";
+        const message = error && error.message ? error.message : "Failed to save the label.";
         window.alert(message);
-        setActionsDisabled(false);
+        setSeverityControlsDisabled(false);
       } finally {
         saving = false;
+        syncSeverityControlState();
       }
     }
 
@@ -8595,20 +8946,20 @@ function extractRlmMetrics(config) {
     }
   }
 
-  async function persistDefectDecision(defectId, decision, options = {}) {
-    const normalized = (decision || "").toLowerCase();
-    if (!defectId || (normalized !== "pass" && normalized !== "fail")) {
-      throw new Error("Decision must be 'pass' or 'fail'.");
+  async function saveDefectLabel(defectId, { severity = null, confidence = null, uncertain = false, category = "" } = {}) {
+    if (!defectId) {
+      throw new Error("Missing defect id.");
     }
-    const payload = { decision: normalized };
-    if (Object.prototype.hasOwnProperty.call(options || {}, "category")) {
-      const rawCategory = options.category;
-      const trimmed =
-        rawCategory === null || rawCategory === undefined ? "" : String(rawCategory).trim();
-      payload.defect_category = trimmed ? trimmed : null;
+    const payload = {
+      severity,
+      confidence,
+      uncertain: Boolean(uncertain),
+    };
+    if (category !== undefined) {
+      const normalized = category === null ? "" : String(category || "").trim();
+      payload.defect_category = normalized || null;
     }
     await Api.post(`defects/${defectId}/decision`, payload);
-    return normalized;
   }
 
   function applyModalSelection(element, index, total) {
