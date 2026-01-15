@@ -890,84 +890,6 @@ def _reel_status_overview(
     }
 
 
-def _job_status_summary(
-    session: Session,
-    filters: Dict[str, Any],
-    pending_filter,
-    latest_review_subq,
-):
-    scope_filters = dict(filters)
-    scope_filters["job"] = None
-    scope_filters["order"] = None
-    reels = (
-        _apply_reel_filters(session.query(Reel), scope_filters)
-        .order_by(Reel.time_start.asc())
-        .all()
-    )
-    if not reels:
-        return []
-    reel_ids = [reel.reel_id for reel in reels if reel.reel_id]
-    if not reel_ids:
-        return []
-    pending_counts = {
-        reel_id: count
-        for reel_id, count in (
-            session.query(Defect.reel_id, func.count())
-            .filter(Defect.reel_id.in_(reel_ids))
-            .filter(pending_filter)
-            .group_by(Defect.reel_id)
-            .all()
-        )
-    }
-    defect_reel_ids = {
-        row.reel_id
-        for row in (
-            session.query(Defect.reel_id)
-            .filter(Defect.reel_id.in_(reel_ids))
-            .distinct()
-            .all()
-        )
-    }
-    latest_reviews = (
-        session.query(Reel.reel_id, ReelReview.decision)
-        .join(
-            latest_review_subq,
-            collate(Reel.reel_code, "utf8mb4_unicode_ci")
-            == collate(latest_review_subq.c.reel_code, "utf8mb4_unicode_ci"),
-        )
-        .join(ReelReview, ReelReview.review_id == latest_review_subq.c.max_id)
-        .filter(Reel.reel_id.in_(reel_ids))
-        .all()
-    )
-    review_map = {row.reel_id: (row.decision or "").strip().lower() for row in latest_reviews}
-    job_summary: Dict[str, Dict[str, int]] = defaultdict(lambda: {"total": 0, "reviewed": 0, "pending": 0})
-    for reel in reels:
-        if reel.reel_id is None:
-            continue
-        job_key = reel.job_name or "Unassigned Job"
-        job_summary[job_key]["total"] += 1
-        pending_total = pending_counts.get(reel.reel_id, 0)
-        decision = review_map.get(reel.reel_id)
-        has_defects = reel.reel_id in defect_reel_ids
-        if pending_total:
-            job_summary[job_key]["pending"] += 1
-        elif decision in {"pass", "fail"} or not has_defects:
-            job_summary[job_key]["reviewed"] += 1
-        else:
-            job_summary[job_key]["pending"] += 1
-    rows = [
-        {
-            "job_name": name,
-            "total_reels": data["total"],
-            "reviewed_reels": data["reviewed"],
-            "pending_reels": data["pending"],
-            "status": "pending" if data["pending"] else "complete",
-        }
-        for name, data in job_summary.items()
-    ]
-    rows.sort(key=lambda entry: (-entry["pending_reels"], entry["job_name"]))
-    return rows
-
 
 def _sensitivity_tuple_has_values(values: Optional[Tuple[Optional[float], Optional[float]]]) -> bool:
     if not values:
@@ -3414,9 +3336,10 @@ def api_qc_review():
             or_(Defect.qc_decision.is_(None), Defect.qc_decision == ""),
         )
         pending_query = base_query.filter(pending_filter)
-        pending_total = pending_query.count()
-        reel_overview = _reel_status_overview(session, filters, base_query, pending_query, latest_review_subq)
-        job_overview = _job_status_summary(session, filters, pending_filter, latest_review_subq)
+        has_pending = (
+            pending_query.with_entities(Defect.reel_id).limit(1).first()
+            is not None
+        )
 
         def build_reel_context(reel_id: int):
             reel = (
@@ -3458,7 +3381,6 @@ def api_qc_review():
             summary_counts = {"pass": 0, "fail": 0, "pending": 0}
             type_breakdown: Dict[str, Dict[str, int]] = defaultdict(lambda: {"pass": 0, "fail": 0, "pending": 0})
             summary_defects: List[Dict[str, Any]] = []
-            pending_with_image = 0
             pending_without_image = 0
             no_image_total = 0
             for defect in reel_defect_rows:
@@ -3470,10 +3392,7 @@ def api_qc_review():
                 has_image = bool(defect.image_src)
                 if not has_image:
                     no_image_total += 1
-                if bucket == "pending":
-                    if has_image:
-                        pending_with_image += 1
-                    else:
+                    if bucket == "pending" and not has_image:
                         pending_without_image += 1
                 summary_defects.append(
                     {
@@ -3578,8 +3497,6 @@ def api_qc_review():
                 "reel": reel_payload,
                 "reel_summary": reel_summary,
                 "next_defect": next_defect_payload,
-                "pending_in_reel": pending_with_image,
-                "pending_without_image": pending_without_image,
             }
 
         if focus_reel_id:
@@ -3587,27 +3504,20 @@ def api_qc_review():
             if context:
                 return jsonify(
                     {
-                        "pending_total": pending_total,
-                        "pending_in_reel": context["pending_in_reel"],
-                        "pending_without_image": context["pending_without_image"],
+                        "has_pending": True,
                         "reel": context["reel"],
                         "next_defect": context["next_defect"],
                         "reel_summary": context["reel_summary"],
-                        "reel_overview": reel_overview,
                     }
                 )
 
-        if pending_total == 0:
+        if not has_pending:
             return jsonify(
                 {
-                    "pending_total": 0,
-                    "pending_in_reel": 0,
-                    "pending_without_image": 0,
+                    "has_pending": False,
                     "reel": None,
                     "next_defect": None,
                     "reel_summary": None,
-                    "reel_overview": reel_overview,
-                    "job_overview": job_overview,
                 }
             )
 
@@ -3621,46 +3531,90 @@ def api_qc_review():
             .first()
         )
         if not target_reel_entry:
-            return jsonify(
-                {
-                    "pending_total": pending_total,
-                    "pending_in_reel": 0,
-                    "pending_without_image": 0,
-                    "reel": None,
-                    "next_defect": None,
-                    "reel_summary": None,
-                    "reel_overview": reel_overview,
-                    "job_overview": job_overview,
-                }
-            )
+            return jsonify({"has_pending": has_pending, "reel": None, "next_defect": None, "reel_summary": None})
 
         context = build_reel_context(target_reel_entry.reel_id)
         if not context:
-            return jsonify(
-                {
-                    "pending_total": pending_total,
-                    "pending_in_reel": 0,
-                    "pending_without_image": 0,
-                    "reel": None,
-                    "next_defect": None,
-                    "reel_summary": None,
-                    "reel_overview": reel_overview,
-                    "job_overview": job_overview,
-                }
-            )
+            return jsonify({"has_pending": has_pending, "reel": None, "next_defect": None, "reel_summary": None})
 
         return jsonify(
             {
-                "pending_total": pending_total,
-                "pending_in_reel": context["pending_in_reel"],
-                "pending_without_image": context["pending_without_image"],
+                "has_pending": True,
                 "reel": context["reel"],
                 "next_defect": context["next_defect"],
                 "reel_summary": context["reel_summary"],
-                "reel_overview": reel_overview,
-                "job_overview": job_overview,
             }
         )
+
+
+@dashboard_bp.route("/api/qc-review/jobs-overview")
+def api_qc_review_jobs_overview():
+    with SessionLocal() as session:
+        try:
+            filters = _validate_filters(session)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        overview_filters = dict(filters)
+        overview_filters["job"] = None
+        overview_filters["order"] = None
+        overview_filters["reel_code"] = None
+        overview_filters["reel_codes"] = []
+        overview_filters["reel_ids"] = []
+
+        overview_numeric_filters = {
+            "magnitude_min": None,
+            "magnitude_max": None,
+            "severity_min": None,
+            "severity_max": None,
+            "position_min": None,
+            "position_max": None,
+        }
+
+        base_query = _build_defect_query(
+            session,
+            overview_filters,
+            [],
+            overview_numeric_filters,
+            None,
+        )
+
+        latest_review_subq = (
+            session.query(
+                ReelReview.reel_code.label("reel_code"),
+                func.max(ReelReview.review_id).label("max_id"),
+            )
+            .group_by(ReelReview.reel_code)
+            .subquery()
+        )
+        finalized_reels_subq = (
+            session.query(Reel.reel_id)
+            .join(
+                latest_review_subq,
+                collate(Reel.reel_code, "utf8mb4_unicode_ci")
+                == collate(latest_review_subq.c.reel_code, "utf8mb4_unicode_ci"),
+            )
+            .join(
+                ReelReview,
+                ReelReview.review_id == latest_review_subq.c.max_id,
+            )
+            .filter(ReelReview.decision.in_(("pass", "fail")))
+            .subquery()
+        )
+        base_query = base_query.filter(
+            ~Defect.reel_id.in_(session.query(finalized_reels_subq.c.reel_id))
+        )
+
+        pending_filter = and_(
+            Defect.severity_score.is_(None),
+            or_(Defect.severity_uncertain.is_(None), Defect.severity_uncertain.is_(False)),
+            or_(Defect.qc_decision.is_(None), Defect.qc_decision == ""),
+        )
+        pending_query = base_query.filter(pending_filter)
+        overview = _reel_status_overview(
+            session, overview_filters, base_query, pending_query, latest_review_subq
+        )
+        return jsonify({"overview": overview})
 
 
 @dashboard_bp.route("/api/defects/<int:defect_id>/decision", methods=["POST"])

@@ -416,112 +416,25 @@
     </section>
 
     <section id="tab-qc-review" class="tab-content hidden">
-      <div class="qc-overview-toggles">
-        <button type="button" class="qc-status-toggle" id="qcRecentToggle" aria-expanded="false">
-          Recent reel
-        </button>
-        <button type="button" class="qc-status-toggle" id="qcJobToggle" aria-expanded="false">
-          Job statuses
-        </button>
-        <button type="button" class="qc-status-toggle" id="qcStatusToggle" aria-expanded="false">
-          Reel statuses
-        </button>
-      </div>
-      <div class="qc-status-overview hidden" id="qcOverviewPanel">
-        <div class="qc-status-panel hidden" id="qcStatusPanel" aria-live="polite">
-          <div class="qc-status-meta">
-            <div>
-              <span>Job Window</span>
-              <strong id="qcStatusWindow">—</strong>
-            </div>
-            <div>
-              <span>Machine</span>
-              <strong id="qcStatusMachine">—</strong>
-            </div>
-            <div>
-              <span>Job</span>
-              <strong id="qcStatusJob">—</strong>
-            </div>
-          </div>
-          <div class="qc-status-counts">
-            <div class="qc-status-card total">
-              <span>Total Reels</span>
-              <strong id="qcStatusTotal">0</strong>
-            </div>
-            <div class="qc-status-card pending">
-              <span>Pending Labeling</span>
-              <strong id="qcStatusPending">0</strong>
-            </div>
-            <div class="qc-status-card ready">
-              <span>Ready for Final Review</span>
-              <strong id="qcStatusReady">0</strong>
-            </div>
-            <div class="qc-status-card reviewed">
-              <span>Reviewed</span>
-              <strong id="qcStatusReviewed">0</strong>
-            </div>
-            <div class="qc-status-card clean">
-              <span>No Defects</span>
-              <strong id="qcStatusClean">0</strong>
-            </div>
-          </div>
-          <div class="qc-status-list">
-            <div class="qc-status-list-header">
-              <span>Reel</span>
-              <span>Window</span>
-              <span>Status</span>
-            </div>
-            <div class="qc-status-list-body" id="qcStatusList">
-              <div class="qc-status-empty">Reel summary unavailable for this filter set.</div>
-            </div>
-          </div>
+      <div class="qc-jobs-table-card" aria-live="polite">
+        <div class="qc-job-header">
+          <strong>Job statuses in current window</strong>
         </div>
-        <div class="qc-jobs-panel hidden" id="qcJobsPanel" aria-live="polite">
-          <div class="qc-job-header">
-            <strong id="qcSelectedJobLabel">No job selected</strong>
-            <span id="qcSelectedJobHint"></span>
-          </div>
-          <div class="qc-jobs-list" id="qcJobsList"></div>
-        </div>
-        <div class="last-review last-review--empty hidden" id="qcLastReviewSummary" aria-live="polite">
-          <div class="last-review-header">
-            <div>
-              <p class="last-review-eyebrow">Most Recent Reel Review</p>
-              <h2 class="last-review-title" data-last-review="title">No reviews submitted yet</h2>
-              <p class="last-review-subtitle" data-last-review="timestamp">—</p>
-              <p class="last-review-window" data-last-review="reel-time">—</p>
-            </div>
-            <span class="last-review-status badge" data-last-review="status">--</span>
-          </div>
-          <div class="last-review-meta">
-            <div>
-              <span>Machine</span>
-              <strong data-last-review="machine">—</strong>
-            </div>
-            <div>
-              <span>Job</span>
-              <strong data-last-review="job">—</strong>
-            </div>
-            <div>
-              <span>Order</span>
-              <strong data-last-review="order">—</strong>
-            </div>
-            <div>
-              <span>Reviewer</span>
-              <strong data-last-review="reviewer">—</strong>
-            </div>
-          </div>
-          <div class="last-review-counts">
-            <span>Pass <strong data-last-review="pass-count">0</strong></span>
-            <span>Fail <strong data-last-review="fail-count">0</strong></span>
-            <span>Total <strong data-last-review="total-count">0</strong></span>
-          </div>
-          <div class="last-review-types">
-            <span class="last-review-types-label">Defect Types</span>
-            <div class="last-review-types-list" data-last-review="types">
-              <span class="badge">No defect details.</span>
-            </div>
-          </div>
+        <div class="qc-jobs-table-wrapper">
+          <table class="qc-jobs-table">
+            <thead>
+              <tr>
+                <th>Job</th>
+                <th>Pending</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="qcJobsTableBody">
+              <tr>
+                <td colspan="3" class="qc-jobs-empty">No job data. Adjust the filters above.</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
       <div class="qc-review-wrapper">
@@ -532,19 +445,11 @@
               <p class="qc-review-reel" id="qcReviewReel">Reel — Machine</p>
               <p class="qc-review-time" id="qcReviewDefectTime">—</p>
             </div>
-            <div class="qc-review-counter">
-              <span id="qcReviewPending">0</span>
-              <span>pending defects</span>
-            </div>
           </div>
           <div class="qc-review-subheader">
             <div>
               <strong>Machine</strong>
               <p id="qcReviewMachine">—</p>
-            </div>
-            <div class="qc-review-reel-stats">
-              <span>Pending in reel</span>
-              <strong id="qcReviewReelPending">0</strong>
             </div>
           </div>
           <div class="qc-review-body">

@@ -1128,6 +1128,7 @@
     }
 
     const listeners = new Set();
+    const optionListeners = new Set();
     const defaults = {
       machine_id:
         (root && root.dataset.defaultMachine) ||
@@ -1261,12 +1262,23 @@
         el.addEventListener("change", (evt) => {
           if (name === "reel") {
             handleInputChange(name, getSelectedReelsFromSelect());
+          } else if (name === "start" || name === "end") {
+            const value = evt.target.value || "";
+            if (value.length === 10) {
+              return;
+            }
+            handleInputChange(name, value);
           } else {
-            handleInputChange(name, evt.target.value);
+            handleInputChange(name, evt.target.value || "");
           }
         });
         if (name === "start" || name === "end") {
-          el.addEventListener("blur", () => handleInputChange(name, el.value));
+          el.addEventListener("input", () => {
+            const value = el.value || "";
+            if (value.length === 10) {
+              handleInputChange(name, value);
+            }
+          });
         }
       });
       if (elements.chips) {
@@ -1347,14 +1359,20 @@
           syncReelSelect();
           scheduleOptionsRefresh();
           break;
-        case "start":
-          state.start = value || "";
+        case "start": {
+          const normalizedStart = value || "";
+          if (state.start === normalizedStart) return;
+          state.start = normalizedStart;
           scheduleOptionsRefresh();
           break;
-        case "end":
-          state.end = value || "";
+        }
+        case "end": {
+          const normalizedEnd = value || "";
+          if (state.end === normalizedEnd) return;
+          state.end = normalizedEnd;
           scheduleOptionsRefresh();
           break;
+        }
         case "job":
           state.job = value || "";
           if (elements.job) elements.job.value = state.job;
@@ -1405,6 +1423,13 @@
         hydratePendingReelIds();
         updating = false;
         updateDependentFilters();
+        optionListeners.forEach((cb) => {
+          try {
+            cb(data);
+          } catch (err) {
+            console.error('Filters.onOptionsUpdated listener failed', err);
+          }
+        });
       } catch (err) {
         console.error("Failed to refresh filter options", err);
       } finally {
@@ -1929,6 +1954,10 @@
       getState,
       ready: () => readyPromise,
       onChange,
+      onOptionsUpdated: (cb) => {
+        optionListeners.add(cb);
+        return () => optionListeners.delete(cb);
+      },
       set,
       setMany,
       addReel,
@@ -6400,7 +6429,6 @@ function extractRlmMetrics(config) {
     let headerReelEl;
     let headerTimeEl;
     let headerMachineEl;
-    let reelPendingEl;
     let stageEl;
     let summaryEl;
     let summaryNoticeEl;
@@ -6413,7 +6441,6 @@ function extractRlmMetrics(config) {
     let summaryCountPendingEl;
     let summaryCountNoImageEl;
     let noImageNoteEl;
-    let pendingEl;
     let noReelNoticeEl;
     let noReelNoticeTextEl;
     let nextReelBtn;
@@ -6440,7 +6467,6 @@ function extractRlmMetrics(config) {
     let currentDefect = null;
     let currentReel = null;
     let summaryData = null;
-    let pendingInReel = 0;
     let summaryTableListenerAttached = false;
     let lastNoReelAlert = "";
     let filtersListenerAttached = false;
@@ -6449,22 +6475,12 @@ function extractRlmMetrics(config) {
     const lastReviewFields = {};
     let defectCategorySelect;
     let categoryButtons = [];
-    let statusToggleBtn;
-    let recentToggleBtn;
-    let jobsToggleBtn;
-    let statusPanel;
-    let jobsPanel;
-    let statusWindowEl;
-    let statusMachineEl;
-    let statusJobEl;
-    let statusListEl;
-    let jobsListEl;
-    let jobsLabelEl;
-    let jobsHintEl;
-    let statusPanelExpanded = false;
-    let recentPanelExpanded = false;
-    let jobsPanelExpanded = false;
-    const statusCountEls = {};
+    let jobsTableBody;
+    let jobOverviewCache = [];
+    let shouldRefreshJobOverview = true;
+    let jobOverviewRequestId = 0;
+    let jobOverviewLoading = false;
+    let lastFilterSnapshot = { start: "", end: "", machine_id: "" };
 
     function init() {
       if (initialized) return;
@@ -6483,7 +6499,6 @@ function extractRlmMetrics(config) {
       headerReelEl = Utils.qs("#qcReviewReel");
       headerTimeEl = Utils.qs("#qcReviewDefectTime");
       headerMachineEl = Utils.qs("#qcReviewMachine");
-      reelPendingEl = Utils.qs("#qcReviewReelPending");
       stageEl = Utils.qs("#qcReviewStage");
       summaryEl = Utils.qs("#qcReviewSummary");
       summaryNoticeEl = Utils.qs("#qcSummaryNotice");
@@ -6496,46 +6511,10 @@ function extractRlmMetrics(config) {
       summaryCountPendingEl = Utils.qs("#qcSummaryPending");
       summaryCountNoImageEl = Utils.qs("#qcSummaryNoImage");
       noImageNoteEl = Utils.qs("#qcNoImageNote");
-      pendingEl = Utils.qs("#qcReviewPending");
       noReelNoticeEl = Utils.qs("#qcNoReelNotice");
       noReelNoticeTextEl = Utils.qs("#qcNoReelNoticeText");
       nextReelBtn = Utils.qs("#qcReviewNextReel");
-      statusToggleBtn = Utils.qs("#qcStatusToggle");
-      recentToggleBtn = Utils.qs("#qcRecentToggle");
-      jobsToggleBtn = Utils.qs("#qcJobToggle");
-      jobsPanel = Utils.qs("#qcJobsPanel");
-      jobsListEl = Utils.qs("#qcJobsList");
-      jobsLabelEl = Utils.qs("#qcSelectedJobLabel");
-      jobsHintEl = Utils.qs("#qcSelectedJobHint");
-      statusPanel = Utils.qs("#qcStatusPanel");
-      statusWindowEl = Utils.qs("#qcStatusWindow");
-      statusMachineEl = Utils.qs("#qcStatusMachine");
-      statusJobEl = Utils.qs("#qcStatusJob");
-      statusListEl = Utils.qs("#qcStatusList");
-      statusCountEls.total = Utils.qs("#qcStatusTotal");
-      statusCountEls.pending = Utils.qs("#qcStatusPending");
-      statusCountEls.ready = Utils.qs("#qcStatusReady");
-      statusCountEls.reviewed = Utils.qs("#qcStatusReviewed");
-      statusCountEls.clean = Utils.qs("#qcStatusClean");
-      lastReviewEl = Utils.qs("#qcLastReviewSummary");
-      if (lastReviewEl) {
-        lastReviewStatusEl = lastReviewEl.querySelector("[data-last-review='status']");
-        [
-          "title",
-          "timestamp",
-          "reel-time",
-          "machine",
-          "job",
-          "order",
-          "reviewer",
-          "pass-count",
-          "fail-count",
-          "total-count",
-        ].forEach((key) => {
-          lastReviewFields[key] = lastReviewEl.querySelector(`[data-last-review='${key}']`);
-        });
-        lastReviewFields.types = lastReviewEl.querySelector("[data-last-review='types']");
-      }
+      jobsTableBody = Utils.qs("#qcJobsTableBody");
       defectActionsEl = Utils.qs("#qcDefectActions");
       reelActionsEl = Utils.qs("#qcReelActions");
       reelPassBtn = Utils.qs("#qcReelPass");
@@ -6547,6 +6526,12 @@ function extractRlmMetrics(config) {
       uncertainToggle = Utils.qs("#qcUncertainToggle");
       retryBtn = Utils.qs("[data-qc-review-retry]");
       defectCategorySelect = Utils.qs("#qcDefectCategory");
+      const initialFilters = Filters && typeof Filters.getState === "function" ? Filters.getState() : {};
+      lastFilterSnapshot = {
+        start: (initialFilters.start || ""),
+        end: (initialFilters.end || ""),
+        machine_id: (initialFilters.machine_id || ""),
+      };
       categoryButtons = Array.from(document.querySelectorAll("#qcCategoryOptions [data-category-value]"));
       FIELD_KEYS.forEach((key) => {
         fieldEls[key] = Utils.qs(`[data-qc-field='${key}']`);
@@ -6569,7 +6554,7 @@ function extractRlmMetrics(config) {
             if (button.disabled) return;
             const value = Number(button.dataset.confidenceValue);
             setConfidenceValue(Number.isFinite(value) ? value : null);
-            await maybeAutoSaveSeverity();
+            await handleSeveritySave();
           });
         });
       }
@@ -6616,6 +6601,9 @@ function extractRlmMetrics(config) {
       if (!filtersListenerAttached && Filters && typeof Filters.onChange === "function") {
         Filters.onChange(() => {
           needsRefresh = true;
+          fetchNext(true, { suppressLoader: true }).catch(() => {});
+          shouldRefreshJobOverview = true;
+          fetchJobOverview(true).catch(() => {});
         });
         filtersListenerAttached = true;
       }
@@ -6625,21 +6613,11 @@ function extractRlmMetrics(config) {
           fetchNext(true);
         });
       }
-      if (statusToggleBtn && statusPanel) {
-        statusToggleBtn.addEventListener("click", () => togglePanel("status"));
-        statusToggleBtn.disabled = true;
-      }
-      if (recentToggleBtn && lastReviewEl) {
-        recentToggleBtn.addEventListener("click", () => togglePanel("recent"));
-        recentToggleBtn.disabled = true;
-      }
-      if (jobsToggleBtn && jobsPanel) {
-        jobsToggleBtn.addEventListener("click", () => togglePanel("jobs"));
-        jobsToggleBtn.disabled = true;
-      }
       initialized = true;
       setDefectCategoryValue("");
       resetSeverityControls();
+      renderJobTablePlaceholder("Loading job summary…");
+      fetchJobOverview(true).catch(() => {});
     }
 
     function updateHeaderInfo(reel, defect) {
@@ -6655,7 +6633,6 @@ function extractRlmMetrics(config) {
       const timeSource = defect && defect.defect_time ? defect.defect_time : reel && (reel.time_end || reel.time_start);
       if (headerTimeEl) headerTimeEl.textContent = formatTime(timeSource);
       if (headerMachineEl) headerMachineEl.textContent = (reel && reel.machine_name) || "—";
-      if (reelPendingEl) reelPendingEl.textContent = Utils.formatNumber(pendingInReel);
     }
 
     async function fetchNext(force = false, options = {}) {
@@ -6689,21 +6666,18 @@ function extractRlmMetrics(config) {
     }
 
     function applyPayload(payload) {
-      const pendingTotal = Number(payload.pending_total || 0);
-      pendingInReel = Number(payload.pending_in_reel || 0);
       currentReel = payload.reel || null;
       currentDefect = payload.next_defect || null;
       summaryData = payload.reel_summary || null;
-      updateStatusOverview(payload.reel_overview || null, payload.job_overview || []);
+      const hasPending = Boolean(payload && payload.has_pending);
       if (!currentDefect) {
         setDefectCategoryValue("");
         resetSeverityControls();
       }
-      updatePendingCount(pendingTotal);
       if (!currentReel) {
         setViewState("empty");
         syncCompletionHighlights(false);
-        if (payload && payload.pending_total > 0) {
+        if (hasPending) {
           showNoReelNotice("This reel has no pending defects. Click Next Reel to continue.", true);
           if (lastNoReelAlert !== "pending") {
             window.alert("This reel has no defects. Click the Next Reel button to continue.");
@@ -6719,7 +6693,7 @@ function extractRlmMetrics(config) {
       hideNoReelNotice();
       lastNoReelAlert = "";
       updateHeaderInfo(currentReel, currentDefect);
-      syncCompletionHighlights(pendingInReel === 0);
+      syncCompletionHighlights(!currentDefect);
       if (currentDefect) {
         renderDefect(currentDefect);
         toggleMode("defect");
@@ -6742,11 +6716,6 @@ function extractRlmMetrics(config) {
       resetSeverityControls();
       setViewState("error", message);
       hideNoReelNotice();
-    }
-
-    function updatePendingCount(total) {
-      if (!pendingEl) return;
-      pendingEl.textContent = Utils.formatNumber(total);
     }
 
     function showNoReelNotice(message, showButton) {
@@ -6846,7 +6815,6 @@ function extractRlmMetrics(config) {
         button.classList.toggle("active", severityValue === btnValue);
       });
       syncSeverityControlState();
-      maybeAutoSaveSeverity();
     }
 
     function setConfidenceValue(value) {
@@ -6860,7 +6828,6 @@ function extractRlmMetrics(config) {
         button.classList.toggle("active", confidenceValue === btnValue);
       });
       syncSeverityControlState();
-      maybeAutoSaveSeverity();
     }
 
     function getConfidenceValue() {
@@ -6888,307 +6855,70 @@ function extractRlmMetrics(config) {
       if (uncertainToggle) {
         uncertainToggle.disabled = !hasDefect || saving;
       }
-      if (!enableSave) return;
     }
 
-    async function maybeAutoSaveSeverity() {
-      if (!currentDefect || saving) return;
-      const uncertain = uncertainToggle ? Boolean(uncertainToggle.checked) : false;
-      const hasSeverity = severityValue !== null && Number.isFinite(severityValue);
-      const hasConfidence = confidenceValue !== null && Number.isFinite(confidenceValue);
-      if (uncertain || (hasSeverity && hasConfidence)) {
-        await handleSeveritySave();
-      }
+    function renderJobTablePlaceholder(message) {
+      if (!jobsTableBody) return;
+      const text = message || "No job data. Adjust the filters above.";
+      jobsTableBody.innerHTML = `<tr><td colspan="3" class="qc-jobs-empty">${Utils.escapeHtml(text)}</td></tr>`;
     }
 
-    function togglePanel(target) {
-      const showStatus = target === "status";
-      const showRecent = target === "recent";
-      const showJobs = target === "jobs";
-      if (showStatus && (!statusPanel || !statusToggleBtn || statusToggleBtn.disabled)) return;
-      if (showRecent && (!recentToggleBtn || !lastReviewEl || recentToggleBtn.disabled)) return;
-      if (showJobs && (!jobsToggleBtn || !jobsPanel || jobsToggleBtn.disabled)) return;
-      const overviewContainer = document.getElementById("qcOverviewPanel");
-      if (showStatus) {
-        const nextState = !statusPanelExpanded;
-        statusPanelExpanded = nextState;
-        recentPanelExpanded = false;
-        jobsPanelExpanded = false;
-        statusPanel.classList.toggle("hidden", !nextState);
-        if (lastReviewEl) lastReviewEl.classList.add("hidden");
-        jobsPanel && jobsPanel.classList.add("hidden");
-        statusToggleBtn.setAttribute("aria-expanded", String(nextState));
-        statusToggleBtn.textContent = nextState ? "Hide reel statuses" : "Reel statuses";
-        statusToggleBtn.classList.toggle("qc-status-toggle--active", nextState);
-        if (jobsToggleBtn) jobsToggleBtn.classList.remove("qc-status-toggle--active");
-        if (recentToggleBtn) recentToggleBtn.classList.remove("qc-status-toggle--active");
-        if (recentToggleBtn) {
-          recentToggleBtn.setAttribute("aria-expanded", "false");
-          recentToggleBtn.textContent = "Recent reel";
-        }
-        if (jobsToggleBtn) {
-          jobsToggleBtn.setAttribute("aria-expanded", "false");
-          jobsToggleBtn.textContent = "Job statuses";
-        }
-        syncOverviewContainerVisibility();
-      } else if (showRecent) {
-        const nextState = !recentPanelExpanded;
-        recentPanelExpanded = nextState;
-        statusPanelExpanded = false;
-        jobsPanelExpanded = false;
-        if (lastReviewEl) {
-          lastReviewEl.classList.toggle("hidden", !nextState);
-        }
-        statusPanel.classList.add("hidden");
-        jobsPanel && jobsPanel.classList.add("hidden");
-        recentToggleBtn.setAttribute("aria-expanded", String(nextState));
-        recentToggleBtn.textContent = nextState ? "Hide recent reel" : "Recent reel";
-        recentToggleBtn.classList.toggle("qc-status-toggle--active", nextState);
-        if (jobsToggleBtn) jobsToggleBtn.classList.remove("qc-status-toggle--active");
-        if (statusToggleBtn) statusToggleBtn.classList.remove("qc-status-toggle--active");
-        if (statusToggleBtn) {
-          statusToggleBtn.setAttribute("aria-expanded", "false");
-          statusToggleBtn.textContent = "Reel statuses";
-        }
-        if (jobsToggleBtn) {
-          jobsToggleBtn.setAttribute("aria-expanded", "false");
-          jobsToggleBtn.textContent = "Job statuses";
-        }
-        syncOverviewContainerVisibility();
-      } else if (showJobs) {
-        const nextState = !jobsPanelExpanded;
-        jobsPanelExpanded = nextState;
-        statusPanelExpanded = false;
-        recentPanelExpanded = false;
-        jobsPanel.classList.toggle("hidden", !nextState);
-        statusPanel.classList.add("hidden");
-        if (lastReviewEl) lastReviewEl.classList.add("hidden");
-        jobsToggleBtn.setAttribute("aria-expanded", String(nextState));
-        jobsToggleBtn.textContent = nextState ? "Hide job statuses" : "Job statuses";
-        jobsToggleBtn.classList.toggle("qc-status-toggle--active", nextState);
-        if (statusToggleBtn) statusToggleBtn.classList.remove("qc-status-toggle--active");
-        if (recentToggleBtn) recentToggleBtn.classList.remove("qc-status-toggle--active");
-        if (statusToggleBtn) {
-          statusToggleBtn.setAttribute("aria-expanded", "false");
-          statusToggleBtn.textContent = "Reel statuses";
-        }
-        if (recentToggleBtn) {
-          recentToggleBtn.setAttribute("aria-expanded", "false");
-          recentToggleBtn.textContent = "Recent reel";
-        }
-        syncOverviewContainerVisibility();
-      }
-    }
-
-    function syncOverviewContainerVisibility() {
-      const overviewContainer = document.getElementById("qcOverviewPanel");
-      if (!overviewContainer) return;
-      const shouldShow = statusPanelExpanded || recentPanelExpanded || jobsPanelExpanded;
-      overviewContainer.classList.toggle("hidden", !shouldShow);
-    }
-
-    function updateStatusOverview(overview, jobRows) {
-      if (!statusPanel || !statusToggleBtn) return;
-      const hasData = Boolean(overview);
-      const jobs = Array.isArray(jobRows) ? jobRows : [];
-      const overviewContainer = document.getElementById("qcOverviewPanel");
-      if (statusToggleBtn) {
-        statusToggleBtn.disabled = !hasData;
-        if (!hasData && statusPanelExpanded) {
-          statusPanelExpanded = false;
-          statusPanel.classList.add("hidden");
-          statusToggleBtn.setAttribute("aria-expanded", "false");
-          statusToggleBtn.textContent = "Reel statuses";
-        }
-      }
-      if (recentToggleBtn) {
-        const hasRecent = Boolean(lastReviewEl);
-        recentToggleBtn.disabled = !hasRecent;
-        if (!hasRecent && recentPanelExpanded) {
-          recentPanelExpanded = false;
-          if (lastReviewEl) lastReviewEl.classList.add("hidden");
-          recentToggleBtn.setAttribute("aria-expanded", "false");
-          recentToggleBtn.textContent = "Recent reel";
-        }
-      }
-      if (jobsToggleBtn) {
-        const hasJobs = jobs.length > 0;
-        jobsToggleBtn.disabled = !hasJobs;
-        if (!hasJobs && jobsPanelExpanded) {
-          jobsPanelExpanded = false;
-          if (jobsPanel) jobsPanel.classList.add("hidden");
-          jobsToggleBtn.setAttribute("aria-expanded", "false");
-          jobsToggleBtn.textContent = "Job statuses";
-          jobsToggleBtn.classList.remove("qc-status-toggle--active");
-        }
-        if (!hasJobs) {
-          jobsToggleBtn.classList.remove("qc-status-toggle--active");
-        }
-      }
-      if (!hasData) {
-        if (statusWindowEl) statusWindowEl.textContent = "—";
-        if (statusMachineEl) statusMachineEl.textContent = "—";
-        if (statusJobEl) statusJobEl.textContent = "—";
-        Object.values(statusCountEls).forEach((el) => {
-          if (el) el.textContent = "0";
-        });
-        renderStatusRows([]);
-        renderJobOverview(jobs);
-        overviewContainer && overviewContainer.classList.add("hidden");
-        syncOverviewContainerVisibility();
-        return;
-      }
-      const windowDisplay = formatOverviewWindow(overview.window);
-      if (statusWindowEl) statusWindowEl.textContent = windowDisplay || "—";
-      if (statusMachineEl) statusMachineEl.textContent = overview.machine_name || "—";
-      if (statusJobEl) statusJobEl.textContent = overview.job_name || "—";
-      const counts = overview.counts || {};
-      Object.entries(statusCountEls).forEach(([key, el]) => {
-        if (!el) return;
-        el.textContent = Utils.formatNumber(counts[key] || 0);
-      });
-      renderStatusRows(overview.reels || []);
-      renderJobOverview(jobs);
-      if (jobs.length && !statusPanelExpanded && !recentPanelExpanded && !jobsPanelExpanded) {
-        jobsPanelExpanded = true;
-        if (jobsPanel) jobsPanel.classList.remove("hidden");
-        statusPanel.classList.add("hidden");
-        if (lastReviewEl) lastReviewEl.classList.add("hidden");
-        if (jobsToggleBtn) {
-          jobsToggleBtn.setAttribute("aria-expanded", "true");
-          jobsToggleBtn.textContent = "Hide job statuses";
-          jobsToggleBtn.classList.add("qc-status-toggle--active");
-        }
-        if (statusToggleBtn) {
-          statusToggleBtn.setAttribute("aria-expanded", "false");
-          statusToggleBtn.textContent = "Reel statuses";
-          statusToggleBtn.classList.remove("qc-status-toggle--active");
-        }
-        if (recentToggleBtn) {
-          recentToggleBtn.setAttribute("aria-expanded", "false");
-          recentToggleBtn.textContent = "Recent reel";
-          recentToggleBtn.classList.remove("qc-status-toggle--active");
-        }
-        overviewContainer && overviewContainer.classList.remove("hidden");
-      }
-      syncOverviewContainerVisibility();
-    }
-
-    function renderStatusRows(rows) {
-      if (!statusListEl) return;
-      const pendingRows = Array.isArray(rows) ? rows.filter((row) => row.status === "pending") : [];
-      if (!pendingRows.length) {
-        statusListEl.innerHTML = '<div class="qc-status-empty">No reels are waiting for labeling in this range.</div>';
-        return;
-      }
-      const html = pendingRows
-        .map((row) => {
-          const reelLabel = row.reel_code ? Utils.escapeHtml(`Reel ${row.reel_code}`) : `Reel #${row.reel_id}`;
-          const windowText = formatOverviewWindow({ start: row.start, end: row.end }) || "—";
-          const statusText = statusLabel(row.status);
-          const pillClass = statusClass(row.status);
-          let detail = "";
-          if (Number(row.pending_defects || 0) > 0) {
-            detail = ` · ${Utils.formatNumber(row.pending_defects)} pending`;
-          }
-          if (row.decision && row.decision !== row.status) {
-            detail += ` · last ${row.decision.toUpperCase()}`;
-          }
-          return `
-            <div class="qc-status-row">
-              <div><strong>${reelLabel}</strong></div>
-              <div>${windowText}</div>
-              <div>
-                <span class="qc-status-pill ${pillClass}">${statusText}</span>${detail}
-              </div>
-            </div>
-          `;
-        })
-        .join("");
-      statusListEl.innerHTML = html;
-    }
-
-    function renderJobOverview(rows) {
-      if (!jobsListEl) return;
+    function renderJobTable(rows) {
+      if (!jobsTableBody) return;
       const list = Array.isArray(rows) ? rows : [];
-      const filtersState = Filters && typeof Filters.getState === "function" ? Filters.getState() : {};
-      const selectedJob = (filtersState.job || "").trim();
-      const selectedEntry = selectedJob ? list.find((row) => (row.job_name || "") === selectedJob) : null;
-      if (jobsLabelEl) {
-        if (!selectedJob) {
-          jobsLabelEl.textContent = "No job selected";
-        } else {
-          jobsLabelEl.textContent = `Selected job: ${selectedJob}`;
-        }
-      }
-      if (jobsHintEl) {
-        if (!selectedJob) {
-          jobsHintEl.textContent = "";
-        } else if (!selectedEntry) {
-          jobsHintEl.textContent = "Selected job is outside this window.";
-        } else if (selectedEntry.status === "complete") {
-          jobsHintEl.textContent = "This job is complete. Pick another job to review.";
-        } else {
-          jobsHintEl.textContent = "";
-        }
-      }
       if (!list.length) {
-        jobsListEl.innerHTML = '<div class="qc-status-empty">No jobs in this window.</div>';
+        renderJobTablePlaceholder("No job data. Adjust the filters above.");
         return;
       }
       const html = list
         .map((row) => {
-          const isSelected = selectedJob && row.job_name === selectedJob;
-          const selectedClass = isSelected ? " qc-job-card--selected" : "";
-          const pending = Number(row.pending_reels || 0);
-          const reviewed = Number(row.reviewed_reels || 0);
+          const jobName = row.label || row.job_name || row.value || "";
           const total = Number(row.total_reels || 0);
-          const status = row.status === "pending" ? "pending" : "complete";
-          const pillClass = status === "pending" ? "qc-job-pill--pending" : "qc-job-pill--complete";
-          const label = status === "pending" ? "Needs attention" : "Complete";
-          const jobLabel = row.job_name ? Utils.escapeHtml(row.job_name) : "Unassigned Job";
+          const reviewed = Number(row.reviewed_reels || 0);
+          const pendingCalculated = Math.max(total - reviewed, 0);
+          const pending = row.pending_reels !== undefined ? Number(row.pending_reels) : pendingCalculated;
+          const normalizedPending = Number.isFinite(pending) ? Math.max(pending, 0) : pendingCalculated;
+          const status = normalizedPending > 0 ? "pending" : "complete";
+          const pillClass = status === "pending" ? "qc-job-status-pill--pending" : "qc-job-status-pill--complete";
+          const pillLabel = status === "pending" ? "Needs attention" : "Complete";
           return `
-            <div class="qc-job-card${selectedClass}">
-              <div class="qc-job-meta">
-                <h4>${jobLabel}</h4>
-                <span class="qc-job-pill ${pillClass}">${label}</span>
-              </div>
-              <p class="qc-job-count">Reviewed ${Utils.formatNumber(reviewed)} / ${Utils.formatNumber(total)} reels</p>
-              <p class="qc-job-pending">${Utils.formatNumber(pending)} pending</p>
-            </div>
+            <tr>
+              <td>${Utils.escapeHtml(jobName || "Unassigned Job")}</td>
+              <td>${Utils.formatNumber(pending)}</td>
+              <td><span class="qc-job-status-pill ${pillClass}">${pillLabel}</span></td>
+            </tr>
           `;
         })
         .join("");
-      jobsListEl.innerHTML = html;
+      jobsTableBody.innerHTML = html;
     }
 
-    function statusLabel(status) {
-      switch (status) {
-        case "pending":
-          return "Pending labeling";
-        case "ready":
-          return "Ready for review";
-        case "reviewed":
-          return "Reviewed";
-        case "clean":
-          return "No defects";
-        default:
-          return "Unknown";
-      }
-    }
-
-    function statusClass(status) {
-      switch (status) {
-        case "pending":
-          return "qc-status-pill--pending";
-        case "ready":
-          return "qc-status-pill--ready";
-        case "reviewed":
-          return "qc-status-pill--reviewed";
-        case "clean":
-          return "qc-status-pill--clean";
-        default:
-          return "";
+    async function fetchJobOverview(force = false) {
+      if (!jobsTableBody) return;
+      if (jobOverviewLoading) return;
+      if (!force && !shouldRefreshJobOverview) return;
+      shouldRefreshJobOverview = false;
+      jobOverviewLoading = true;
+      const requestId = ++jobOverviewRequestId;
+      renderJobTablePlaceholder("Loading job summary…");
+      try {
+        const data = await Api.get("qc-review/jobs-overview");
+        if (requestId !== jobOverviewRequestId) return;
+        const jobs = data?.overview?.jobs || [];
+        jobOverviewCache = jobs;
+        if (jobs.length) {
+          renderJobTable(jobOverviewCache);
+        } else {
+          renderJobTablePlaceholder("No job data. Adjust the filters above.");
+        }
+      } catch (error) {
+        if (requestId !== jobOverviewRequestId) return;
+        jobOverviewCache = [];
+        renderJobTablePlaceholder("Failed to load job overview.");
+      } finally {
+        if (requestId === jobOverviewRequestId) {
+          jobOverviewLoading = false;
+        }
       }
     }
 
@@ -7334,7 +7064,7 @@ function extractRlmMetrics(config) {
             const decisionCell = canManualReview
               ? `
                   <div class="qc-summary-actions">
-                    <button type="button" data-summary-action="pass" data-defect-id="${row.defect_id}">Ship</button>
+                    <button type="button" data-summary-action="pass" data-defect-id="${row.defect_id}">Pass</button>
                     <button type="button" data-summary-action="fail" data-defect-id="${row.defect_id}">Reject</button>
                   </div>
                 `
@@ -7373,10 +7103,7 @@ function extractRlmMetrics(config) {
         }
       }
       if (summaryNoticeEl) {
-        summaryNoticeEl.textContent =
-          pendingInReel === 0
-            ? "All photo-backed defects are reviewed. Submit a reel decision to continue."
-            : "Review remaining defects with images to enable reel decisions.";
+        summaryNoticeEl.textContent = "All photo-backed defects are reviewed. Submit a reel decision to continue.";
       }
       if (noImageNoteEl) {
         const pendingNoImage = Number(summary?.no_image_pending || 0);
@@ -7560,6 +7287,8 @@ function extractRlmMetrics(config) {
         needsRefresh = true;
         await fetchNext(true);
         refreshLastReview();
+        shouldRefreshJobOverview = true;
+        fetchJobOverview(true).catch(() => {});
       } catch (error) {
         const message = error && error.message ? error.message : "Failed to submit reel decision.";
         window.alert(message);
@@ -7573,8 +7302,11 @@ function extractRlmMetrics(config) {
       if (!initialized) init();
       if (!panel) return;
       refreshLastReview();
-      if (needsRefresh || (!currentDefect && pendingInReel === 0)) {
+      if (needsRefresh || !currentDefect) {
         fetchNext(true);
+      }
+      if (shouldRefreshJobOverview) {
+        fetchJobOverview(true).catch(() => {});
       }
     }
 
@@ -7585,6 +7317,8 @@ function extractRlmMetrics(config) {
     function onFiltersUpdated() {
       needsRefresh = true;
       fetchNext(true);
+      shouldRefreshJobOverview = true;
+      fetchJobOverview(true).catch(() => {});
     }
 
     async function refreshLastReview() {
