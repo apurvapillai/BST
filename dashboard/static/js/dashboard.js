@@ -6478,11 +6478,17 @@ function extractRlmMetrics(config) {
     let categoryButtons = [];
     let jobsTableBody;
     let imageRotation = 0;
+    let jobSwitchModal;
+    let jobSwitchModalMessage;
+    let jobSwitchModalConfirm;
+    let jobSwitchModalCancel;
+    let pendingJobSwitchTarget = null;
     let jobOverviewCache = [];
+    let lastJobAlerted = "";
     let shouldRefreshJobOverview = true;
     let jobOverviewRequestId = 0;
     let jobOverviewLoading = false;
-    let lastFilterSnapshot = { start: "", end: "", machine_id: "" };
+    let lastFilterSnapshot = { start: "", end: "", machine_id: "", job: "" };
 
     function init() {
       if (initialized) return;
@@ -6518,6 +6524,10 @@ function extractRlmMetrics(config) {
       noReelNoticeTextEl = Utils.qs("#qcNoReelNoticeText");
       nextReelBtn = Utils.qs("#qcReviewNextReel");
       jobsTableBody = Utils.qs("#qcJobsTableBody");
+      jobSwitchModal = Utils.qs("#jobSwitchModal");
+      jobSwitchModalMessage = Utils.qs("#jobSwitchModalMessage");
+      jobSwitchModalConfirm = Utils.qs("#jobSwitchModalConfirm");
+      jobSwitchModalCancel = Utils.qs("#jobSwitchModalCancel");
       defectActionsEl = Utils.qs("#qcDefectActions");
       reelActionsEl = Utils.qs("#qcReelActions");
       reelPassBtn = Utils.qs("#qcReelPass");
@@ -6534,6 +6544,7 @@ function extractRlmMetrics(config) {
         start: (initialFilters.start || ""),
         end: (initialFilters.end || ""),
         machine_id: (initialFilters.machine_id || ""),
+        job: (initialFilters.job || ""),
       };
       categoryButtons = Array.from(document.querySelectorAll("#qcCategoryOptions [data-category-value]"));
       FIELD_KEYS.forEach((key) => {
@@ -6589,6 +6600,18 @@ function extractRlmMetrics(config) {
           applyImageRotation();
         });
       }
+      if (jobSwitchModalConfirm) {
+        jobSwitchModalConfirm.addEventListener("click", () => {
+          const target = pendingJobSwitchTarget;
+          hideJobSwitchModal();
+          if (target) {
+            Filters.set("job", target, { emit: true, updateUrl: true });
+          }
+        });
+      }
+      if (jobSwitchModalCancel) {
+        jobSwitchModalCancel.addEventListener("click", hideJobSwitchModal);
+      }
       if (categoryButtons.length) {
         categoryButtons.forEach((button) => {
           button.addEventListener("click", () => {
@@ -6611,9 +6634,23 @@ function extractRlmMetrics(config) {
       }
       if (!filtersListenerAttached && Filters && typeof Filters.onChange === "function") {
         Filters.onChange(() => {
+          const nextState = Filters && typeof Filters.getState === "function" ? Filters.getState() : {};
+          const nextSnapshot = {
+            start: nextState.start || "",
+            end: nextState.end || "",
+            machine_id: nextState.machine_id || "",
+            job: nextState.job || "",
+          };
+          if (nextSnapshot.job !== lastFilterSnapshot.job) {
+            lastJobAlerted = "";
+          }
+          lastFilterSnapshot = nextSnapshot;
           needsRefresh = true;
-          fetchNext(true, { suppressLoader: true }).catch(() => {});
           shouldRefreshJobOverview = true;
+          if (!isQcReviewActive()) {
+            return;
+          }
+          fetchNext(true, { suppressLoader: true }).catch(() => {});
           fetchJobOverview(true).catch(() => {});
         });
         filtersListenerAttached = true;
@@ -6824,6 +6861,27 @@ function extractRlmMetrics(config) {
       rotateImageBtn.disabled = !enabled;
     }
 
+    function showJobSwitchModal(selectedJob, nextJob) {
+      if (!jobSwitchModal || !jobSwitchModalMessage || !jobSwitchModalConfirm) return;
+      pendingJobSwitchTarget = nextJob || null;
+      const hasNext = Boolean(nextJob);
+      jobSwitchModalMessage.textContent = hasNext
+        ? `Job "${selectedJob}" has no reels to review. Switch to next available "${nextJob}"?`
+        : `Job "${selectedJob}" has no reels to review. All jobs in this time range look complete—try adjusting the start/end date.`;
+      jobSwitchModal.classList.remove("hidden");
+      if (jobSwitchModalCancel) {
+        jobSwitchModalCancel.classList.toggle("hidden", !hasNext);
+      }
+      jobSwitchModalConfirm.textContent = hasNext ? "Switch Job" : "OK";
+    }
+
+    function hideJobSwitchModal() {
+      if (jobSwitchModal) {
+        jobSwitchModal.classList.add("hidden");
+      }
+      pendingJobSwitchTarget = null;
+    }
+
     function resetSeverityControls() {
       severityValue = null;
       confidenceValue = null;
@@ -6889,10 +6947,27 @@ function extractRlmMetrics(config) {
       }
     }
 
+    function isQcReviewActive() {
+      return Router && typeof Router.current === "function" && Router.current() === "qc-review";
+    }
+
     function renderJobTablePlaceholder(message) {
       if (!jobsTableBody) return;
       const text = message || "No job data. Adjust the filters above.";
       jobsTableBody.innerHTML = `<tr><td colspan="3" class="qc-jobs-empty">${Utils.escapeHtml(text)}</td></tr>`;
+    }
+
+    function normalizeJobLabel(row) {
+      return (row && (row.job_name || row.label || row.value)) || "";
+    }
+
+    function getPendingCount(row) {
+      if (!row) return 0;
+      const total = Number(row.total_reels || 0);
+      const reviewed = Number(row.reviewed_reels || 0);
+      const pendingCalculated = Math.max(total - reviewed, 0);
+      const pending = row.pending_reels !== undefined ? Number(row.pending_reels) : pendingCalculated;
+      return Number.isFinite(pending) ? Math.max(pending, 0) : pendingCalculated;
     }
 
     function renderJobTable(rows) {
@@ -6904,13 +6979,9 @@ function extractRlmMetrics(config) {
       }
       const html = list
         .map((row) => {
-          const jobName = row.label || row.job_name || row.value || "";
-          const total = Number(row.total_reels || 0);
-          const reviewed = Number(row.reviewed_reels || 0);
-          const pendingCalculated = Math.max(total - reviewed, 0);
-          const pending = row.pending_reels !== undefined ? Number(row.pending_reels) : pendingCalculated;
-          const normalizedPending = Number.isFinite(pending) ? Math.max(pending, 0) : pendingCalculated;
-          const status = normalizedPending > 0 ? "pending" : "complete";
+          const jobName = normalizeJobLabel(row);
+          const pending = getPendingCount(row);
+          const status = pending > 0 ? "pending" : "complete";
           const pillClass = status === "pending" ? "qc-job-status-pill--pending" : "qc-job-status-pill--complete";
           const pillLabel = status === "pending" ? "Needs attention" : "Complete";
           return `
@@ -6923,6 +6994,50 @@ function extractRlmMetrics(config) {
         })
         .join("");
       jobsTableBody.innerHTML = html;
+    }
+
+    function maybePromptForJobSwitch(rows) {
+      if (!isQcReviewActive()) return;
+      if (!Filters || typeof Filters.getState !== "function") return;
+      const state = Filters.getState();
+      const selectedJob = (state.job || "").trim();
+      if (!selectedJob) {
+        lastJobAlerted = "";
+        return;
+      }
+      const list = Array.isArray(rows) ? rows : [];
+      if (!list.length) {
+        lastJobAlerted = "";
+        return;
+      }
+      const normalizedSelection = selectedJob.toLowerCase();
+      const selectedRow = list.find((row) => normalizeJobLabel(row).toLowerCase() === normalizedSelection);
+      if (!selectedRow) {
+        lastJobAlerted = "";
+        return;
+      }
+      const pending = getPendingCount(selectedRow);
+      if (pending > 0) {
+        lastJobAlerted = "";
+        return;
+      }
+      if (lastJobAlerted.toLowerCase && lastJobAlerted.toLowerCase() === normalizedSelection) {
+        return;
+      }
+      const nextRow = list.find((row) => {
+        const label = normalizeJobLabel(row);
+        if (!label) return false;
+        if (label.toLowerCase() === normalizedSelection) return false;
+        return getPendingCount(row) > 0;
+      });
+      if (!nextRow) {
+        showJobSwitchModal(selectedJob, null);
+        lastJobAlerted = selectedJob;
+        return;
+      }
+      const nextLabel = normalizeJobLabel(nextRow) || "Next job";
+      showJobSwitchModal(selectedJob, nextLabel);
+      lastJobAlerted = selectedJob;
     }
 
     async function fetchJobOverview(force = false) {
@@ -6940,13 +7055,16 @@ function extractRlmMetrics(config) {
         jobOverviewCache = jobs;
         if (jobs.length) {
           renderJobTable(jobOverviewCache);
+          maybePromptForJobSwitch(jobOverviewCache);
         } else {
           renderJobTablePlaceholder("No job data. Adjust the filters above.");
+          maybePromptForJobSwitch([]);
         }
       } catch (error) {
         if (requestId !== jobOverviewRequestId) return;
         jobOverviewCache = [];
         renderJobTablePlaceholder("Failed to load job overview.");
+        maybePromptForJobSwitch([]);
       } finally {
         if (requestId === jobOverviewRequestId) {
           jobOverviewLoading = false;

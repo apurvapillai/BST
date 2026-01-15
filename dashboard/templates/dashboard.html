@@ -697,10 +697,19 @@
 
   </div>
 
+  <div class="modal-overlay hidden" id="jobSwitchModal" role="dialog" aria-modal="true">
+    <div class="modal-dialog">
+      <h3 id="jobSwitchModalTitle">No Reels to Review</h3>
+      <p id="jobSwitchModalMessage"></p>
+      <div class="modal-actions">
+        <button type="button" class="button-secondary" id="jobSwitchModalCancel">Cancel</button>
+        <button type="button" class="button-primary" id="jobSwitchModalConfirm">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="true"></div>
+
   <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 </body>
 </html>
-      </div>
-    </div>
-
-    <div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="true"></div>

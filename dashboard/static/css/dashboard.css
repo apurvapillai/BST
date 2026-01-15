@@ -3475,6 +3475,66 @@ body {
   transform: scale(1.05);
 }
 
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}
+
+.modal-overlay.hidden {
+  display: none;
+}
+
+.modal-dialog {
+  width: min(420px, 90vw);
+  background: #fff;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 30px 60px rgba(15, 23, 42, 0.35);
+  text-align: center;
+}
+
+.modal-dialog h3 {
+  margin: 0 0 12px;
+  color: #0f172a;
+  font-size: 20px;
+}
+
+.modal-dialog p {
+  margin: 0 0 20px;
+  color: #475569;
+  font-size: 15px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.modal-actions button {
+  min-width: 110px;
+  border-radius: 999px;
+  border: none;
+  padding: 10px 20px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.button-primary {
+  background: linear-gradient(135deg, #1d4ed8, #2563eb);
+  color: #fff;
+}
+
+.button-secondary {
+  background: rgba(148, 163, 184, 0.2);
+  color: #0f172a;
+}
+
 .qc-review-details {
   display: flex;
   flex-direction: column;
