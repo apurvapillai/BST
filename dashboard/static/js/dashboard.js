@@ -1326,6 +1326,21 @@
       }
     }
 
+    function maybeClearJobSelectionForOverview() {
+      const routerAvailable = typeof Router !== "undefined" && Router && typeof Router.current === "function";
+      if (!routerAvailable) return;
+      if (Router.current() !== "overview") return;
+      const hasAnySelection = state.job || state.order || state.reel_ids.length;
+      if (!hasAnySelection) return;
+      state.job = "";
+      if (elements.job) elements.job.value = "";
+      state.order = "";
+      if (elements.order) elements.order.value = "";
+      state.reel_ids = [];
+      pendingReelCodes = [];
+      syncReelSelect();
+    }
+
     function applyOptionStatusStyles(option, status) {
       if (!option) return;
       const normalized = status || "";
@@ -1388,6 +1403,7 @@
           if (state.start === normalizedStart) return;
           state.start = normalizedStart;
           autoAdjustEndDateFromStart(normalizedStart);
+          maybeClearJobSelectionForOverview();
           scheduleOptionsRefresh();
           break;
         }
@@ -1395,6 +1411,7 @@
           const normalizedEnd = value || "";
           if (state.end === normalizedEnd) return;
           state.end = normalizedEnd;
+          maybeClearJobSelectionForOverview();
           scheduleOptionsRefresh();
           break;
         }
