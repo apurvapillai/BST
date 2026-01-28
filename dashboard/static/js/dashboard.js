@@ -1059,6 +1059,7 @@
     const reelOptionCache = new Map(); // reel_id -> { value, code, label }
     const reelIdsByCode = new Map(); // reel_code -> [reel_id]
     const forcedDisabled = new Map();
+    const AUTO_RANGE_DAYS = 3; // how many days the end date should trail the start date by default
     let pendingReelCodes = [];
     const STATUS_STYLES = {
       pass: { bg: "rgba(34, 197, 94, 0.35)", color: "#065f46" },
@@ -1310,6 +1311,21 @@
         .filter((value) => value);
     }
 
+    function autoAdjustEndDateFromStart(startValue) {
+      if (!startValue || startValue.length !== 10) return;
+      const segments = startValue.split("-").map((part) => Number.parseInt(part, 10));
+      if (segments.length !== 3 || segments.some((part) => Number.isNaN(part))) return;
+      const [year, month, day] = segments;
+      const utcDate = new Date(Date.UTC(year, month - 1, day));
+      utcDate.setUTCDate(utcDate.getUTCDate() + AUTO_RANGE_DAYS);
+      const newEnd = utcDate.toISOString().slice(0, 10);
+      if (!newEnd) return;
+      state.end = newEnd;
+      if (elements.end) {
+        elements.end.value = newEnd;
+      }
+    }
+
     function applyOptionStatusStyles(option, status) {
       if (!option) return;
       const normalized = status || "";
@@ -1371,6 +1387,7 @@
           const normalizedStart = value || "";
           if (state.start === normalizedStart) return;
           state.start = normalizedStart;
+          autoAdjustEndDateFromStart(normalizedStart);
           scheduleOptionsRefresh();
           break;
         }
