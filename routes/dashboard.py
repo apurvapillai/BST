@@ -1347,6 +1347,9 @@ def api_filters():
 
         job_filters = dict(filters)
         job_filters["job"] = None
+        job_filters["reel_code"] = None
+        job_filters["reel_codes"] = []
+        job_filters["reel_ids"] = []
         jobs_query = _apply_reel_filters(
             session.query(Reel), job_filters, include_reel_code=False
         )
