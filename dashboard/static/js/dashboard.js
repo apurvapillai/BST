@@ -1778,6 +1778,7 @@
 
     function set(field, value, { emit: shouldEmit = true, updateUrl = true } = {}) {
       updating = true;
+      let needsOptionsRefresh = false;
       switch (field) {
         case "job":
           state.job = value || "";
@@ -1787,6 +1788,7 @@
           state.reel_ids = [];
           pendingReelCodes = [];
           syncReelSelect();
+          needsOptionsRefresh = true;
           break;
         case "order":
           state.order = value || "";
@@ -1843,6 +1845,9 @@
       }
       updateDependentFilters();
       updating = false;
+      if (needsOptionsRefresh) {
+        scheduleOptionsRefresh();
+      }
       if (shouldEmit) emit(false);
       if (updateUrl && !shouldEmit) {
         Utils.updateUrlQuery(getState());
