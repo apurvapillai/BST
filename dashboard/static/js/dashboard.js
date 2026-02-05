@@ -6534,7 +6534,6 @@ function extractRlmMetrics(config) {
     let jobOverviewLoading = false;
     let reviewSummaryToggleBtn;
     let reviewSummaryWrapper;
-    let reviewSummaryTableBody;
     let reviewSummaryHistoryTableBody;
     let reviewSummaryHistoryImagesEl;
     let reviewSummaryHistoryReelsEl;
@@ -6742,7 +6741,6 @@ function extractRlmMetrics(config) {
           }
           fetchNext(true, { suppressLoader: true }).catch(() => {});
           fetchJobOverview(true).catch(() => {});
-          fetchReviewSummary(true).catch(() => {});
         });
         filtersListenerAttached = true;
       }
@@ -7624,8 +7622,6 @@ function extractRlmMetrics(config) {
         refreshLastReview();
         shouldRefreshJobOverview = true;
         fetchJobOverview(true).catch(() => {});
-        shouldRefreshReviewSummary = true;
-        fetchReviewSummary(true).catch(() => {});
         shouldRefreshReviewSummaryHistory = true;
         fetchReviewSummaryHistory(true).catch(() => {});
       } catch (error) {
