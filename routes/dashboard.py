@@ -563,6 +563,272 @@ def _defect_buckets(
     return defects_by_type, defects_trend, len(unique_classes), total
 
 
+def _empty_review_summary() -> Dict[str, Dict[str, Dict[str, int]]]:
+    return {
+        "summary": {
+            "rows": [],
+            "totals": {
+                "images_reviewed": 0,
+                "reels_reviewed": 0,
+                "reviewers": 0,
+            },
+        }
+    }
+
+
+def _build_review_summary_payload(
+    session: Session,
+    target_reel_ids: Optional[List[int]],
+) -> Dict[str, Any]:
+    if target_reel_ids is not None and not target_reel_ids:
+        return _empty_review_summary()
+
+    latest_review_subq = (
+        session.query(
+            ReelReview.reel_code.label("reel_code"),
+            func.max(ReelReview.review_id).label("max_id"),
+        )
+        .group_by(ReelReview.reel_code)
+        .subquery()
+    )
+    review_query = (
+        session.query(
+            Reel.reel_id,
+            Reel.job_name,
+            ReelReview.reviewer_id,
+            ReelReview.decision,
+            ReelReview.created_at,
+        )
+        .join(
+            latest_review_subq,
+            collate(Reel.reel_code, "utf8mb4_unicode_ci")
+            == collate(latest_review_subq.c.reel_code, "utf8mb4_unicode_ci"),
+        )
+        .join(ReelReview, ReelReview.review_id == latest_review_subq.c.max_id)
+        .filter(ReelReview.decision.in_(("pass", "fail")))
+    )
+    if target_reel_ids is not None:
+        review_query = review_query.filter(Reel.reel_id.in_(target_reel_ids))
+    review_rows = review_query.all()
+    if not review_rows:
+        return _empty_review_summary()
+
+    reviewed_reel_ids = [row.reel_id for row in review_rows if row.reel_id]
+    reviewed_defects: Dict[int, int] = {}
+    if reviewed_reel_ids:
+        reviewed_defects = {
+            reel_id: count
+            for reel_id, count in (
+                session.query(Defect.reel_id, func.count(Defect.defect_id))
+                .filter(Defect.reel_id.in_(reviewed_reel_ids))
+                .filter(and_(Defect.qc_decision.isnot(None), Defect.qc_decision != ""))
+                .group_by(Defect.reel_id)
+                .all()
+            )
+        }
+
+    summary_groups: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    unique_reviewers: Set[str] = set()
+    total_images = 0
+    total_reels = 0
+
+    for row in review_rows:
+        if not row.reel_id:
+            continue
+        reviewer_value = (row.reviewer_id or "").strip()
+        reviewer_name = reviewer_value or "Unassigned Reviewer"
+        job_name = row.job_name or "Unassigned Job"
+        key = (job_name, reviewer_name)
+        entry = summary_groups.get(key)
+        if not entry:
+            entry = {
+                "job_name": job_name,
+                "reviewer": reviewer_name,
+                "reels_reviewed": 0,
+                "images_reviewed": 0,
+                "last_reviewed_at": None,
+            }
+        entry["reels_reviewed"] += 1
+        total_reels += 1
+        images_for_reel = reviewed_defects.get(row.reel_id, 0)
+        entry["images_reviewed"] += images_for_reel
+        total_images += images_for_reel
+        if row.created_at and (
+            not entry["last_reviewed_at"] or row.created_at > entry["last_reviewed_at"]
+        ):
+            entry["last_reviewed_at"] = row.created_at
+        summary_groups[key] = entry
+        unique_reviewers.add(reviewer_name)
+
+    if not summary_groups:
+        return _empty_review_summary()
+
+    rows_payload: List[Dict[str, Any]] = []
+    for entry in summary_groups.values():
+        rows_payload.append(
+            {
+                "job_name": entry.get("job_name"),
+                "reviewer": entry.get("reviewer"),
+                "reels_reviewed": int(entry.get("reels_reviewed") or 0),
+                "images_reviewed": int(entry.get("images_reviewed") or 0),
+                "last_reviewed_at": _iso(entry.get("last_reviewed_at")),
+            }
+        )
+    rows_payload.sort(
+        key=lambda item: (
+            -int(item.get("images_reviewed") or 0),
+            item.get("job_name") or "",
+            item.get("reviewer") or "",
+        )
+    )
+    totals = {
+        "images_reviewed": total_images,
+        "reels_reviewed": total_reels,
+        "reviewers": len(unique_reviewers),
+    }
+    return {"summary": {"rows": rows_payload, "totals": totals}}
+
+
+def _build_review_history_summary(session: Session) -> Dict[str, Any]:
+    total_reel_reviews = (
+        session.execute(text("SELECT COUNT(*) FROM pressbst.reel_reviews")).scalar()
+        or 0
+    )
+    review_rows_raw = (
+        session.query(
+            ReelReview.review_id,
+            ReelReview.reviewer_id,
+            ReelReview.reel_id,
+            ReelReview.reel_code,
+            ReelReview.created_at,
+        )
+        .order_by(ReelReview.created_at.desc(), ReelReview.review_id.desc())
+        .all()
+    )
+
+    review_rows: List[Dict[str, Any]] = []
+    missing_codes: Set[str] = set()
+    for row in review_rows_raw:
+        reel_code = (row.reel_code or "").strip()
+        normalized_code = reel_code.lower()
+        if not row.reel_id and normalized_code:
+            missing_codes.add(normalized_code)
+        review_rows.append(
+            {
+                "reviewer_id": (row.reviewer_id or "").strip(),
+                "reel_id": row.reel_id,
+                "reel_code": normalized_code,
+                "created_at": row.created_at,
+            }
+        )
+
+    code_lookup: Dict[str, Optional[int]] = {}
+    if missing_codes:
+        code_rows = (
+            session.query(Reel.reel_code, Reel.reel_id)
+            .filter(Reel.reel_code.isnot(None))
+            .filter(Reel.reel_code != "")
+            .filter(func.lower(Reel.reel_code).in_(missing_codes))
+            .all()
+        )
+        code_lookup = {str(code).strip().lower(): reel_id for code, reel_id in code_rows}
+
+    for row in review_rows:
+        if not row["reel_id"] and row["reel_code"]:
+            row["reel_id"] = code_lookup.get(row["reel_code"])
+
+    reel_defect_counts: Dict[int, int] = {
+        reel_id: count
+        for reel_id, count in (
+            session.query(Defect.reel_id, func.count(Defect.defect_id))
+            .filter(Defect.qc_decision.isnot(None))
+            .filter(Defect.qc_decision != "")
+            .group_by(Defect.reel_id)
+            .all()
+        )
+    }
+
+    def _aggregate_reviews(
+        rows: List[Dict[str, Any]],
+        since: Optional[datetime],
+        label: str,
+        override_total: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        reviewer_map: Dict[str, Dict[str, Any]] = {}
+        total_reviews = 0
+        aggregate_reel_ids: Set[int] = set()
+
+        for entry in rows:
+            created_at = entry.get("created_at")
+            if since and (created_at is None or created_at < since):
+                continue
+            total_reviews += 1
+            reviewer_value = entry.get("reviewer_id") or ""
+            reviewer_name = reviewer_value.strip() or "Unassigned Reviewer"
+            record = reviewer_map.get(reviewer_name)
+            if not record:
+                record = {
+                    "reviewer": reviewer_name,
+                    "reels_reviewed": 0,
+                    "last_reviewed_at": None,
+                    "_reel_ids": set(),
+                }
+                reviewer_map[reviewer_name] = record
+            record["reels_reviewed"] += 1
+            if created_at and (
+                record["last_reviewed_at"] is None or created_at > record["last_reviewed_at"]
+            ):
+                record["last_reviewed_at"] = created_at
+            reel_id = entry.get("reel_id")
+            if reel_id:
+                record["_reel_ids"].add(reel_id)
+                aggregate_reel_ids.add(reel_id)
+
+        rows_payload: List[Dict[str, Any]] = []
+        for record in reviewer_map.values():
+            reel_ids = record.pop("_reel_ids", set())
+            images_reviewed = sum(reel_defect_counts.get(reel_id, 0) for reel_id in reel_ids)
+            last_dt = record.get("last_reviewed_at")
+            rows_payload.append(
+                {
+                    "reviewer": record.get("reviewer"),
+                    "images_reviewed": int(images_reviewed),
+                    "reels_reviewed": int(record.get("reels_reviewed") or 0),
+                    "last_reviewed_at": _iso(last_dt),
+                    "_last_dt": last_dt,
+                }
+            )
+        rows_payload.sort(key=lambda item: item.get("_last_dt") or datetime.min, reverse=True)
+        for row in rows_payload:
+            row.pop("_last_dt", None)
+
+        total_images = sum(reel_defect_counts.get(reel_id, 0) for reel_id in aggregate_reel_ids)
+        total_review_count = override_total if override_total is not None else total_reviews
+
+        return {
+            "label": label,
+            "rows": rows_payload,
+            "totals": {
+                "images_reviewed": int(total_images),
+                "reels_reviewed": int(total_review_count),
+                "reviewers": len(reviewer_map),
+            },
+        }
+
+    now = datetime.utcnow()
+    windows = {
+        "all": _aggregate_reviews(review_rows, None, "All time", override_total=total_reel_reviews),
+        "last_7_days": _aggregate_reviews(review_rows, now - timedelta(days=7), "Last 7 days"),
+        "last_30_days": _aggregate_reviews(review_rows, now - timedelta(days=30), "Last 30 days"),
+    }
+    return {
+        "history": {
+            "windows": windows,
+            "default_window": "all",
+        }
+    }
+
+
 def _paginate() -> Tuple[int, int]:
     page = max(1, request.args.get("page", type=int, default=1) or 1)
     page_size = request.args.get("page_size", type=int, default=200) or 200
@@ -3615,6 +3881,29 @@ def api_qc_review_jobs_overview():
             session, overview_filters, base_query, pending_query, latest_review_subq
         )
         return jsonify({"overview": overview})
+
+
+@dashboard_bp.route("/api/qc-review/review-summary")
+def api_qc_review_review_summary():
+    with SessionLocal() as session:
+        try:
+            filters = _validate_filters(session)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        reel_rows = (
+            _apply_reel_filters(session.query(Reel.reel_id.label("reel_id")), filters)
+            .distinct()
+            .all()
+        )
+        reel_ids = [row.reel_id for row in reel_rows if row and row.reel_id]
+        return jsonify(_build_review_summary_payload(session, reel_ids))
+
+
+@dashboard_bp.route("/api/qc-review/review-summary/history")
+def api_qc_review_review_summary_history():
+    with SessionLocal() as session:
+        return jsonify(_build_review_history_summary(session))
 
 
 @dashboard_bp.route("/api/defects/<int:defect_id>/decision", methods=["POST"])

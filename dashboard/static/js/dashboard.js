@@ -6532,6 +6532,20 @@ function extractRlmMetrics(config) {
     let shouldRefreshJobOverview = true;
     let jobOverviewRequestId = 0;
     let jobOverviewLoading = false;
+    let reviewSummaryToggleBtn;
+    let reviewSummaryWrapper;
+    let reviewSummaryTableBody;
+    let reviewSummaryHistoryTableBody;
+    let reviewSummaryHistoryImagesEl;
+    let reviewSummaryHistoryReelsEl;
+    let reviewSummaryHistoryReviewersEl;
+    let historyWindowControls;
+    let historyWindowButtons = [];
+    let historySummaryData = null;
+    let historyActiveWindow = "all";
+    let reviewSummaryHistoryLoading = false;
+    let reviewSummaryHistoryRequestId = 0;
+    let shouldRefreshReviewSummaryHistory = true;
     let lastFilterSnapshot = { start: "", end: "", machine_id: "", job: "" };
 
     function init() {
@@ -6572,6 +6586,13 @@ function extractRlmMetrics(config) {
       jobsTableBody = Utils.qs("#qcJobsTableBody");
       jobsToggleBtn = Utils.qs("#qcJobsToggleBtn");
       jobsTableWrapper = Utils.qs("#qcJobsTableWrapper");
+      reviewSummaryToggleBtn = Utils.qs("#qcReviewSummaryToggleBtn");
+      reviewSummaryWrapper = Utils.qs("#qcReviewSummaryWrapper");
+      reviewSummaryHistoryTableBody = Utils.qs("#qcReviewSummaryHistoryTableBody");
+      reviewSummaryHistoryImagesEl = Utils.qs("#qcSummaryHistoryImagesReviewed");
+      reviewSummaryHistoryReelsEl = Utils.qs("#qcSummaryHistoryReelsReviewed");
+      reviewSummaryHistoryReviewersEl = Utils.qs("#qcSummaryHistoryReviewers");
+      historyWindowControls = Utils.qs("#qcHistoryWindowControls");
       jobSwitchModal = Utils.qs("#jobSwitchModal");
       jobSwitchModalMessage = Utils.qs("#jobSwitchModalMessage");
       jobSwitchModalConfirm = Utils.qs("#jobSwitchModalConfirm");
@@ -6669,6 +6690,23 @@ function extractRlmMetrics(config) {
           });
         });
       }
+      if (historyWindowControls) {
+        historyWindowButtons = Array.from(historyWindowControls.querySelectorAll("[data-history-window]"));
+        historyWindowButtons.forEach((button) => {
+          button.addEventListener("click", () => {
+            const windowKey = button.dataset.historyWindow || "all";
+            setHistoryWindow(windowKey);
+          });
+        });
+      }
+      if (reviewSummaryToggleBtn && reviewSummaryWrapper) {
+        reviewSummaryToggleBtn.addEventListener("click", () => {
+          const isExpanded = reviewSummaryToggleBtn.getAttribute("aria-expanded") === "true";
+          reviewSummaryToggleBtn.setAttribute("aria-expanded", String(!isExpanded));
+          reviewSummaryToggleBtn.textContent = !isExpanded ? "Hide" : "Show";
+          reviewSummaryWrapper.classList.toggle("hidden", isExpanded);
+        });
+      }
       if (jobsToggleBtn && jobsTableWrapper) {
         jobsToggleBtn.addEventListener("click", () => {
           const isExpanded = jobsToggleBtn.getAttribute("aria-expanded") === "true";
@@ -6704,6 +6742,7 @@ function extractRlmMetrics(config) {
           }
           fetchNext(true, { suppressLoader: true }).catch(() => {});
           fetchJobOverview(true).catch(() => {});
+          fetchReviewSummary(true).catch(() => {});
         });
         filtersListenerAttached = true;
       }
@@ -6716,8 +6755,10 @@ function extractRlmMetrics(config) {
       initialized = true;
       setDefectCategoryValue("");
       resetSeverityControls();
+      renderReviewSummaryHistoryPlaceholder("Loading historical summary…");
       renderJobTablePlaceholder("Loading job summary…");
       fetchJobOverview(true).catch(() => {});
+      fetchReviewSummaryHistory(true).catch(() => {});
     }
 
     function updateHeaderInfo(reel, defect) {
@@ -7005,6 +7046,116 @@ function extractRlmMetrics(config) {
 
     function isQcReviewActive() {
       return Router && typeof Router.current === "function" && Router.current() === "qc-review";
+    }
+
+    function setHistoryWindow(windowKey) {
+      if (!historySummaryData || !historySummaryData.windows) return;
+      if (!historySummaryData.windows[windowKey]) return;
+      if (historyActiveWindow === windowKey) return;
+      historyActiveWindow = windowKey;
+      updateHistoryWindowControls();
+      renderReviewSummaryHistory();
+    }
+
+    function updateHistoryWindowControls() {
+      if (!historyWindowButtons.length) return;
+      historyWindowButtons.forEach((button) => {
+        const isActive = button.dataset.historyWindow === historyActiveWindow;
+        button.classList.toggle("qc-history-btn-active", isActive);
+      });
+    }
+
+    function getHistoryWindowData() {
+      if (!historySummaryData || !historySummaryData.windows) return null;
+      const windows = historySummaryData.windows;
+      if (!windows[historyActiveWindow]) {
+        const fallback = historySummaryData.default_window || "all";
+        historyActiveWindow = windows[fallback] ? fallback : Object.keys(windows)[0] || "all";
+      }
+      updateHistoryWindowControls();
+      return windows[historyActiveWindow] || null;
+    }
+
+    function renderReviewSummaryHistoryPlaceholder(message) {
+      if (!reviewSummaryHistoryTableBody) return;
+      const text = message || "No historical review activity.";
+      reviewSummaryHistoryTableBody.innerHTML = `<tr><td colspan="4" class="qc-jobs-empty">${Utils.escapeHtml(text)}</td></tr>`;
+    }
+
+    function renderReviewSummaryHistoryTotals(totals) {
+      if (reviewSummaryHistoryImagesEl) {
+        reviewSummaryHistoryImagesEl.textContent = Utils.formatNumber(totals ? totals.images_reviewed : null);
+      }
+      if (reviewSummaryHistoryReelsEl) {
+        reviewSummaryHistoryReelsEl.textContent = Utils.formatNumber(totals ? totals.reels_reviewed : null);
+      }
+      if (reviewSummaryHistoryReviewersEl) {
+        reviewSummaryHistoryReviewersEl.textContent = Utils.formatNumber(totals ? totals.reviewers : null);
+      }
+    }
+
+    function renderReviewSummaryHistory() {
+      if (!reviewSummaryHistoryTableBody) return;
+      const windowData = getHistoryWindowData();
+      const rows = windowData && Array.isArray(windowData.rows) ? windowData.rows : [];
+      renderReviewSummaryHistoryTotals(windowData ? windowData.totals : null);
+      const label = windowData && windowData.label ? windowData.label.toLowerCase() : "";
+      if (!rows.length) {
+        const message = label ? `No review activity during ${label}.` : "No historical review activity.";
+        renderReviewSummaryHistoryPlaceholder(message);
+        return;
+      }
+      const html = rows
+        .map((row) => {
+          const reviewer = row.reviewer || "—";
+          const images = Utils.formatNumber(row.images_reviewed || 0);
+          const reels = Utils.formatNumber(row.reels_reviewed || 0);
+          const reviewedAt = formatTime(row.last_reviewed_at, "—");
+          return `
+            <tr>
+              <td>${Utils.escapeHtml(reviewer)}</td>
+              <td>${images}</td>
+              <td>${reels}</td>
+              <td>${Utils.escapeHtml(reviewedAt)}</td>
+            </tr>
+          `;
+        })
+        .join("");
+      reviewSummaryHistoryTableBody.innerHTML = html;
+    }
+
+    async function fetchReviewSummaryHistory(force = false) {
+      if (!reviewSummaryHistoryTableBody) return;
+      if (reviewSummaryHistoryLoading) return;
+      if (!force && !shouldRefreshReviewSummaryHistory) return;
+      shouldRefreshReviewSummaryHistory = false;
+      reviewSummaryHistoryLoading = true;
+      const requestId = ++reviewSummaryHistoryRequestId;
+      renderReviewSummaryHistoryPlaceholder("Loading historical summary…");
+      try {
+        const data = await Api.get("qc-review/review-summary/history");
+        if (requestId !== reviewSummaryHistoryRequestId) return;
+        const history = (data && data.history) || null;
+        historySummaryData = history && history.windows ? history : null;
+        historyActiveWindow = (historySummaryData && historySummaryData.default_window) || "all";
+        updateHistoryWindowControls();
+        if (!historySummaryData) {
+          renderReviewSummaryHistoryTotals(null);
+          renderReviewSummaryHistoryPlaceholder("No historical review activity.");
+        } else {
+          renderReviewSummaryHistory();
+        }
+      } catch (error) {
+        if (requestId !== reviewSummaryHistoryRequestId) return;
+        historySummaryData = null;
+        renderReviewSummaryHistoryTotals(null);
+        renderReviewSummaryHistoryPlaceholder("Failed to load historical summary.");
+        shouldRefreshReviewSummaryHistory = true;
+      } finally {
+        if (requestId === reviewSummaryHistoryRequestId) {
+          reviewSummaryHistoryLoading = false;
+        }
+      }
     }
 
     function renderJobTablePlaceholder(message) {
@@ -7473,6 +7624,10 @@ function extractRlmMetrics(config) {
         refreshLastReview();
         shouldRefreshJobOverview = true;
         fetchJobOverview(true).catch(() => {});
+        shouldRefreshReviewSummary = true;
+        fetchReviewSummary(true).catch(() => {});
+        shouldRefreshReviewSummaryHistory = true;
+        fetchReviewSummaryHistory(true).catch(() => {});
       } catch (error) {
         const message = error && error.message ? error.message : "Failed to submit reel decision.";
         window.alert(message);
@@ -7491,6 +7646,9 @@ function extractRlmMetrics(config) {
       }
       if (shouldRefreshJobOverview) {
         fetchJobOverview(true).catch(() => {});
+      }
+      if (shouldRefreshReviewSummaryHistory) {
+        fetchReviewSummaryHistory(true).catch(() => {});
       }
     }
 

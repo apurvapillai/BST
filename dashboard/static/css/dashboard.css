@@ -1076,6 +1076,117 @@ body {
   color: #166534;
 }
 
+.qc-summary-kpis {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.qc-summary-kpi {
+  flex: 1 1 160px;
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+}
+
+.qc-summary-kpi span {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.qc-summary-kpi strong {
+  font-size: 20px;
+  color: #0f172a;
+}
+
+.qc-summary-table td:nth-child(3),
+.qc-summary-table td:nth-child(4) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.qc-summary-table td:nth-child(5) {
+  white-space: nowrap;
+}
+
+.qc-review-summary-panels {
+  display: grid;
+  gap: 18px;
+  margin-top: 12px;
+}
+
+.qc-summary-section {
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 16px;
+  padding: 16px 18px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+
+.qc-summary-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.qc-summary-section-header h4 {
+  margin: 0;
+  font-size: 16px;
+  color: #0f172a;
+}
+
+.qc-history-controls {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.qc-history-btn {
+  border: 1px solid rgba(15, 23, 42, 0.2);
+  background: #fff;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: 999px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.qc-history-btn-active,
+.qc-history-btn:hover {
+  background: #1d4ed8;
+  color: #fff;
+  border-color: #1d4ed8;
+}
+
+.qc-summary-table-wrapper {
+  overflow-x: auto;
+}
+
+.qc-summary-scroll {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 12px;
+}
+
+.qc-summary-table--compact th,
+.qc-summary-table--compact td {
+  font-size: 13px;
+  padding: 8px 10px;
+}
+
 .qc-status-panel {
   margin-top: 16px;
   display: flex;

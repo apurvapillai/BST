@@ -418,6 +418,55 @@
     <section id="tab-qc-review" class="tab-content hidden">
       <div class="qc-jobs-table-card" aria-live="polite">
         <div class="qc-job-header">
+          <strong>Review summary</strong>
+          <button type="button" class="qc-jobs-toggle" id="qcReviewSummaryToggleBtn" aria-expanded="false">Show</button>
+        </div>
+        <div class="qc-review-summary-panels hidden" id="qcReviewSummaryWrapper">
+          <section class="qc-summary-section">
+            <div class="qc-summary-section-header">
+              <h4>Historical totals</h4>
+              <div class="qc-history-controls" id="qcHistoryWindowControls">
+                <button type="button" class="qc-history-btn qc-history-btn-active" data-history-window="all">All time</button>
+                <button type="button" class="qc-history-btn" data-history-window="last_7_days">Last 7 days</button>
+                <button type="button" class="qc-history-btn" data-history-window="last_30_days">Last 30 days</button>
+              </div>
+            </div>
+            <div class="qc-summary-kpis">
+              <div class="qc-summary-kpi">
+                <span>Images Reviewed</span>
+                <strong id="qcSummaryHistoryImagesReviewed">--</strong>
+              </div>
+              <div class="qc-summary-kpi">
+                <span>Reel Reviews</span>
+                <strong id="qcSummaryHistoryReelsReviewed">--</strong>
+              </div>
+              <div class="qc-summary-kpi">
+                <span>Active Reviewers</span>
+                <strong id="qcSummaryHistoryReviewers">--</strong>
+              </div>
+            </div>
+            <div class="qc-summary-scroll">
+              <table class="qc-jobs-table qc-summary-table qc-summary-table--compact">
+                <thead>
+                  <tr>
+                    <th>Reviewer</th>
+                    <th>Images Reviewed</th>
+                    <th>Reel Reviews</th>
+                    <th>Last Reviewed</th>
+                  </tr>
+                </thead>
+                <tbody id="qcReviewSummaryHistoryTableBody">
+                  <tr>
+                    <td colspan="4" class="qc-jobs-empty">No historical review activity.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </div>
+      <div class="qc-jobs-table-card" aria-live="polite">
+        <div class="qc-job-header">
           <strong>Job statuses in current window</strong>
           <button type="button" class="qc-jobs-toggle" id="qcJobsToggleBtn" aria-expanded="false">Show</button>
         </div>
