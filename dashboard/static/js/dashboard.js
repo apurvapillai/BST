@@ -7423,6 +7423,7 @@ function extractRlmMetrics(config) {
     function toggleMode(mode) {
       const isSummary = mode === "summary";
       if (stageEl) stageEl.classList.toggle("hidden", isSummary);
+      if (positionTrackEl) positionTrackEl.classList.toggle("hidden", isSummary);
       if (defectActionsEl) defectActionsEl.classList.toggle("hidden", isSummary);
       if (summaryEl) summaryEl.classList.toggle("hidden", !isSummary);
       if (isSummary) {
