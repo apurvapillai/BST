@@ -561,16 +561,28 @@
                         Select a defect to visualize the footprint on the reference image.
                       </p>
                     </div>
+                    <div class="qc-reference-tools">
+                      <button type="button" class="qc-reference-tool-btn" id="qcReferenceMirrorBtn" aria-pressed="false" aria-label="Toggle mirror">
+                        ⇋
+                      </button>
+                      <div class="qc-reference-zoom">
+                        <button type="button" class="qc-reference-tool-btn" id="qcReferenceZoomOut" aria-label="Zoom out">−</button>
+                        <button type="button" class="qc-reference-tool-btn" id="qcReferenceZoomReset" aria-label="Reset zoom">100%</button>
+                        <button type="button" class="qc-reference-tool-btn" id="qcReferenceZoomIn" aria-label="Zoom in">+</button>
+                      </div>
+                    </div>
                   </div>
                   <div class="qc-reference-stage" id="qcReferenceStage">
-                    <canvas
-                      id="qcReferenceCanvas"
-                      class="hidden"
-                      role="img"
-                      aria-label="Defect footprint overlay"
-                    ></canvas>
-                    <div class="qc-reference-placeholder" id="qcReferencePlaceholder">
-                      Footprint preview unavailable.
+                    <div class="qc-reference-stage-inner" id="qcReferenceStageInner">
+                      <canvas
+                        id="qcReferenceCanvas"
+                        class="hidden"
+                        role="img"
+                        aria-label="Defect footprint overlay"
+                      ></canvas>
+                      <div class="qc-reference-placeholder" id="qcReferencePlaceholder">
+                        Footprint preview unavailable.
+                      </div>
                     </div>
                   </div>
                 </div>

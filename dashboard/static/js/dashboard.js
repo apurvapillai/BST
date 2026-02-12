@@ -6634,6 +6634,28 @@ function extractRlmMetrics(config) {
       referencePlaceholderEl = Utils.qs("#qcReferencePlaceholder");
       referenceStageEl = Utils.qs("#qcReferenceStage");
       referenceStatusEl = Utils.qs("#qcReferenceStatus");
+      referenceInnerEl = Utils.qs("#qcReferenceStageInner");
+      referenceMirrorBtn = Utils.qs("#qcReferenceMirrorBtn");
+      referenceZoomInBtn = Utils.qs("#qcReferenceZoomIn");
+      referenceZoomOutBtn = Utils.qs("#qcReferenceZoomOut");
+      referenceZoomResetBtn = Utils.qs("#qcReferenceZoomReset");
+      if (referenceMirrorBtn) {
+        referenceMirrorBtn.addEventListener("click", () => {
+          referenceMirror = !referenceMirror;
+          persistReferenceMirror(referenceMirror);
+          updateReferenceControls();
+          applyReferenceTransform();
+        });
+      }
+      if (referenceZoomInBtn) {
+        referenceZoomInBtn.addEventListener("click", () => setReferenceZoom(referenceZoom + REFERENCE_ZOOM_STEP));
+      }
+      if (referenceZoomOutBtn) {
+        referenceZoomOutBtn.addEventListener("click", () => setReferenceZoom(referenceZoom - REFERENCE_ZOOM_STEP));
+      }
+      if (referenceZoomResetBtn) {
+        referenceZoomResetBtn.addEventListener("click", () => setReferenceZoom(REFERENCE_ZOOM_DEFAULT));
+      }
       positionTrackEl = Utils.qs("#qcPositionTrack");
       positionTrackMetaEl = Utils.qs("#qcPositionTrackMeta");
       positionTrackStartEl = Utils.qs("#qcPositionTrackStart");
@@ -6644,6 +6666,8 @@ function extractRlmMetrics(config) {
         positionTrackSquaresEl.addEventListener("mousemove", handlePositionTrackHover);
         positionTrackSquaresEl.addEventListener("mouseleave", clearPositionTrackHover);
       }
+      updateReferenceControls();
+      applyReferenceTransform();
       const initialFilters = Filters && typeof Filters.getState === "function" ? Filters.getState() : {};
       lastFilterSnapshot = {
         start: (initialFilters.start || ""),
@@ -7020,6 +7044,42 @@ function extractRlmMetrics(config) {
     function persistImageRotation(value) {
       try {
         window.localStorage.setItem(IMAGE_ROTATION_STORAGE_KEY, String(normalizeRotation(value)));
+      } catch (error) {
+        // ignore
+      }
+    }
+
+    function loadStoredReferenceMirror() {
+      try {
+        const stored = window.localStorage.getItem(REFERENCE_MIRROR_STORAGE_KEY);
+        if (stored === null) return false;
+        return stored === "1";
+      } catch (error) {
+        return false;
+      }
+    }
+
+    function persistReferenceMirror(value) {
+      try {
+        window.localStorage.setItem(REFERENCE_MIRROR_STORAGE_KEY, value ? "1" : "0");
+      } catch (error) {
+        // ignore
+      }
+    }
+
+    function loadStoredReferenceZoom() {
+      try {
+        const stored = window.localStorage.getItem(REFERENCE_ZOOM_STORAGE_KEY);
+        if (stored === null) return REFERENCE_ZOOM_DEFAULT;
+        return clampReferenceZoom(Number(stored));
+      } catch (error) {
+        return REFERENCE_ZOOM_DEFAULT;
+      }
+    }
+
+    function persistReferenceZoom(value) {
+      try {
+        window.localStorage.setItem(REFERENCE_ZOOM_STORAGE_KEY, String(clampReferenceZoom(value)));
       } catch (error) {
         // ignore
       }
@@ -7691,6 +7751,44 @@ function extractRlmMetrics(config) {
         setReferenceStatus("Defect footprint aligned to the reference image.");
       }
       drawReferenceCanvas(shapes, geometry, image);
+      applyReferenceTransform();
+    }
+
+    function setReferenceZoom(value) {
+      const clamped = clampReferenceZoom(value);
+      if (Math.abs(clamped - referenceZoom) < 0.0001) return;
+      referenceZoom = clamped;
+      persistReferenceZoom(referenceZoom);
+      updateReferenceControls();
+      applyReferenceTransform();
+    }
+
+    function clampReferenceZoom(value) {
+      if (!Number.isFinite(value)) return REFERENCE_ZOOM_DEFAULT;
+      return Math.min(REFERENCE_ZOOM_MAX, Math.max(REFERENCE_ZOOM_MIN, value));
+    }
+
+    function updateReferenceControls() {
+      if (referenceMirrorBtn) {
+        referenceMirrorBtn.classList.toggle("active", Boolean(referenceMirror));
+        referenceMirrorBtn.setAttribute("aria-pressed", referenceMirror ? "true" : "false");
+      }
+      if (referenceZoomResetBtn) {
+        referenceZoomResetBtn.textContent = `${Math.round(referenceZoom * 100)}%`;
+      }
+      if (referenceZoomInBtn) {
+        referenceZoomInBtn.disabled = referenceZoom >= REFERENCE_ZOOM_MAX - 0.001;
+      }
+      if (referenceZoomOutBtn) {
+        referenceZoomOutBtn.disabled = referenceZoom <= REFERENCE_ZOOM_MIN + 0.001;
+      }
+    }
+
+    function applyReferenceTransform() {
+      if (!referenceInnerEl) return;
+      const zoom = referenceZoom;
+      const scaleX = referenceMirror ? -zoom : zoom;
+      referenceInnerEl.style.transform = `scale(${scaleX}, ${zoom})`;
     }
 
     function normalizeTrackValue(value) {
