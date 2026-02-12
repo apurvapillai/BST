@@ -6462,6 +6462,9 @@ function extractRlmMetrics(config) {
       "magnitude_value",
       "severity_value",
     ];
+    const REFERENCE_CANVAS_PADDING = 32;
+    const POSITION_TIMELINE_MIN_WIDTH = 320;
+    const POSITION_TIMELINE_HEIGHT = 44;
     let panel;
     let loadingEl;
     let emptyEl;
@@ -6551,6 +6554,27 @@ function extractRlmMetrics(config) {
     let reviewSummaryHistoryRequestId = 0;
     let shouldRefreshReviewSummaryHistory = true;
     let lastFilterSnapshot = { start: "", end: "", machine_id: "", job: "" };
+    let referencePanelEl;
+    let referenceCanvasEl;
+    let referencePlaceholderEl;
+    let referenceStageEl;
+    let referenceStatusEl;
+    let referenceRenderToken = 0;
+    let positionTimelineEl;
+    let positionStageEl;
+    let positionCanvasEl;
+    let positionPlaceholderEl;
+    let positionStartLabelEl;
+    let positionEndLabelEl;
+    let positionCursorLabelEl;
+    let positionStatusEl;
+    let positionTimelineData = null;
+    let positionTimelineHits = [];
+    let positionTimelineDataset = null;
+    let positionTimelineDefaultStatus = "Waiting for position data…";
+    let positionTimelineDefaultCursor = "—";
+    let positionTimelineDefaultRange = { start: 0, end: 0 };
+    let manualDefectSelection = false;
 
     function init() {
       if (initialized) return;
@@ -6612,6 +6636,24 @@ function extractRlmMetrics(config) {
       uncertainToggle = Utils.qs("#qcUncertainToggle");
       retryBtn = Utils.qs("[data-qc-review-retry]");
       defectCategorySelect = Utils.qs("#qcDefectCategory");
+      referencePanelEl = Utils.qs("#qcReferencePanel");
+      referenceCanvasEl = Utils.qs("#qcReferenceCanvas");
+      referencePlaceholderEl = Utils.qs("#qcReferencePlaceholder");
+      referenceStageEl = Utils.qs("#qcReferenceStage");
+      referenceStatusEl = Utils.qs("#qcReferenceStatus");
+      positionTimelineEl = Utils.qs("#qcPositionTimeline");
+      positionStageEl = Utils.qs("#qcPositionStage");
+      positionCanvasEl = Utils.qs("#qcPositionCanvas");
+      positionPlaceholderEl = Utils.qs("#qcPositionPlaceholder");
+      positionStartLabelEl = Utils.qs("#qcPositionStartLabel");
+      positionEndLabelEl = Utils.qs("#qcPositionEndLabel");
+      positionCursorLabelEl = Utils.qs("#qcPositionCursorLabel");
+      positionStatusEl = Utils.qs("#qcPositionStatus");
+      if (positionStageEl) {
+        positionStageEl.addEventListener("mousemove", handleTimelinePointerMove);
+        positionStageEl.addEventListener("mouseleave", handleTimelinePointerLeave);
+        positionStageEl.addEventListener("click", handleTimelineClick);
+      }
       const initialFilters = Filters && typeof Filters.getState === "function" ? Filters.getState() : {};
       lastFilterSnapshot = {
         start: (initialFilters.start || ""),
@@ -6780,7 +6822,7 @@ function extractRlmMetrics(config) {
     }
 
     async function fetchNext(force = false, options = {}) {
-      const { lockToReel = false, suppressLoader = false } = options;
+      const { lockToReel = false, suppressLoader = false, focusDefectId = null, forceReelId = null } = options;
       if (!panel || loading) return;
       hideNoReelNotice();
       loading = true;
@@ -6791,8 +6833,13 @@ function extractRlmMetrics(config) {
       }
       try {
         const params = {};
-        if (lockToReel && currentReel && currentReel.reel_id) {
-          params.focus_reel_id = currentReel.reel_id;
+        if (focusDefectId) {
+          params.focus_defect_id = focusDefectId;
+        }
+        const reelTarget =
+          forceReelId || (lockToReel && currentReel && currentReel.reel_id ? currentReel.reel_id : null);
+        if (reelTarget) {
+          params.focus_reel_id = reelTarget;
         }
         const data = await Api.get("qc-review", params);
         applyPayload(data || {});
@@ -6813,11 +6860,14 @@ function extractRlmMetrics(config) {
       currentReel = payload.reel || null;
       currentDefect = payload.next_defect || null;
       summaryData = payload.reel_summary || null;
+      updatePositionTimelineData(summaryData, currentDefect);
       const hasPending = Boolean(payload && payload.has_pending);
       updateImagePendingCounter(summaryData);
       if (!currentDefect) {
         setDefectCategoryValue("");
         resetSeverityControls();
+        resetReferencePreview("No pending defect selected.");
+        renderPositionTimeline(null);
       }
       if (!currentReel) {
         setViewState("empty");
@@ -6836,6 +6886,8 @@ function extractRlmMetrics(config) {
         setRotateButtonState(false);
         resetImageRotation();
         resetSeverityControls();
+        resetReferencePreview("No reel selected.");
+        resetPositionTimeline("No reel selected.");
         return;
       }
       hideNoReelNotice();
@@ -6856,6 +6908,8 @@ function extractRlmMetrics(config) {
       toggleMode("summary");
       setViewState("content");
       resetSeverityControls();
+      resetReferencePreview("No pending defect selected.");
+      renderPositionTimeline(null);
     }
 
     function showErrorState(message) {
@@ -6870,6 +6924,8 @@ function extractRlmMetrics(config) {
       setRotateButtonState(false);
       resetImageRotation();
       updateImagePendingCounter(null);
+      resetReferencePreview("Unable to load reference preview.");
+      resetPositionTimeline("Unable to load position data.");
     }
 
     function showNoReelNotice(message, showButton) {
@@ -7405,6 +7461,489 @@ function extractRlmMetrics(config) {
       if (currentDefect) {
         currentDefect.defect_category = defect.defect_category || "";
       }
+      renderReferencePreview(defect).catch(() => {
+        resetReferencePreview("Unable to render the footprint preview.");
+      });
+      renderPositionTimeline(defect);
+    }
+
+    function getReferenceImageUrl(defect) {
+      const direct = defect && defect.reference_image && defect.reference_image.image_src;
+      const fallback = currentReel && currentReel.reference_image && currentReel.reference_image.image_src;
+      const source = direct || fallback || "";
+      return source ? urlForStatic(source) : "";
+    }
+
+    function normalizeReferenceShapes(defect) {
+      if (!defect || !Array.isArray(defect.coords)) return [];
+      return defect.coords
+        .map((shape) => {
+          if (!shape || typeof shape !== "object") return null;
+          const xs = Array.isArray(shape.x) ? shape.x.map((value) => Number(value)).filter((value) => Number.isFinite(value)) : [];
+          const ys = Array.isArray(shape.y) ? shape.y.map((value) => Number(value)).filter((value) => Number.isFinite(value)) : [];
+          const count = Math.min(xs.length, ys.length);
+          if (count < 3) return null;
+          return {
+            xs: xs.slice(0, count),
+            ys: ys.slice(0, count),
+          };
+        })
+        .filter(Boolean);
+    }
+
+    function computeReferenceGeometry(defect, shapes) {
+      if (!Array.isArray(shapes) || !shapes.length) return null;
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      shapes.forEach((shape) => {
+        shape.xs.forEach((value) => {
+          minX = Math.min(minX, value);
+          maxX = Math.max(maxX, value);
+        });
+        shape.ys.forEach((value) => {
+          minY = Math.min(minY, value);
+          maxY = Math.max(maxY, value);
+        });
+      });
+      const widthHint = Number(defect?.format_width);
+      const lengthHint = Number(defect?.format_length);
+      const hasDimensions =
+        Number.isFinite(widthHint) && Number.isFinite(lengthHint) && Math.abs(widthHint) > 0 && Math.abs(lengthHint) > 0;
+      const fallbackWidth = Number.isFinite(maxX - minX) && maxX - minX > 0 ? maxX - minX : 1;
+      const fallbackLength = Number.isFinite(maxY - minY) && maxY - minY > 0 ? maxY - minY : 1;
+      const centerX = hasDimensions ? 0 : (minX + maxX) / 2 || 0;
+      const centerY = hasDimensions ? 0 : (minY + maxY) / 2 || 0;
+      return {
+        width: hasDimensions ? Math.abs(widthHint) : fallbackWidth,
+        length: hasDimensions ? Math.abs(lengthHint) : fallbackLength,
+        centerX,
+        centerY,
+      };
+    }
+
+    function setReferenceStatus(message) {
+      if (referenceStatusEl) {
+        referenceStatusEl.textContent = message || "Select a defect to visualize the footprint.";
+      }
+    }
+
+    function showReferencePlaceholder(message) {
+      if (referencePlaceholderEl) {
+        referencePlaceholderEl.textContent = message || "Reference preview unavailable.";
+        referencePlaceholderEl.classList.remove("hidden");
+      }
+      if (referenceCanvasEl) {
+        referenceCanvasEl.classList.add("hidden");
+      }
+    }
+
+    function hideReferencePlaceholder() {
+      if (referencePlaceholderEl) {
+        referencePlaceholderEl.classList.add("hidden");
+      }
+      if (referenceCanvasEl) {
+        referenceCanvasEl.classList.remove("hidden");
+      }
+    }
+
+    function resetReferencePreview(message) {
+      referenceRenderToken += 1;
+      showReferencePlaceholder(message || "Select a defect to visualize the footprint.");
+      setReferenceStatus("Select a defect to visualize the footprint.");
+      if (referenceCanvasEl) {
+        referenceCanvasEl.width = 0;
+        referenceCanvasEl.height = 0;
+        referenceCanvasEl.removeAttribute("style");
+      }
+    }
+
+    function getReferenceCanvasSize() {
+      if (referenceStageEl && referenceStageEl.clientWidth) {
+        return Math.max(260, referenceStageEl.clientWidth);
+      }
+      if (referencePanelEl && referencePanelEl.clientWidth) {
+        return Math.max(260, referencePanelEl.clientWidth);
+      }
+      return 320;
+    }
+
+    function drawReferenceCanvas(shapes, geometry, image) {
+      if (!referenceCanvasEl) return;
+      const size = getReferenceCanvasSize();
+      const dpr = window.devicePixelRatio || 1;
+      referenceCanvasEl.width = size * dpr;
+      referenceCanvasEl.height = size * dpr;
+      referenceCanvasEl.style.width = `${size}px`;
+      referenceCanvasEl.style.height = `${size}px`;
+      const ctx = referenceCanvasEl.getContext("2d");
+      if (!ctx) {
+        showReferencePlaceholder("Unable to access the preview canvas.");
+        return;
+      }
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, referenceCanvasEl.width, referenceCanvasEl.height);
+      ctx.scale(dpr, dpr);
+      ctx.fillStyle = "#020617";
+      ctx.fillRect(0, 0, size, size);
+      ctx.save();
+      ctx.translate(size / 2, size / 2);
+      const span = Math.max(geometry.width, geometry.length);
+      const scale = span ? (size - REFERENCE_CANVAS_PADDING * 2) / span : 1;
+      const drawWidth = geometry.width * scale;
+      const drawLength = geometry.length * scale;
+      ctx.fillStyle = "#0f172a";
+      ctx.fillRect(-drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
+      if (image) {
+        ctx.save();
+        ctx.scale(1, -1);
+        ctx.drawImage(image, -drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
+        ctx.restore();
+      } else {
+        ctx.fillStyle = "rgba(15, 23, 42, 0.8)";
+        ctx.fillRect(-drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
+      }
+      ctx.strokeStyle = "rgba(226, 232, 240, 0.4)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(-drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = "rgba(148, 163, 184, 0.35)";
+      ctx.beginPath();
+      ctx.moveTo(-drawWidth / 2, 0);
+      ctx.lineTo(drawWidth / 2, 0);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, -drawLength / 2);
+      ctx.lineTo(0, drawLength / 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.lineJoin = "round";
+      shapes.forEach((shape) => {
+        ctx.beginPath();
+        ctx.moveTo((shape.xs[0] - geometry.centerX) * scale, -(shape.ys[0] - geometry.centerY) * scale);
+        for (let idx = 1; idx < shape.xs.length; idx += 1) {
+          ctx.lineTo((shape.xs[idx] - geometry.centerX) * scale, -(shape.ys[idx] - geometry.centerY) * scale);
+        }
+        ctx.closePath();
+        ctx.fillStyle = "rgba(248, 113, 113, 0.45)";
+        ctx.strokeStyle = "rgba(248, 113, 113, 0.95)";
+        ctx.lineWidth = 2;
+        ctx.fill();
+        ctx.stroke();
+      });
+      ctx.restore();
+      hideReferencePlaceholder();
+    }
+
+    function loadReferenceImage(src) {
+      if (!src) return Promise.resolve(null);
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.decoding = "async";
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        img.src = src;
+      });
+    }
+
+    async function renderReferencePreview(defect) {
+      if (!referencePanelEl || !referenceCanvasEl) return;
+      if (!defect) {
+        resetReferencePreview();
+        return;
+      }
+      const shapes = normalizeReferenceShapes(defect);
+      if (!shapes.length) {
+        resetReferencePreview("This defect does not include footprint coordinates.");
+        return;
+      }
+      const geometry = computeReferenceGeometry(defect, shapes);
+      if (!geometry) {
+        resetReferencePreview("Unable to determine footprint bounds.");
+        return;
+      }
+      const referenceUrl = getReferenceImageUrl(defect);
+      const renderId = ++referenceRenderToken;
+      setReferenceStatus(
+        referenceUrl
+          ? "Overlaying the defect footprint on the reference image."
+          : "Reference image unavailable. Showing footprint in reel space."
+      );
+      showReferencePlaceholder(referenceUrl ? "Loading reference preview…" : "Drawing footprint…");
+      const image = await loadReferenceImage(referenceUrl);
+      if (renderId !== referenceRenderToken) return;
+      if (!image && referenceUrl) {
+        setReferenceStatus("Failed to load reference image. Showing footprint in reel space.");
+      } else if (image) {
+        setReferenceStatus("Defect footprint aligned to the reference image.");
+      }
+      drawReferenceCanvas(shapes, geometry, image);
+    }
+
+    function normalizeDecision(value) {
+      const normalized = (value || "").toString().trim().toLowerCase();
+      if (normalized === "pass" || normalized === "fail") return normalized;
+      if (normalized === "uncertain") return "uncertain";
+      return "pending";
+    }
+
+    function setPositionStatus(message, { persist = false } = {}) {
+      if (positionStatusEl) {
+        positionStatusEl.textContent = message || "Waiting for position data…";
+      }
+      if (persist) {
+        positionTimelineDefaultStatus = message || "Waiting for position data…";
+      }
+    }
+
+    function showPositionPlaceholder(message) {
+      if (positionPlaceholderEl) {
+        if (message) {
+          positionPlaceholderEl.textContent = message;
+        }
+        positionPlaceholderEl.classList.remove("hidden");
+      }
+      if (positionCanvasEl) {
+        positionCanvasEl.classList.add("hidden");
+      }
+    }
+
+    function hidePositionPlaceholder() {
+      if (positionPlaceholderEl) {
+        positionPlaceholderEl.classList.add("hidden");
+      }
+      if (positionCanvasEl) {
+        positionCanvasEl.classList.remove("hidden");
+      }
+    }
+
+    function setPositionLabels(start, end, cursorLabel, { persist = false } = {}) {
+      const safeStart = Number.isFinite(start) ? start : 0;
+      const safeEnd = Number.isFinite(end) ? end : safeStart;
+      if (positionStartLabelEl) {
+        positionStartLabelEl.textContent = Utils.formatNumber(safeStart, 0);
+      }
+      if (positionEndLabelEl) {
+        positionEndLabelEl.textContent = Utils.formatNumber(safeEnd, 0);
+      }
+      if (positionCursorLabelEl) {
+        positionCursorLabelEl.textContent = cursorLabel || "—";
+      }
+      if (persist) {
+        positionTimelineDefaultRange = { start: safeStart, end: safeEnd };
+        positionTimelineDefaultCursor = cursorLabel || "—";
+      }
+    }
+
+    function updatePositionTimelineData(summary, fallbackDefect) {
+      positionTimelineData = buildPositionTimelineData(summary, fallbackDefect);
+      positionTimelineDataset = positionTimelineData;
+    }
+
+    function buildPositionTimelineData(summary, fallbackDefect) {
+      const rows = Array.isArray(summary?.defects) ? summary.defects : [];
+      const workingRows = rows.length ? rows : fallbackDefect ? [fallbackDefect] : [];
+      if (!workingRows.length) return null;
+      const slots = new Map();
+      let minPosition = Infinity;
+      let maxPosition = -Infinity;
+      workingRows.forEach((row) => {
+        const raw = Number(row && row.format_position);
+        if (!Number.isFinite(raw)) return;
+        const key = Math.round(raw);
+        let slot = slots.get(key);
+        if (!slot) {
+          slot = {
+            position: key,
+            defects: [],
+            counts: { pass: 0, fail: 0, pending: 0 },
+          };
+          slots.set(key, slot);
+        }
+        const normalizedDecision = normalizeDecision(row && row.qc_decision);
+        if (normalizedDecision === "pass") slot.counts.pass += 1;
+        else if (normalizedDecision === "fail") slot.counts.fail += 1;
+        else slot.counts.pending += 1;
+        slot.defects.push({
+          defect_id: row && row.defect_id,
+          decision: normalizedDecision,
+          format_position: raw,
+        });
+        minPosition = Math.min(minPosition, raw);
+        maxPosition = Math.max(maxPosition, raw);
+      });
+      if (!slots.size || !Number.isFinite(minPosition) || !Number.isFinite(maxPosition)) {
+        return null;
+      }
+      const start = Math.floor(minPosition);
+      let end = Number.isFinite(maxPosition) ? Math.ceil(maxPosition) : start + 1;
+      if (end <= start) {
+        end = start + 1;
+      }
+      const totalDefects = Array.from(slots.values()).reduce((sum, slot) => sum + slot.defects.length, 0);
+      return {
+        start,
+        end,
+        slots,
+        totalDefects,
+      };
+    }
+
+    function renderPositionTimeline(defect) {
+      if (!positionTimelineEl || !positionCanvasEl) return;
+      const dataset = positionTimelineData;
+      if (!dataset) {
+        const message = summaryData ? "No position data for this reel." : "Position data unavailable.";
+        showPositionPlaceholder(message);
+        setPositionLabels(0, 0, "—", { persist: true });
+        setPositionStatus(message, { persist: true });
+        positionTimelineHits = [];
+        return;
+      }
+      const { start, end, slots, totalDefects } = dataset;
+      const totalSlots = Math.max(end - start + 1, 1);
+      const containerWidth =
+        (positionStageEl && positionStageEl.clientWidth) ||
+        (positionTimelineEl && positionTimelineEl.clientWidth) ||
+        (referenceStageEl && referenceStageEl.clientWidth) ||
+        (stageEl && stageEl.clientWidth) ||
+        POSITION_TIMELINE_MIN_WIDTH;
+      const width = Math.max(POSITION_TIMELINE_MIN_WIDTH, containerWidth);
+      const height = POSITION_TIMELINE_HEIGHT;
+      const dpr = window.devicePixelRatio || 1;
+      const ctx = positionCanvasEl.getContext("2d");
+      if (!ctx) {
+        showPositionPlaceholder("Unable to render position timeline.");
+        setPositionLabels(start, end, "—", { persist: true });
+        setPositionStatus("Unable to render position timeline.", { persist: true });
+        positionTimelineHits = [];
+        return;
+      }
+      positionCanvasEl.width = width * dpr;
+      positionCanvasEl.height = height * dpr;
+      positionCanvasEl.style.width = `${width}px`;
+      positionCanvasEl.style.height = `${height}px`;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, positionCanvasEl.width, positionCanvasEl.height);
+      ctx.scale(dpr, dpr);
+      ctx.fillStyle = "#022c22";
+      ctx.fillRect(0, 0, width, height);
+      const slotWidth = width / totalSlots;
+      positionTimelineHits = [];
+      for (let pos = start; pos <= end; pos += 1) {
+        const slot = slots.get(pos);
+        const hasDefect = slot && slot.defects.length;
+        const x = (pos - start) * slotWidth;
+        const w = Math.max(slotWidth, 1 / dpr);
+        ctx.fillStyle = hasDefect ? "#ef4444" : "#0f9d58";
+        ctx.fillRect(x, 0, w + 0.5, height);
+        positionTimelineHits.push({
+          position: pos,
+          x0: x,
+          x1: x + w,
+          slot,
+        });
+      }
+      const rawPosition =
+        defect && Number.isFinite(Number(defect.format_position)) ? Number(defect.format_position) : null;
+      let cursorLabel = "—";
+      if (rawPosition !== null) {
+        const pointer = Math.round(rawPosition);
+        const pointerX = (pointer - start) * slotWidth;
+        const pointerWidth = Math.max(slotWidth, 2);
+        ctx.fillStyle = "rgba(59, 130, 246, 0.35)";
+        ctx.fillRect(pointerX, 0, pointerWidth, height);
+        ctx.strokeStyle = "#3b82f6";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(pointerX, 1, pointerWidth, height - 2);
+        cursorLabel = Utils.formatNumber(rawPosition, 1);
+      }
+      hidePositionPlaceholder();
+      setPositionLabels(start, end, cursorLabel, { persist: true });
+      const spanLabel = `${Utils.formatNumber(totalSlots, 0)} positions`;
+      const defectLabel = `${Utils.formatNumber(totalDefects, 0)} defects`;
+      setPositionStatus(`${defectLabel} across ${spanLabel}`, { persist: true });
+    }
+
+    function resetPositionTimeline(message) {
+      positionTimelineData = null;
+      positionTimelineDataset = null;
+      positionTimelineHits = [];
+      showPositionPlaceholder(message || "Position data unavailable.");
+      setPositionStatus(message || "Position data unavailable.", { persist: true });
+      setPositionLabels(0, 0, "—", { persist: true });
+    }
+
+    function getTimelineSlotFromEvent(event) {
+      if (!positionStageEl || !positionTimelineHits.length) return null;
+      const rect = positionStageEl.getBoundingClientRect();
+      if (!rect || rect.width === 0) return null;
+      const x = event.clientX - rect.left;
+      if (Number.isNaN(x)) return null;
+      return positionTimelineHits.find((hit) => x >= hit.x0 && x <= hit.x1) || null;
+    }
+
+    function formatSlotStatus(slot) {
+      if (!slot || !slot.defects || !slot.defects.length) return null;
+      const parts = slot.defects.map((entry) => {
+        const decision = entry.decision === "fail" ? "Fail" : entry.decision === "pass" ? "Pass" : "Pending";
+        const idLabel = entry.defect_id ? `#${entry.defect_id}` : "Defect";
+        return `${idLabel} ${decision}`;
+      });
+      return `Position ${slot.position}: ${parts.join(", ")}`;
+    }
+
+    function restorePositionTimelineDefaults() {
+      setPositionStatus(positionTimelineDefaultStatus, { persist: false });
+      setPositionLabels(
+        positionTimelineDefaultRange.start,
+        positionTimelineDefaultRange.end,
+        positionTimelineDefaultCursor,
+        { persist: false }
+      );
+    }
+
+    function handleTimelinePointerMove(event) {
+      const hit = getTimelineSlotFromEvent(event);
+      if (!hit || !hit.slot || !hit.slot.defects.length) {
+        restorePositionTimelineDefaults();
+        return;
+      }
+      const status = formatSlotStatus(hit.slot);
+      if (status) {
+        setPositionStatus(status);
+      }
+      const cursorValue =
+        (hit.slot.defects[0] && Utils.formatNumber(hit.slot.defects[0].format_position || hit.position, 1)) || "—";
+      setPositionLabels(positionTimelineDefaultRange.start, positionTimelineDefaultRange.end, cursorValue);
+    }
+
+    function handleTimelinePointerLeave() {
+      restorePositionTimelineDefaults();
+    }
+
+    async function handleTimelineClick(event) {
+      const hit = getTimelineSlotFromEvent(event);
+      if (!hit || !hit.slot || !hit.slot.defects.length) return;
+      const pendingTarget = hit.slot.defects.find((entry) => entry.decision !== "pass");
+      const target = pendingTarget || hit.slot.defects[0];
+      if (!target || !target.defect_id) return;
+      await focusDefectById(target.defect_id);
+    }
+
+    async function focusDefectById(defectId) {
+      if (!defectId || !currentReel) return;
+      manualDefectSelection = true;
+      try {
+        await fetchNext(false, {
+          focusDefectId: defectId,
+          forceReelId: currentReel.reel_id,
+        });
+      } catch (error) {
+        manualDefectSelection = false;
+        console.error("Failed to focus defect", defectId, error);
+      }
     }
 
     function countPendingImageDefects(summary) {
@@ -7507,6 +8046,7 @@ function extractRlmMetrics(config) {
           summaryHistoryEl.textContent = "";
         }
       }
+      renderPositionTimeline(currentDefect);
     }
 
     function syncCompletionHighlights(isComplete) {
@@ -7575,6 +8115,7 @@ function extractRlmMetrics(config) {
           category: getDefectCategoryValue(),
         });
         needsRefresh = true;
+        manualDefectSelection = false;
         await fetchNext(false, { lockToReel: true, suppressLoader: true });
       } catch (error) {
         const message = error && error.message ? error.message : "Failed to save the label.";

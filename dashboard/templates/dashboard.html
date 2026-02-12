@@ -545,12 +545,62 @@
                   </div>
                 </dl>
               </div>
-              <div class="qc-review-image qc-review-image--defect">
-                <button type="button" class="qc-image-rotate-btn" id="qcImageRotateBtn" aria-label="Rotate image">
-                  ⟲
-                </button>
-                <div id="qcReviewImagePlaceholder" class="qc-review-image-placeholder hidden">No preview image.</div>
-                <img id="qcReviewImage" alt="Pending defect" loading="lazy" decoding="async">
+              <div class="qc-review-visuals">
+                <div class="qc-review-image qc-review-image--defect">
+                  <button type="button" class="qc-image-rotate-btn" id="qcImageRotateBtn" aria-label="Rotate image">
+                    ⟲
+                  </button>
+                  <div id="qcReviewImagePlaceholder" class="qc-review-image-placeholder hidden">No preview image.</div>
+                  <img id="qcReviewImage" alt="Pending defect" loading="lazy" decoding="async">
+                </div>
+                <div class="qc-reference-panel" id="qcReferencePanel">
+                  <div class="qc-reference-header">
+                    <div>
+                      <p class="qc-reference-title">Reference Alignment</p>
+                      <p class="qc-reference-status" id="qcReferenceStatus">
+                        Select a defect to visualize the footprint on the reference image.
+                      </p>
+                    </div>
+                  </div>
+                  <div class="qc-reference-stage" id="qcReferenceStage">
+                    <canvas
+                      id="qcReferenceCanvas"
+                      class="hidden"
+                      role="img"
+                      aria-label="Defect footprint overlay"
+                    ></canvas>
+                    <div class="qc-reference-placeholder" id="qcReferencePlaceholder">
+                      Footprint preview unavailable.
+                    </div>
+                  </div>
+                  <p class="qc-reference-note">
+                    Overlay uses the defect’s coords_json relative to the reel’s reference image.
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div class="qc-position-timeline" id="qcPositionTimeline">
+              <div class="qc-position-header">
+                <p class="qc-position-title">Position Timeline</p>
+                <p class="qc-position-status" id="qcPositionStatus">
+                  Waiting for position data…
+                </p>
+              </div>
+              <div class="qc-position-stage" id="qcPositionStage">
+                <canvas
+                  id="qcPositionCanvas"
+                  class="hidden"
+                  role="img"
+                  aria-label="Defect position timeline"
+                ></canvas>
+                <div class="qc-position-placeholder" id="qcPositionPlaceholder">
+                  Position data unavailable.
+                </div>
+              </div>
+              <div class="qc-position-labels">
+                <span id="qcPositionStartLabel">0</span>
+                <span id="qcPositionCursorLabel">—</span>
+                <span id="qcPositionEndLabel">0</span>
               </div>
             </div>
               <div class="qc-review-actions" id="qcDefectActions">

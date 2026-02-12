@@ -3564,6 +3564,7 @@ def api_qc_review():
         }
 
         focus_reel_id = request.args.get("focus_reel_id", type=int)
+        focus_defect_id = request.args.get("focus_defect_id", type=int)
 
         base_query = _build_defect_query(
             session,
@@ -3610,7 +3611,16 @@ def api_qc_review():
             is not None
         )
 
-        def build_reel_context(reel_id: int):
+        if focus_defect_id and not focus_reel_id:
+            focus_parent = (
+                base_query.with_entities(Defect.reel_id)
+                .filter(Defect.defect_id == focus_defect_id)
+                .first()
+            )
+            if focus_parent:
+                focus_reel_id = focus_parent.reel_id
+
+        def build_reel_context(reel_id: int, target_defect_id: Optional[int] = None):
             reel = (
                 session.query(Reel)
                 .options(
@@ -3639,6 +3649,17 @@ def api_qc_review():
             if not reel_defect_rows:
                 return None
 
+            ordered_refs = _ordered_reference_images(reel.reference_images)
+            reference_images = [
+                {
+                    "filename": ref.filename,
+                    "image_src": (ref.image_src or "").replace("\\", "/"),
+                }
+                for ref in ordered_refs
+                if (ref.image_src or "").strip()
+            ]
+            reference_image = reference_images[0] if reference_images else None
+
             next_defect_row = (
                 reel_query.filter(pending_filter)
                 .filter(Defect.image_src.isnot(None))
@@ -3646,6 +3667,17 @@ def api_qc_review():
                 .order_by(Defect.defect_time.desc(), Defect.defect_id.desc())
                 .first()
             )
+            target_defect_row = None
+            if target_defect_id:
+                target_defect_row = (
+                    reel_query.options(selectinload(Defect.reel))
+                    .filter(Defect.defect_id == target_defect_id)
+                    .first()
+                )
+                if not target_defect_row:
+                    target_defect_id = None
+            if target_defect_row:
+                next_defect_row = target_defect_row
 
             summary_counts = {"pass": 0, "fail": 0, "pending": 0}
             type_breakdown: Dict[str, Dict[str, int]] = defaultdict(lambda: {"pass": 0, "fail": 0, "pending": 0})
@@ -3736,6 +3768,7 @@ def api_qc_review():
                     "severity_label": _severity_label(
                         _normalize_int(next_defect_row.severity_score), bool(next_defect_row.severity_uncertain)
                     ),
+                    "reference_image": reference_image,
                 }
 
             reel_summary = {
@@ -3760,6 +3793,9 @@ def api_qc_review():
                 "machine_name": reel.machine.name if reel.machine else None,
                 "time_start": _iso(reel.time_start),
                 "time_end": _iso(reel.time_end),
+                "format_length": _to_float(reel.format_length),
+                "format_width": _to_float(reel.format_width),
+                "reference_image": reference_image,
             }
 
             return {
@@ -3769,7 +3805,10 @@ def api_qc_review():
             }
 
         if focus_reel_id:
-            context = build_reel_context(focus_reel_id)
+            context = build_reel_context(
+                focus_reel_id,
+                focus_defect_id if focus_defect_id else None,
+            )
             if context:
                 return jsonify(
                     {
