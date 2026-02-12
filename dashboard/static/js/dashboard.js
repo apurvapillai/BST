@@ -6464,6 +6464,12 @@ function extractRlmMetrics(config) {
     ];
     const REFERENCE_CANVAS_PADDING = 32;
     const IMAGE_ROTATION_STORAGE_KEY = "qcReviewImageRotation";
+    const REFERENCE_MIRROR_STORAGE_KEY = "qcReferenceMirror";
+    const REFERENCE_ZOOM_STORAGE_KEY = "qcReferenceZoom";
+    const REFERENCE_ZOOM_MIN = 0.5;
+    const REFERENCE_ZOOM_MAX = 3;
+    const REFERENCE_ZOOM_STEP = 0.25;
+    const REFERENCE_ZOOM_DEFAULT = 1;
     const POSITION_TIMELINE_MIN_WIDTH = 320;
     const POSITION_TIMELINE_HEIGHT = 44;
     let panel;
@@ -6512,6 +6518,8 @@ function extractRlmMetrics(config) {
     let reelFailBtn;
     let reviewerInput;
     let commentsInput;
+    let referenceMirror = loadStoredReferenceMirror();
+    let referenceZoom = loadStoredReferenceZoom();
     const fieldEls = {};
     const COMPLETION_FIELDS = ["job_name", "order_number", "reel_code"];
     let initialized = false;
