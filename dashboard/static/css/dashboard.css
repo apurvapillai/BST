@@ -3753,6 +3753,11 @@ body {
   box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.5);
 }
 
+.qc-position-track__square--defect-active {
+  transform: scaleY(2.2);
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.5);
+}
+
 .qc-image-rotate-btn {
   position: absolute;
   top: 10px;

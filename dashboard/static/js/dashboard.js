@@ -6463,6 +6463,7 @@ function extractRlmMetrics(config) {
       "severity_value",
     ];
     const REFERENCE_CANVAS_PADDING = 32;
+    const IMAGE_ROTATION_STORAGE_KEY = "qcReviewImageRotation";
     const POSITION_TIMELINE_MIN_WIDTH = 320;
     const POSITION_TIMELINE_HEIGHT = 44;
     let panel;
@@ -6529,7 +6530,7 @@ function extractRlmMetrics(config) {
     let defectCategorySelect;
     let categoryButtons = [];
     let jobsTableBody;
-    let imageRotation = 0;
+    let imageRotation = loadStoredRotation();
     let jobSwitchModal;
     let jobSwitchModalMessage;
     let jobSwitchModalConfirm;
@@ -6566,6 +6567,7 @@ function extractRlmMetrics(config) {
     let positionTrackEndEl;
     let positionTrackSquaresEl;
     let positionTrackSegments = [];
+    let positionTrackHoverIndex = null;
 
     function init() {
       if (initialized) return;
@@ -6639,6 +6641,8 @@ function extractRlmMetrics(config) {
       positionTrackSquaresEl = Utils.qs("#qcPositionTrackSquares");
       if (positionTrackSquaresEl) {
         positionTrackSquaresEl.addEventListener("click", handlePositionTrackClick);
+        positionTrackSquaresEl.addEventListener("mousemove", handlePositionTrackHover);
+        positionTrackSquaresEl.addEventListener("mouseleave", clearPositionTrackHover);
       }
       const initialFilters = Filters && typeof Filters.getState === "function" ? Filters.getState() : {};
       lastFilterSnapshot = {
@@ -6697,7 +6701,8 @@ function extractRlmMetrics(config) {
         rotateImageBtn.disabled = true;
         rotateImageBtn.addEventListener("click", () => {
           if (rotateImageBtn.disabled) return;
-          imageRotation = (imageRotation + 90) % 360;
+          imageRotation = normalizeRotation(imageRotation + 90);
+          persistImageRotation(imageRotation);
           applyImageRotation();
         });
       }
@@ -6987,13 +6992,37 @@ function extractRlmMetrics(config) {
     }
 
     function resetImageRotation() {
-      imageRotation = 0;
+      imageRotation = loadStoredRotation();
       applyImageRotation();
     }
 
     function applyImageRotation() {
       if (!imageEl) return;
       imageEl.style.transform = `rotate(${imageRotation}deg)`;
+    }
+
+    function normalizeRotation(value) {
+      const num = Number(value);
+      if (!Number.isFinite(num)) return 0;
+      const normalized = num % 360;
+      return normalized < 0 ? normalized + 360 : normalized;
+    }
+
+    function loadStoredRotation() {
+      try {
+        const stored = window.localStorage.getItem(IMAGE_ROTATION_STORAGE_KEY);
+        return normalizeRotation(stored);
+      } catch (error) {
+        return 0;
+      }
+    }
+
+    function persistImageRotation(value) {
+      try {
+        window.localStorage.setItem(IMAGE_ROTATION_STORAGE_KEY, String(normalizeRotation(value)));
+      } catch (error) {
+        // ignore
+      }
     }
 
     function setRotateButtonState(enabled) {
@@ -7403,7 +7432,7 @@ function extractRlmMetrics(config) {
           imagePlaceholderEl.classList.add("hidden");
         }
         setRotateButtonState(true);
-        resetImageRotation();
+        applyImageRotation();
       } else {
         if (imageEl) {
           imageEl.removeAttribute("src");
@@ -7681,6 +7710,7 @@ function extractRlmMetrics(config) {
       if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
         positionTrackEl.classList.add("hidden");
         positionTrackSegments = [];
+        clearPositionTrackHover();
         if (positionTrackSquaresEl) positionTrackSquaresEl.innerHTML = "";
         if (positionTrackMetaEl) positionTrackMetaEl.textContent = "Position data unavailable.";
         if (positionTrackStartEl) positionTrackStartEl.textContent = "—";
@@ -7749,11 +7779,13 @@ function extractRlmMetrics(config) {
             start: rangeStart,
             end: rangeEnd,
             defectId: chosenDefect ? chosenDefect.id : null,
+            element: square,
           };
           fragment.appendChild(square);
         }
         positionTrackSquaresEl.innerHTML = "";
         positionTrackSquaresEl.appendChild(fragment);
+        clearPositionTrackHover();
       }
     }
 
@@ -7762,9 +7794,80 @@ function extractRlmMetrics(config) {
       if (!target || !positionTrackSquaresEl || !positionTrackSquaresEl.contains(target)) return;
       const index = Number(target.dataset.segmentIndex);
       if (!Number.isInteger(index)) return;
-      const segment = positionTrackSegments[index];
-      if (!segment || !segment.defectId) return;
-      focusDefectFromTrack(segment.defectId);
+      const nearest = getNearestDefectSegment(index);
+      if (!nearest || !nearest.segment || !nearest.segment.defectId) return;
+      focusDefectFromTrack(nearest.segment.defectId);
+    }
+
+    function handlePositionTrackHover(event) {
+      const target = event.target.closest(".qc-position-track__square");
+      if (!target || !positionTrackSquaresEl || !positionTrackSquaresEl.contains(target)) {
+        clearPositionTrackHover();
+        return;
+      }
+      const index = Number(target.dataset.segmentIndex);
+      if (!Number.isInteger(index)) {
+        clearPositionTrackHover();
+        return;
+      }
+      const nearest = getNearestDefectSegment(index);
+      if (!nearest || !nearest.segment || !nearest.segment.defectId) {
+        clearPositionTrackHover();
+        return;
+      }
+      setPositionTrackHover(nearest.index);
+    }
+
+    function setPositionTrackHover(index) {
+      if (positionTrackHoverIndex === index) return;
+      if (positionTrackHoverIndex !== null) {
+        const previous = positionTrackSegments[positionTrackHoverIndex];
+        if (previous && previous.element) {
+          previous.element.classList.remove("qc-position-track__square--defect-active");
+        }
+      }
+      positionTrackHoverIndex = index;
+      if (index === null) return;
+      const current = positionTrackSegments[index];
+      if (current && current.defectId && current.element) {
+        current.element.classList.add("qc-position-track__square--defect-active");
+      }
+    }
+
+    function clearPositionTrackHover() {
+      if (positionTrackHoverIndex === null) return;
+      const current = positionTrackSegments[positionTrackHoverIndex];
+      if (current && current.element) {
+        current.element.classList.remove("qc-position-track__square--defect-active");
+      }
+      positionTrackHoverIndex = null;
+    }
+
+    function getNearestDefectSegment(index) {
+      if (!Array.isArray(positionTrackSegments) || !positionTrackSegments.length) return null;
+      const total = positionTrackSegments.length;
+      const maxOffset = Math.min(15, Math.max(1, Math.floor(total * 0.05)));
+      const current = positionTrackSegments[index];
+      if (current && current.defectId) {
+        return { segment: current, index };
+      }
+      for (let offset = 1; offset <= maxOffset; offset += 1) {
+        const leftIdx = index - offset;
+        if (leftIdx >= 0) {
+          const leftSegment = positionTrackSegments[leftIdx];
+          if (leftSegment && leftSegment.defectId) {
+            return { segment: leftSegment, index: leftIdx };
+          }
+        }
+        const rightIdx = index + offset;
+        if (rightIdx < total) {
+          const rightSegment = positionTrackSegments[rightIdx];
+          if (rightSegment && rightSegment.defectId) {
+            return { segment: rightSegment, index: rightIdx };
+          }
+        }
+      }
+      return null;
     }
 
     async function focusDefectFromTrack(defectId) {
