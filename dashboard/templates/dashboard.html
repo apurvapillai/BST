@@ -561,15 +561,19 @@
                         Select a defect to visualize the footprint on the reference image.
                       </p>
                     </div>
-                    <div class="qc-reference-tools">
-                      <button type="button" class="qc-reference-tool-btn" id="qcReferenceMirrorBtn" aria-pressed="false" aria-label="Toggle mirror">
-                        ⇋
-                      </button>
+                      <div class="qc-reference-tools">
+                        <button type="button" class="qc-reference-tool-btn" id="qcReferenceMirrorBtn" aria-pressed="false" aria-label="Toggle mirror">
+                        ⇋ Flip
+                        </button>
                       <div class="qc-reference-zoom">
-                        <button type="button" class="qc-reference-tool-btn" id="qcReferenceZoomOut" aria-label="Zoom out">−</button>
-                        <button type="button" class="qc-reference-tool-btn" id="qcReferenceZoomReset" aria-label="Reset zoom">100%</button>
-                        <button type="button" class="qc-reference-tool-btn" id="qcReferenceZoomIn" aria-label="Zoom in">+</button>
+                        <span class="qc-reference-zoom-display" id="qcReferenceZoomDisplay">100%</span>
                       </div>
+                      <button type="button" class="qc-reference-tool-btn" id="qcReferenceFocusBtn" aria-label="Focus on defect">
+                        Focus
+                      </button>
+                      <button type="button" class="qc-reference-tool-btn qc-reference-tool-btn--reset hidden" id="qcReferenceResetBtn" aria-label="Reset focus">
+                        Reset
+                      </button>
                     </div>
                   </div>
                   <div class="qc-reference-stage" id="qcReferenceStage">

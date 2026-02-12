@@ -6465,11 +6465,12 @@ function extractRlmMetrics(config) {
     const REFERENCE_CANVAS_PADDING = 32;
     const IMAGE_ROTATION_STORAGE_KEY = "qcReviewImageRotation";
     const REFERENCE_MIRROR_STORAGE_KEY = "qcReferenceMirror";
-    const REFERENCE_ZOOM_STORAGE_KEY = "qcReferenceZoom";
     const REFERENCE_ZOOM_MIN = 0.5;
-    const REFERENCE_ZOOM_MAX = 3;
-    const REFERENCE_ZOOM_STEP = 0.25;
+    const REFERENCE_ZOOM_MAX = 8;
     const REFERENCE_ZOOM_DEFAULT = 1;
+    const REFERENCE_FOCUS_PADDING = 1.4;
+    const REFERENCE_FOCUS_DURATION = 2000;
+    const REFERENCE_INTERACTION_HINT = "Use Focus to zoom to the defect. Click Reset to return to 100%.";
     const POSITION_TIMELINE_MIN_WIDTH = 320;
     const POSITION_TIMELINE_HEIGHT = 44;
     let panel;
@@ -6519,7 +6520,7 @@ function extractRlmMetrics(config) {
     let reviewerInput;
     let commentsInput;
     let referenceMirror = loadStoredReferenceMirror();
-    let referenceZoom = loadStoredReferenceZoom();
+    let referenceZoom = REFERENCE_ZOOM_DEFAULT;
     const fieldEls = {};
     const COMPLETION_FIELDS = ["job_name", "order_number", "reel_code"];
     let initialized = false;
@@ -6568,7 +6569,16 @@ function extractRlmMetrics(config) {
     let referencePlaceholderEl;
     let referenceStageEl;
     let referenceStatusEl;
+    let referenceInnerEl;
+    let referenceMirrorBtn;
+    let referenceZoomDisplayEl;
+    let referenceFocusBtn;
+    let referenceResetBtn;
     let referenceRenderToken = 0;
+    let referencePanX = 0;
+    let referencePanY = 0;
+    let referenceFootprintBounds = null;
+    let referenceTransformAnimation = null;
     let positionTrackEl;
     let positionTrackMetaEl;
     let positionTrackStartEl;
@@ -6644,9 +6654,9 @@ function extractRlmMetrics(config) {
       referenceStatusEl = Utils.qs("#qcReferenceStatus");
       referenceInnerEl = Utils.qs("#qcReferenceStageInner");
       referenceMirrorBtn = Utils.qs("#qcReferenceMirrorBtn");
-      referenceZoomInBtn = Utils.qs("#qcReferenceZoomIn");
-      referenceZoomOutBtn = Utils.qs("#qcReferenceZoomOut");
-      referenceZoomResetBtn = Utils.qs("#qcReferenceZoomReset");
+      referenceZoomDisplayEl = Utils.qs("#qcReferenceZoomDisplay");
+      referenceFocusBtn = Utils.qs("#qcReferenceFocusBtn");
+      referenceResetBtn = Utils.qs("#qcReferenceResetBtn");
       if (referenceMirrorBtn) {
         referenceMirrorBtn.addEventListener("click", () => {
           referenceMirror = !referenceMirror;
@@ -6655,14 +6665,11 @@ function extractRlmMetrics(config) {
           applyReferenceTransform();
         });
       }
-      if (referenceZoomInBtn) {
-        referenceZoomInBtn.addEventListener("click", () => setReferenceZoom(referenceZoom + REFERENCE_ZOOM_STEP));
+      if (referenceResetBtn) {
+        referenceResetBtn.addEventListener("click", () => handleReferenceReset());
       }
-      if (referenceZoomOutBtn) {
-        referenceZoomOutBtn.addEventListener("click", () => setReferenceZoom(referenceZoom - REFERENCE_ZOOM_STEP));
-      }
-      if (referenceZoomResetBtn) {
-        referenceZoomResetBtn.addEventListener("click", () => setReferenceZoom(REFERENCE_ZOOM_DEFAULT));
+      if (referenceFocusBtn) {
+        referenceFocusBtn.addEventListener("click", () => focusReferenceOnFootprint());
       }
       positionTrackEl = Utils.qs("#qcPositionTrack");
       positionTrackMetaEl = Utils.qs("#qcPositionTrackMeta");
@@ -6676,6 +6683,8 @@ function extractRlmMetrics(config) {
       }
       updateReferenceControls();
       applyReferenceTransform();
+      syncReferenceFocusButton();
+      setReferenceResetVisible(false);
       const initialFilters = Filters && typeof Filters.getState === "function" ? Filters.getState() : {};
       lastFilterSnapshot = {
         start: (initialFilters.start || ""),
@@ -7070,24 +7079,6 @@ function extractRlmMetrics(config) {
     function persistReferenceMirror(value) {
       try {
         window.localStorage.setItem(REFERENCE_MIRROR_STORAGE_KEY, value ? "1" : "0");
-      } catch (error) {
-        // ignore
-      }
-    }
-
-    function loadStoredReferenceZoom() {
-      try {
-        const stored = window.localStorage.getItem(REFERENCE_ZOOM_STORAGE_KEY);
-        if (stored === null) return REFERENCE_ZOOM_DEFAULT;
-        return clampReferenceZoom(Number(stored));
-      } catch (error) {
-        return REFERENCE_ZOOM_DEFAULT;
-      }
-    }
-
-    function persistReferenceZoom(value) {
-      try {
-        window.localStorage.setItem(REFERENCE_ZOOM_STORAGE_KEY, String(clampReferenceZoom(value)));
       } catch (error) {
         // ignore
       }
@@ -7609,6 +7600,12 @@ function extractRlmMetrics(config) {
       }
     }
 
+    function setReferenceStatusWithHint(message) {
+      const trimmed = (message || "").trim();
+      const fullMessage = trimmed ? `${trimmed} ${REFERENCE_INTERACTION_HINT}` : REFERENCE_INTERACTION_HINT;
+      setReferenceStatus(fullMessage);
+    }
+
     function showReferencePlaceholder(message) {
       if (referencePlaceholderEl) {
         referencePlaceholderEl.textContent = message || "Reference preview unavailable.";
@@ -7637,6 +7634,41 @@ function extractRlmMetrics(config) {
         referenceCanvasEl.height = 0;
         referenceCanvasEl.removeAttribute("style");
       }
+      referenceFootprintBounds = null;
+      syncReferenceFocusButton();
+      resetReferenceTransformDefaults();
+    }
+
+    function resetReferenceTransformDefaults() {
+      cancelReferenceTransformAnimation();
+      referenceZoom = REFERENCE_ZOOM_DEFAULT;
+      referencePanX = 0;
+      referencePanY = 0;
+      updateReferenceControls();
+      applyReferenceTransform();
+      setReferenceResetVisible(false);
+    }
+
+    function cancelReferenceTransformAnimation() {
+      if (referenceTransformAnimation && referenceTransformAnimation.frameId) {
+        cancelAnimationFrame(referenceTransformAnimation.frameId);
+      }
+      referenceTransformAnimation = null;
+    }
+
+    function syncReferenceFocusButton() {
+      if (referenceFocusBtn) {
+        referenceFocusBtn.disabled = !referenceFootprintBounds;
+      }
+      if (!referenceFootprintBounds) {
+        setReferenceResetVisible(false);
+      }
+    }
+
+    function setReferenceResetVisible(visible) {
+      if (!referenceResetBtn) return;
+      referenceResetBtn.classList.toggle("hidden", !visible);
+      referenceResetBtn.disabled = !visible;
     }
 
     function getReferenceCanvasSize() {
@@ -7699,11 +7731,27 @@ function extractRlmMetrics(config) {
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.lineJoin = "round";
+      let footprintMinX = Infinity;
+      let footprintMaxX = -Infinity;
+      let footprintMinY = Infinity;
+      let footprintMaxY = -Infinity;
+      function recordFootprintPoint(px, py) {
+        footprintMinX = Math.min(footprintMinX, px);
+        footprintMaxX = Math.max(footprintMaxX, px);
+        footprintMinY = Math.min(footprintMinY, py);
+        footprintMaxY = Math.max(footprintMaxY, py);
+      }
       shapes.forEach((shape) => {
         ctx.beginPath();
-        ctx.moveTo((shape.xs[0] - geometry.centerX) * scale, -(shape.ys[0] - geometry.centerY) * scale);
+        const startX = (shape.xs[0] - geometry.centerX) * scale;
+        const startY = -(shape.ys[0] - geometry.centerY) * scale;
+        ctx.moveTo(startX, startY);
+        recordFootprintPoint(startX, startY);
         for (let idx = 1; idx < shape.xs.length; idx += 1) {
-          ctx.lineTo((shape.xs[idx] - geometry.centerX) * scale, -(shape.ys[idx] - geometry.centerY) * scale);
+          const pointX = (shape.xs[idx] - geometry.centerX) * scale;
+          const pointY = -(shape.ys[idx] - geometry.centerY) * scale;
+          ctx.lineTo(pointX, pointY);
+          recordFootprintPoint(pointX, pointY);
         }
         ctx.closePath();
         ctx.fillStyle = "rgba(248, 113, 113, 0.45)";
@@ -7713,6 +7761,26 @@ function extractRlmMetrics(config) {
         ctx.stroke();
       });
       ctx.restore();
+      if (
+        Number.isFinite(footprintMinX) &&
+        Number.isFinite(footprintMaxX) &&
+        Number.isFinite(footprintMinY) &&
+        Number.isFinite(footprintMaxY)
+      ) {
+        const boundsWidth = Math.max(1, footprintMaxX - footprintMinX);
+        const boundsHeight = Math.max(1, footprintMaxY - footprintMinY);
+        const centerX = (footprintMinX + footprintMaxX) / 2;
+        const centerY = (footprintMinY + footprintMaxY) / 2;
+        referenceFootprintBounds = {
+          centerOffsetXRatio: centerX / size,
+          centerOffsetYRatio: centerY / size,
+          widthRatio: boundsWidth / size,
+          heightRatio: boundsHeight / size,
+        };
+      } else {
+        referenceFootprintBounds = null;
+      }
+      syncReferenceFocusButton();
       hideReferencePlaceholder();
     }
 
@@ -7745,6 +7813,9 @@ function extractRlmMetrics(config) {
       }
       const referenceUrl = getReferenceImageUrl(defect);
       const renderId = ++referenceRenderToken;
+      referenceFootprintBounds = null;
+      syncReferenceFocusButton();
+      resetReferenceTransformDefaults();
       setReferenceStatus(
         referenceUrl
           ? "Overlaying the defect footprint on the reference image."
@@ -7754,22 +7825,16 @@ function extractRlmMetrics(config) {
       const image = await loadReferenceImage(referenceUrl);
       if (renderId !== referenceRenderToken) return;
       if (!image && referenceUrl) {
-        setReferenceStatus("Failed to load reference image. Showing footprint in reel space.");
+        setReferenceStatusWithHint("Failed to load reference image. Showing footprint in reel space.");
       } else if (image) {
-        setReferenceStatus("Defect footprint aligned to the reference image.");
+        setReferenceStatusWithHint("Defect footprint aligned to the reference image.");
+      } else {
+        setReferenceStatusWithHint("Reference image unavailable. Showing footprint in reel space.");
       }
       drawReferenceCanvas(shapes, geometry, image);
       applyReferenceTransform();
     }
 
-    function setReferenceZoom(value) {
-      const clamped = clampReferenceZoom(value);
-      if (Math.abs(clamped - referenceZoom) < 0.0001) return;
-      referenceZoom = clamped;
-      persistReferenceZoom(referenceZoom);
-      updateReferenceControls();
-      applyReferenceTransform();
-    }
 
     function clampReferenceZoom(value) {
       if (!Number.isFinite(value)) return REFERENCE_ZOOM_DEFAULT;
@@ -7781,14 +7846,8 @@ function extractRlmMetrics(config) {
         referenceMirrorBtn.classList.toggle("active", Boolean(referenceMirror));
         referenceMirrorBtn.setAttribute("aria-pressed", referenceMirror ? "true" : "false");
       }
-      if (referenceZoomResetBtn) {
-        referenceZoomResetBtn.textContent = `${Math.round(referenceZoom * 100)}%`;
-      }
-      if (referenceZoomInBtn) {
-        referenceZoomInBtn.disabled = referenceZoom >= REFERENCE_ZOOM_MAX - 0.001;
-      }
-      if (referenceZoomOutBtn) {
-        referenceZoomOutBtn.disabled = referenceZoom <= REFERENCE_ZOOM_MIN + 0.001;
+      if (referenceZoomDisplayEl) {
+        referenceZoomDisplayEl.textContent = `${Math.round(referenceZoom * 100)}%`;
       }
     }
 
@@ -7796,7 +7855,26 @@ function extractRlmMetrics(config) {
       if (!referenceInnerEl) return;
       const zoom = referenceZoom;
       const scaleX = referenceMirror ? -zoom : zoom;
-      referenceInnerEl.style.transform = `scale(${scaleX}, ${zoom})`;
+      const pan = clampReferencePan(referencePanX, referencePanY);
+      referencePanX = pan.x;
+      referencePanY = pan.y;
+      referenceInnerEl.style.transform = `translate(${referencePanX}px, ${referencePanY}px) scale(${scaleX}, ${zoom})`;
+    }
+
+    function clampReferencePan(x, y) {
+      return clampReferencePanForZoom(x, y, referenceZoom);
+    }
+
+    function clampReferencePanForZoom(x, y, zoomValue) {
+      if (zoomValue <= 1) return { x: 0, y: 0 };
+      if (!referenceStageEl) return { x, y };
+      const rect = referenceStageEl.getBoundingClientRect();
+      const limitX = Math.max(0, ((zoomValue - 1) * rect.width) / 2);
+      const limitY = Math.max(0, ((zoomValue - 1) * rect.height) / 2);
+      return {
+        x: Math.min(limitX, Math.max(-limitX, x)),
+        y: Math.min(limitY, Math.max(-limitY, y)),
+      };
     }
 
     function normalizeTrackValue(value) {
@@ -7974,6 +8052,102 @@ function extractRlmMetrics(config) {
         }
       }
       return null;
+    }
+
+
+    function focusReferenceOnFootprint() {
+      if (!referenceFootprintBounds || !referenceStageEl) return;
+      const rect = referenceStageEl.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const centerRatioX = Number(referenceFootprintBounds.centerOffsetXRatio) || 0;
+      const centerRatioY = Number(referenceFootprintBounds.centerOffsetYRatio) || 0;
+      const centerOffsetX = centerRatioX * rect.width;
+      const centerOffsetY = centerRatioY * rect.height;
+      const baseWidth = Math.max(8, (referenceFootprintBounds.widthRatio || 0) * rect.width);
+      const baseHeight = Math.max(8, (referenceFootprintBounds.heightRatio || 0) * rect.height);
+      const paddedWidth = baseWidth * REFERENCE_FOCUS_PADDING;
+      const paddedHeight = baseHeight * REFERENCE_FOCUS_PADDING;
+      const targetZoom = clampReferenceZoom(Math.min(rect.width / paddedWidth, rect.height / paddedHeight));
+      const targetScaleX = referenceMirror ? -targetZoom : targetZoom;
+      let targetPanX = -targetScaleX * centerOffsetX;
+      let targetPanY = -targetZoom * centerOffsetY;
+      const clamped = clampReferencePanForZoom(targetPanX, targetPanY, targetZoom);
+      targetPanX = clamped.x;
+      targetPanY = clamped.y;
+      animateReferenceTransform(targetZoom, targetPanX, targetPanY, REFERENCE_FOCUS_DURATION, {
+        centerLock: { offsetXRatio: centerRatioX, offsetYRatio: centerRatioY },
+      });
+      setReferenceResetVisible(true);
+    }
+
+    function handleReferenceReset() {
+      resetReferenceTransformDefaults();
+      setReferenceResetVisible(false);
+    }
+
+    function animateReferenceTransform(targetZoom, targetPanX, targetPanY, durationMs, options = {}) {
+      const limitedTargetZoom = clampReferenceZoom(targetZoom);
+      const duration = Number.isFinite(durationMs) && durationMs > 0 ? durationMs : 500;
+      cancelReferenceTransformAnimation();
+      const startZoom = referenceZoom;
+      const startPanX = referencePanX;
+      const startPanY = referencePanY;
+      const centerLock =
+        options &&
+        options.centerLock &&
+        referenceStageEl &&
+        referenceStageEl.getBoundingClientRect
+          ? (() => {
+              const rect = referenceStageEl.getBoundingClientRect();
+              if (!rect.width || !rect.height) return null;
+              const ratioX = Number(options.centerLock.offsetXRatio);
+              const ratioY = Number(options.centerLock.offsetYRatio);
+              return {
+                offsetX: (Number.isFinite(ratioX) ? ratioX : 0) * rect.width,
+                offsetY: (Number.isFinite(ratioY) ? ratioY : 0) * rect.height,
+              };
+            })()
+          : null;
+      const startTime = performance.now();
+      function step(now) {
+        const elapsed = now - startTime;
+        const progress = Math.min(1, elapsed / duration);
+        const eased = easeInOutCubic(progress);
+        const desiredZoom = startZoom + (limitedTargetZoom - startZoom) * eased;
+        const nextZoom = clampReferenceZoom(desiredZoom);
+        let desiredPanX;
+        let desiredPanY;
+        if (centerLock) {
+          const scaleX = referenceMirror ? -nextZoom : nextZoom;
+          desiredPanX = -scaleX * centerLock.offsetX;
+          desiredPanY = -nextZoom * centerLock.offsetY;
+        } else {
+          desiredPanX = startPanX + (targetPanX - startPanX) * eased;
+          desiredPanY = startPanY + (targetPanY - startPanY) * eased;
+        }
+        referenceZoom = nextZoom;
+        const clampedPan = clampReferencePanForZoom(desiredPanX, desiredPanY, nextZoom);
+        referencePanX = clampedPan.x;
+        referencePanY = clampedPan.y;
+        updateReferenceControls();
+        applyReferenceTransform();
+        if (progress < 1) {
+          referenceTransformAnimation = { frameId: requestAnimationFrame(step) };
+        } else {
+          referenceTransformAnimation = null;
+        }
+      }
+      referenceTransformAnimation = { frameId: requestAnimationFrame(step) };
+    }
+
+    function easeInOutCubic(value) {
+      if (value <= 0) return 0;
+      if (value >= 1) return 1;
+      if (value < 0.5) {
+        return 4 * value * value * value;
+      }
+      const adjusted = 2 * value - 2;
+      return 1 - (adjusted * adjusted * adjusted) / 2;
     }
 
     async function focusDefectFromTrack(defectId) {
