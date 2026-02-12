@@ -6560,21 +6560,12 @@ function extractRlmMetrics(config) {
     let referenceStageEl;
     let referenceStatusEl;
     let referenceRenderToken = 0;
-    let positionTimelineEl;
-    let positionStageEl;
-    let positionCanvasEl;
-    let positionPlaceholderEl;
-    let positionStartLabelEl;
-    let positionEndLabelEl;
-    let positionCursorLabelEl;
-    let positionStatusEl;
-    let positionTimelineData = null;
-    let positionTimelineHits = [];
-    let positionTimelineDataset = null;
-    let positionTimelineDefaultStatus = "Waiting for position data…";
-    let positionTimelineDefaultCursor = "—";
-    let positionTimelineDefaultRange = { start: 0, end: 0 };
-    let manualDefectSelection = false;
+    let positionTrackEl;
+    let positionTrackMetaEl;
+    let positionTrackStartEl;
+    let positionTrackEndEl;
+    let positionTrackSquaresEl;
+    let positionTrackSegments = [];
 
     function init() {
       if (initialized) return;
@@ -6641,18 +6632,13 @@ function extractRlmMetrics(config) {
       referencePlaceholderEl = Utils.qs("#qcReferencePlaceholder");
       referenceStageEl = Utils.qs("#qcReferenceStage");
       referenceStatusEl = Utils.qs("#qcReferenceStatus");
-      positionTimelineEl = Utils.qs("#qcPositionTimeline");
-      positionStageEl = Utils.qs("#qcPositionStage");
-      positionCanvasEl = Utils.qs("#qcPositionCanvas");
-      positionPlaceholderEl = Utils.qs("#qcPositionPlaceholder");
-      positionStartLabelEl = Utils.qs("#qcPositionStartLabel");
-      positionEndLabelEl = Utils.qs("#qcPositionEndLabel");
-      positionCursorLabelEl = Utils.qs("#qcPositionCursorLabel");
-      positionStatusEl = Utils.qs("#qcPositionStatus");
-      if (positionStageEl) {
-        positionStageEl.addEventListener("mousemove", handleTimelinePointerMove);
-        positionStageEl.addEventListener("mouseleave", handleTimelinePointerLeave);
-        positionStageEl.addEventListener("click", handleTimelineClick);
+      positionTrackEl = Utils.qs("#qcPositionTrack");
+      positionTrackMetaEl = Utils.qs("#qcPositionTrackMeta");
+      positionTrackStartEl = Utils.qs("#qcPositionTrackStart");
+      positionTrackEndEl = Utils.qs("#qcPositionTrackEnd");
+      positionTrackSquaresEl = Utils.qs("#qcPositionTrackSquares");
+      if (positionTrackSquaresEl) {
+        positionTrackSquaresEl.addEventListener("click", handlePositionTrackClick);
       }
       const initialFilters = Filters && typeof Filters.getState === "function" ? Filters.getState() : {};
       lastFilterSnapshot = {
@@ -6860,14 +6846,13 @@ function extractRlmMetrics(config) {
       currentReel = payload.reel || null;
       currentDefect = payload.next_defect || null;
       summaryData = payload.reel_summary || null;
-      updatePositionTimelineData(summaryData, currentDefect);
       const hasPending = Boolean(payload && payload.has_pending);
       updateImagePendingCounter(summaryData);
+      renderPositionTrack(currentReel, summaryData);
       if (!currentDefect) {
         setDefectCategoryValue("");
         resetSeverityControls();
         resetReferencePreview("No pending defect selected.");
-        renderPositionTimeline(null);
       }
       if (!currentReel) {
         setViewState("empty");
@@ -6887,7 +6872,7 @@ function extractRlmMetrics(config) {
         resetImageRotation();
         resetSeverityControls();
         resetReferencePreview("No reel selected.");
-        resetPositionTimeline("No reel selected.");
+        renderPositionTrack(null, null);
         return;
       }
       hideNoReelNotice();
@@ -6909,7 +6894,6 @@ function extractRlmMetrics(config) {
       setViewState("content");
       resetSeverityControls();
       resetReferencePreview("No pending defect selected.");
-      renderPositionTimeline(null);
     }
 
     function showErrorState(message) {
@@ -6925,7 +6909,7 @@ function extractRlmMetrics(config) {
       resetImageRotation();
       updateImagePendingCounter(null);
       resetReferencePreview("Unable to load reference preview.");
-      resetPositionTimeline("Unable to load position data.");
+      renderPositionTrack(null, null);
     }
 
     function showNoReelNotice(message, showButton) {
@@ -7464,7 +7448,6 @@ function extractRlmMetrics(config) {
       renderReferencePreview(defect).catch(() => {
         resetReferencePreview("Unable to render the footprint preview.");
       });
-      renderPositionTimeline(defect);
     }
 
     function getReferenceImageUrl(defect) {
@@ -7681,271 +7664,124 @@ function extractRlmMetrics(config) {
       drawReferenceCanvas(shapes, geometry, image);
     }
 
+    function normalizeTrackValue(value) {
+      if (value === null || value === undefined) return null;
+      const num = Number(value);
+      return Number.isFinite(num) ? num : null;
+    }
+
+    function renderPositionTrack(reel, summary) {
+      if (!positionTrackEl) return;
+      const start = normalizeTrackValue(
+        reel && (reel.reel_start_position ?? reel.reel_start ?? reel.reel_start_position_mm ?? reel.reel_start_mm)
+      );
+      const end = normalizeTrackValue(
+        reel && (reel.reel_end_position ?? reel.reel_end ?? reel.reel_end_position_mm ?? reel.reel_end_mm)
+      );
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+        positionTrackEl.classList.add("hidden");
+        positionTrackSegments = [];
+        if (positionTrackSquaresEl) positionTrackSquaresEl.innerHTML = "";
+        if (positionTrackMetaEl) positionTrackMetaEl.textContent = "Position data unavailable.";
+        if (positionTrackStartEl) positionTrackStartEl.textContent = "—";
+        if (positionTrackEndEl) positionTrackEndEl.textContent = "—";
+        return;
+      }
+      positionTrackEl.classList.remove("hidden");
+      const span = end - start;
+      if (positionTrackMetaEl) {
+        positionTrackMetaEl.textContent = `Span ${Utils.formatNumber(span, 0)} units`;
+      }
+      if (positionTrackStartEl) positionTrackStartEl.textContent = Utils.formatNumber(start, 0);
+      if (positionTrackEndEl) positionTrackEndEl.textContent = Utils.formatNumber(end, 0);
+      if (positionTrackSquaresEl) {
+        positionTrackSegments = [];
+        const fragment = document.createDocumentFragment();
+        const measuredWidth =
+          positionTrackSquaresEl.getBoundingClientRect().width ||
+          positionTrackEl?.getBoundingClientRect().width ||
+          referenceStageEl?.getBoundingClientRect().width ||
+          positionTrackEl?.parentElement?.getBoundingClientRect?.().width ||
+          positionTrackSquaresEl.clientWidth ||
+          positionTrackEl?.clientWidth ||
+          referenceStageEl?.clientWidth ||
+          positionTrackEl?.parentElement?.clientWidth ||
+          0;
+        if (!measuredWidth || measuredWidth <= 0) {
+          window.requestAnimationFrame(() => renderPositionTrack(reel, summary));
+          return;
+        }
+        const maxSegments = Math.max(25, Math.floor(measuredWidth));
+        const idealSegments = Math.max(1, Math.round(span));
+        const segments = Math.min(idealSegments, maxSegments);
+        const step = span / segments;
+        const defectEntries = Array.isArray(summary?.defects)
+          ? summary.defects
+              .map((row) => ({
+                position: normalizeTrackValue(row && row.format_position),
+                id: row && row.defect_id,
+              }))
+              .filter((entry) => Number.isFinite(entry.position) && entry.id)
+              .sort((a, b) => a.position - b.position)
+          : [];
+        let defectIdx = 0;
+        for (let idx = 0; idx < segments; idx += 1) {
+          const square = document.createElement("div");
+          const rangeStart = start + idx * step;
+          const rangeEnd = idx === segments - 1 ? end : rangeStart + step;
+          while (defectIdx < defectEntries.length && defectEntries[defectIdx].position < rangeStart) {
+            defectIdx += 1;
+          }
+          let chosenDefect = null;
+          let scanIdx = defectIdx;
+          while (scanIdx < defectEntries.length && defectEntries[scanIdx].position < rangeEnd) {
+            chosenDefect = defectEntries[scanIdx];
+            break;
+          }
+          square.className = chosenDefect
+            ? "qc-position-track__square qc-position-track__square--defect"
+            : "qc-position-track__square";
+          square.dataset.segmentIndex = String(idx);
+          square.title = chosenDefect
+            ? `Defect #${chosenDefect.id} · position ${Utils.formatNumber(chosenDefect.position, 0)}`
+            : `Positions ${Utils.formatNumber(rangeStart, 0)} – ${Utils.formatNumber(rangeEnd, 0)}`;
+          positionTrackSegments[idx] = {
+            start: rangeStart,
+            end: rangeEnd,
+            defectId: chosenDefect ? chosenDefect.id : null,
+          };
+          fragment.appendChild(square);
+        }
+        positionTrackSquaresEl.innerHTML = "";
+        positionTrackSquaresEl.appendChild(fragment);
+      }
+    }
+
+    function handlePositionTrackClick(event) {
+      const target = event.target.closest(".qc-position-track__square");
+      if (!target || !positionTrackSquaresEl || !positionTrackSquaresEl.contains(target)) return;
+      const index = Number(target.dataset.segmentIndex);
+      if (!Number.isInteger(index)) return;
+      const segment = positionTrackSegments[index];
+      if (!segment || !segment.defectId) return;
+      focusDefectFromTrack(segment.defectId);
+    }
+
+    async function focusDefectFromTrack(defectId) {
+      if (!defectId) return;
+      try {
+        await fetchNext(false, { focusDefectId: defectId });
+      } catch (error) {
+        console.error("Failed to load defect", defectId, error);
+      }
+    }
+
     function normalizeDecision(value) {
       const normalized = (value || "").toString().trim().toLowerCase();
       if (normalized === "pass" || normalized === "fail") return normalized;
       if (normalized === "uncertain") return "uncertain";
       return "pending";
     }
-
-    function setPositionStatus(message, { persist = false } = {}) {
-      if (positionStatusEl) {
-        positionStatusEl.textContent = message || "Waiting for position data…";
-      }
-      if (persist) {
-        positionTimelineDefaultStatus = message || "Waiting for position data…";
-      }
-    }
-
-    function showPositionPlaceholder(message) {
-      if (positionPlaceholderEl) {
-        if (message) {
-          positionPlaceholderEl.textContent = message;
-        }
-        positionPlaceholderEl.classList.remove("hidden");
-      }
-      if (positionCanvasEl) {
-        positionCanvasEl.classList.add("hidden");
-      }
-    }
-
-    function hidePositionPlaceholder() {
-      if (positionPlaceholderEl) {
-        positionPlaceholderEl.classList.add("hidden");
-      }
-      if (positionCanvasEl) {
-        positionCanvasEl.classList.remove("hidden");
-      }
-    }
-
-    function setPositionLabels(start, end, cursorLabel, { persist = false } = {}) {
-      const safeStart = Number.isFinite(start) ? start : 0;
-      const safeEnd = Number.isFinite(end) ? end : safeStart;
-      if (positionStartLabelEl) {
-        positionStartLabelEl.textContent = Utils.formatNumber(safeStart, 0);
-      }
-      if (positionEndLabelEl) {
-        positionEndLabelEl.textContent = Utils.formatNumber(safeEnd, 0);
-      }
-      if (positionCursorLabelEl) {
-        positionCursorLabelEl.textContent = cursorLabel || "—";
-      }
-      if (persist) {
-        positionTimelineDefaultRange = { start: safeStart, end: safeEnd };
-        positionTimelineDefaultCursor = cursorLabel || "—";
-      }
-    }
-
-    function updatePositionTimelineData(summary, fallbackDefect) {
-      positionTimelineData = buildPositionTimelineData(summary, fallbackDefect);
-      positionTimelineDataset = positionTimelineData;
-    }
-
-    function buildPositionTimelineData(summary, fallbackDefect) {
-      const rows = Array.isArray(summary?.defects) ? summary.defects : [];
-      const workingRows = rows.length ? rows : fallbackDefect ? [fallbackDefect] : [];
-      if (!workingRows.length) return null;
-      const slots = new Map();
-      let minPosition = Infinity;
-      let maxPosition = -Infinity;
-      workingRows.forEach((row) => {
-        const raw = Number(row && row.format_position);
-        if (!Number.isFinite(raw)) return;
-        const key = Math.round(raw);
-        let slot = slots.get(key);
-        if (!slot) {
-          slot = {
-            position: key,
-            defects: [],
-            counts: { pass: 0, fail: 0, pending: 0 },
-          };
-          slots.set(key, slot);
-        }
-        const normalizedDecision = normalizeDecision(row && row.qc_decision);
-        if (normalizedDecision === "pass") slot.counts.pass += 1;
-        else if (normalizedDecision === "fail") slot.counts.fail += 1;
-        else slot.counts.pending += 1;
-        slot.defects.push({
-          defect_id: row && row.defect_id,
-          decision: normalizedDecision,
-          format_position: raw,
-        });
-        minPosition = Math.min(minPosition, raw);
-        maxPosition = Math.max(maxPosition, raw);
-      });
-      if (!slots.size || !Number.isFinite(minPosition) || !Number.isFinite(maxPosition)) {
-        return null;
-      }
-      const start = Math.floor(minPosition);
-      let end = Number.isFinite(maxPosition) ? Math.ceil(maxPosition) : start + 1;
-      if (end <= start) {
-        end = start + 1;
-      }
-      const totalDefects = Array.from(slots.values()).reduce((sum, slot) => sum + slot.defects.length, 0);
-      return {
-        start,
-        end,
-        slots,
-        totalDefects,
-      };
-    }
-
-    function renderPositionTimeline(defect) {
-      if (!positionTimelineEl || !positionCanvasEl) return;
-      const dataset = positionTimelineData;
-      if (!dataset) {
-        const message = summaryData ? "No position data for this reel." : "Position data unavailable.";
-        showPositionPlaceholder(message);
-        setPositionLabels(0, 0, "—", { persist: true });
-        setPositionStatus(message, { persist: true });
-        positionTimelineHits = [];
-        return;
-      }
-      const { start, end, slots, totalDefects } = dataset;
-      const totalSlots = Math.max(end - start + 1, 1);
-      const containerWidth =
-        (positionStageEl && positionStageEl.clientWidth) ||
-        (positionTimelineEl && positionTimelineEl.clientWidth) ||
-        (referenceStageEl && referenceStageEl.clientWidth) ||
-        (stageEl && stageEl.clientWidth) ||
-        POSITION_TIMELINE_MIN_WIDTH;
-      const width = Math.max(POSITION_TIMELINE_MIN_WIDTH, containerWidth);
-      const height = POSITION_TIMELINE_HEIGHT;
-      const dpr = window.devicePixelRatio || 1;
-      const ctx = positionCanvasEl.getContext("2d");
-      if (!ctx) {
-        showPositionPlaceholder("Unable to render position timeline.");
-        setPositionLabels(start, end, "—", { persist: true });
-        setPositionStatus("Unable to render position timeline.", { persist: true });
-        positionTimelineHits = [];
-        return;
-      }
-      positionCanvasEl.width = width * dpr;
-      positionCanvasEl.height = height * dpr;
-      positionCanvasEl.style.width = `${width}px`;
-      positionCanvasEl.style.height = `${height}px`;
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, positionCanvasEl.width, positionCanvasEl.height);
-      ctx.scale(dpr, dpr);
-      ctx.fillStyle = "#022c22";
-      ctx.fillRect(0, 0, width, height);
-      const slotWidth = width / totalSlots;
-      positionTimelineHits = [];
-      for (let pos = start; pos <= end; pos += 1) {
-        const slot = slots.get(pos);
-        const hasDefect = slot && slot.defects.length;
-        const x = (pos - start) * slotWidth;
-        const w = Math.max(slotWidth, 1 / dpr);
-        ctx.fillStyle = hasDefect ? "#ef4444" : "#0f9d58";
-        ctx.fillRect(x, 0, w + 0.5, height);
-        positionTimelineHits.push({
-          position: pos,
-          x0: x,
-          x1: x + w,
-          slot,
-        });
-      }
-      const rawPosition =
-        defect && Number.isFinite(Number(defect.format_position)) ? Number(defect.format_position) : null;
-      let cursorLabel = "—";
-      if (rawPosition !== null) {
-        const pointer = Math.round(rawPosition);
-        const pointerX = (pointer - start) * slotWidth;
-        const pointerWidth = Math.max(slotWidth, 2);
-        ctx.fillStyle = "rgba(59, 130, 246, 0.35)";
-        ctx.fillRect(pointerX, 0, pointerWidth, height);
-        ctx.strokeStyle = "#3b82f6";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(pointerX, 1, pointerWidth, height - 2);
-        cursorLabel = Utils.formatNumber(rawPosition, 1);
-      }
-      hidePositionPlaceholder();
-      setPositionLabels(start, end, cursorLabel, { persist: true });
-      const spanLabel = `${Utils.formatNumber(totalSlots, 0)} positions`;
-      const defectLabel = `${Utils.formatNumber(totalDefects, 0)} defects`;
-      setPositionStatus(`${defectLabel} across ${spanLabel}`, { persist: true });
-    }
-
-    function resetPositionTimeline(message) {
-      positionTimelineData = null;
-      positionTimelineDataset = null;
-      positionTimelineHits = [];
-      showPositionPlaceholder(message || "Position data unavailable.");
-      setPositionStatus(message || "Position data unavailable.", { persist: true });
-      setPositionLabels(0, 0, "—", { persist: true });
-    }
-
-    function getTimelineSlotFromEvent(event) {
-      if (!positionStageEl || !positionTimelineHits.length) return null;
-      const rect = positionStageEl.getBoundingClientRect();
-      if (!rect || rect.width === 0) return null;
-      const x = event.clientX - rect.left;
-      if (Number.isNaN(x)) return null;
-      return positionTimelineHits.find((hit) => x >= hit.x0 && x <= hit.x1) || null;
-    }
-
-    function formatSlotStatus(slot) {
-      if (!slot || !slot.defects || !slot.defects.length) return null;
-      const parts = slot.defects.map((entry) => {
-        const decision = entry.decision === "fail" ? "Fail" : entry.decision === "pass" ? "Pass" : "Pending";
-        const idLabel = entry.defect_id ? `#${entry.defect_id}` : "Defect";
-        return `${idLabel} ${decision}`;
-      });
-      return `Position ${slot.position}: ${parts.join(", ")}`;
-    }
-
-    function restorePositionTimelineDefaults() {
-      setPositionStatus(positionTimelineDefaultStatus, { persist: false });
-      setPositionLabels(
-        positionTimelineDefaultRange.start,
-        positionTimelineDefaultRange.end,
-        positionTimelineDefaultCursor,
-        { persist: false }
-      );
-    }
-
-    function handleTimelinePointerMove(event) {
-      const hit = getTimelineSlotFromEvent(event);
-      if (!hit || !hit.slot || !hit.slot.defects.length) {
-        restorePositionTimelineDefaults();
-        return;
-      }
-      const status = formatSlotStatus(hit.slot);
-      if (status) {
-        setPositionStatus(status);
-      }
-      const cursorValue =
-        (hit.slot.defects[0] && Utils.formatNumber(hit.slot.defects[0].format_position || hit.position, 1)) || "—";
-      setPositionLabels(positionTimelineDefaultRange.start, positionTimelineDefaultRange.end, cursorValue);
-    }
-
-    function handleTimelinePointerLeave() {
-      restorePositionTimelineDefaults();
-    }
-
-    async function handleTimelineClick(event) {
-      const hit = getTimelineSlotFromEvent(event);
-      if (!hit || !hit.slot || !hit.slot.defects.length) return;
-      const pendingTarget = hit.slot.defects.find((entry) => entry.decision !== "pass");
-      const target = pendingTarget || hit.slot.defects[0];
-      if (!target || !target.defect_id) return;
-      await focusDefectById(target.defect_id);
-    }
-
-    async function focusDefectById(defectId) {
-      if (!defectId || !currentReel) return;
-      manualDefectSelection = true;
-      try {
-        await fetchNext(false, {
-          focusDefectId: defectId,
-          forceReelId: currentReel.reel_id,
-        });
-      } catch (error) {
-        manualDefectSelection = false;
-        console.error("Failed to focus defect", defectId, error);
-      }
-    }
-
     function countPendingImageDefects(summary) {
       if (!summary || !Array.isArray(summary.defects)) return 0;
       return summary.defects.filter((row) => {
@@ -8046,7 +7882,6 @@ function extractRlmMetrics(config) {
           summaryHistoryEl.textContent = "";
         }
       }
-      renderPositionTimeline(currentDefect);
     }
 
     function syncCompletionHighlights(isComplete) {
@@ -8115,7 +7950,6 @@ function extractRlmMetrics(config) {
           category: getDefectCategoryValue(),
         });
         needsRefresh = true;
-        manualDefectSelection = false;
         await fetchNext(false, { lockToReel: true, suppressLoader: true });
       } catch (error) {
         const message = error && error.message ? error.message : "Failed to save the label.";

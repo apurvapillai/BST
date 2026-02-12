@@ -3796,6 +3796,8 @@ def api_qc_review():
                 "format_length": _to_float(reel.format_length),
                 "format_width": _to_float(reel.format_width),
                 "reference_image": reference_image,
+                "reel_start_position": _to_float(reel.reel_start),
+                "reel_end_position": _to_float(reel.reel_end),
             }
 
             return {

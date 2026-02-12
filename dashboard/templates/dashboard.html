@@ -573,35 +573,20 @@
                       Footprint preview unavailable.
                     </div>
                   </div>
-                  <p class="qc-reference-note">
-                    Overlay uses the defect’s coords_json relative to the reel’s reference image.
-                  </p>
                 </div>
               </div>
             </div>
-            <div class="qc-position-timeline" id="qcPositionTimeline">
-              <div class="qc-position-header">
-                <p class="qc-position-title">Position Timeline</p>
-                <p class="qc-position-status" id="qcPositionStatus">
-                  Waiting for position data…
-                </p>
+            <div class="qc-position-track hidden" id="qcPositionTrack" aria-live="polite">
+              <div class="qc-position-track__header">
+                <p class="qc-position-track__title">Position Range</p>
+                <p class="qc-position-track__meta" id="qcPositionTrackMeta">Waiting for reel data…</p>
               </div>
-              <div class="qc-position-stage" id="qcPositionStage">
-                <canvas
-                  id="qcPositionCanvas"
-                  class="hidden"
-                  role="img"
-                  aria-label="Defect position timeline"
-                ></canvas>
-                <div class="qc-position-placeholder" id="qcPositionPlaceholder">
-                  Position data unavailable.
-                </div>
+              <div class="qc-position-track__labels">
+                <span id="qcPositionTrackStart">—</span>
+                <span id="qcPositionTrackEnd">—</span>
               </div>
-              <div class="qc-position-labels">
-                <span id="qcPositionStartLabel">0</span>
-                <span id="qcPositionCursorLabel">—</span>
-                <span id="qcPositionEndLabel">0</span>
-              </div>
+              <div class="qc-position-track__squares" id="qcPositionTrackSquares" role="img"
+                   aria-label="Reel position span"></div>
             </div>
               <div class="qc-review-actions" id="qcDefectActions">
                 <div class="qc-severity-panel">
