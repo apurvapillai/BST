@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Repeat Length Monitoring</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/rlm.css') }}">
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+  <header class="rlm-header">
+    <div class="rlm-brand">
+      <p class="rlm-eyebrow">ProcessGuard AI</p>
+      <h1>Repeat Length Monitoring</h1>
+      <p class="rlm-tagline">Dedicated analysis workspace for pressbstrlm</p>
+    </div>
+    <div class="rlm-header-meta">
+      <span class="rlm-badge">pressbstrlm</span>
+      <span class="rlm-badge">Read Only</span>
+    </div>
+  </header>
+
+  <main id="rlmApp"
+        data-default-start="{{ default_start_str }}"
+        data-default-end="{{ default_end_str }}"
+        data-default-machine="{{ default_machine_id if default_machine_id else '' }}">
+    <section class="rlm-hero-grid">
+      <div class="rlm-panel rlm-panel--filters">
+        <div class="panel-header">
+          <h2>Filters</h2>
+        </div>
+        <div class="filters-grid">
+          <div class="filter-control">
+            <label for="rlmMachine">Machine</label>
+            <select id="rlmMachine">
+              {% for machine in machines %}
+              <option value="{{ machine.machine_id }}" {% if machine.machine_id == default_machine_id %}selected{% endif %}>
+                {{ machine.machine_name }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="filter-control">
+            <label for="rlmStart">Start date</label>
+            <input type="date" id="rlmStart" value="{{ default_start_str }}">
+          </div>
+          <div class="filter-control">
+            <label for="rlmEnd">End date</label>
+            <input type="date" id="rlmEnd" value="{{ default_end_str }}">
+          </div>
+        <div class="filter-control">
+          <label for="rlmJob">Job / Reel</label>
+          <select id="rlmJob">
+            <option value="">Add job filter…</option>
+          </select>
+        </div>
+        <div class="filter-control">
+          <label for="rlmMinFeet">Min reel feet</label>
+          <input type="number" id="rlmMinFeet" min="0" step="10" placeholder="e.g. 1000">
+        </div>
+        <div class="filter-control filter-action">
+          <button type="button" id="rlmRefresh" class="btn">Submit</button>
+        </div>
+        <div class="job-chips hidden" id="rlmJobChips"></div>
+      </div>
+      </div>
+      <div class="rlm-panel rlm-panel--summary">
+        <div class="panel-header">
+          <h2>Summary</h2>
+          <span id="rlmRangeLabel" class="rlm-badge"></span>
+        </div>
+        <div class="summary-grid" id="rlmSummary"></div>
+        <div class="rlm-timeline-strip">
+          <p class="rlm-timeline-label">Jobs</p>
+          <div id="rlmTimelineBar" class="timeline-bar timeline-bar--compact"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="rlm-panel rlm-panel--highlight rlm-panel--curlength">
+      <div class="panel-header">
+        <div>
+          <h2>Curlength Analysis</h2>
+          <p class="panel-subtitle">Primary trend focus with alert banding</p>
+        </div>
+      </div>
+      <div class="curlength-controls">
+        <div class="control control--hidden">
+          <label for="rlmTargetValue">Target curlength (mm)</label>
+          <input type="number" step="0.001" id="rlmTargetValue" placeholder="e.g. 700">
+        </div>
+        <div class="control control--hidden">
+          <label for="rlmMinusTolerance">Minus tolerance (mm)</label>
+          <input type="number" step="0.001" id="rlmMinusTolerance" placeholder="e.g. 2">
+        </div>
+        <div class="control control--hidden">
+          <label for="rlmPlusTolerance">Plus tolerance (mm)</label>
+          <input type="number" step="0.001" id="rlmPlusTolerance" placeholder="e.g. 3">
+        </div>
+        <div class="control control--stats control--hidden">
+          <label>Out-of-band summary</label>
+          <div id="rlmCurlengthStats" class="curlength-stats">--</div>
+        </div>
+      </div>
+      <div class="chart-card chart-card--tall">
+        <div class="chart-card-title">
+          <p class="chart-card__eyebrow">Trend View</p>
+          <h4>Curlength Trend</h4>
+        </div>
+        <div id="rlmCurlengthChart" class="chart chart--tall"></div>
+      </div>
+    </section>
+
+    <section class="rlm-panel rlm-panel--delta">
+      <div class="panel-header">
+        <div>
+          <h2>Delta Intelligence</h2>
+          <p class="panel-subtitle">Repeat length deltas, distributions, and detail</p>
+        </div>
+        <span id="rlmDeltaSummary" class="delta-summary">--</span>
+      </div>
+      <div class="delta-control-card">
+        <div class="delta-controls delta-controls--inline">
+          <label class="delta-toggle delta-toggle--inline">
+            <input type="checkbox" id="rlmDeltaToggle">
+            Out-of-bounds only
+          </label>
+          <div class="delta-controls__inputs">
+            <div class="control control--overrides">
+              <label>Trend range (mm)</label>
+              <div class="override-inputs">
+                <input type="number" step="0.001" id="rlmDeltaAxisMin" placeholder="min">
+                <input type="number" step="0.001" id="rlmDeltaAxisMax" placeholder="max">
+              </div>
+            </div>
+            <div class="control control--overrides">
+              <label>New error bounds (mm)</label>
+              <div class="override-inputs">
+                <input type="number" step="0.001" id="rlmErrShrinkOverride" placeholder="err shrink">
+                <input type="number" step="0.001" id="rlmErrExpandOverride" placeholder="err expand">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="chart-card chart-card--tall chart-card--full rlm-delta-chart">
+        <div class="chart-card-title">
+          <p class="chart-card__eyebrow">Delta Analysis</p>
+          <h4>Repeat Length Delta</h4>
+        </div>
+        <div id="rlmDeltaChart" class="chart chart--tall"></div>
+      </div>
+      <div class="rlm-delta-grid">
+        <div class="rlm-delta-left">
+          <div class="delta-info-grid delta-info-grid--trio">
+            <div class="delta-card">
+              <p>Total reels</p>
+              <div class="delta-card__value" id="rlmReelCountTotal">--</div>
+            </div>
+            <div class="delta-card">
+              <p>Good reels</p>
+              <div class="delta-card__value" id="rlmReelCountGood">--</div>
+            </div>
+            <div class="delta-card">
+              <p>Bad reels</p>
+              <div class="delta-card__value" id="rlmReelCountBad">--</div>
+            </div>
+          </div>
+          <div class="delta-info-grid delta-info-grid--trio">
+            <div class="delta-card">
+              <p>Avg delta</p>
+              <div class="delta-card__value" id="rlmDeltaAvg">--</div>
+            </div>
+            <div class="delta-card">
+              <p>Std dev delta</p>
+              <div class="delta-card__value" id="rlmDeltaStd">--</div>
+            </div>
+            <div class="delta-card delta-card--paired">
+              <p>Delta min / max</p>
+              <div class="delta-card__value-pair">
+                <span id="rlmDeltaMin">--</span>
+                <span>/</span>
+                <span id="rlmDeltaMax">--</span>
+              </div>
+            </div>
+          </div>
+        <div class="delta-mini-charts">
+          <div class="chart-card chart-card--mini">
+            <div class="chart-card-title">
+              <p class="chart-card__eyebrow">Distribution</p>
+              <h4>Out-of-bounds Breakdown</h4>
+              </div>
+              <div id="rlmDeltaOobPie" class="chart chart--mini"></div>
+            </div>
+          <div class="chart-card chart-card--mini">
+            <div class="chart-card-title">
+              <p class="chart-card__eyebrow">Split</p>
+              <h4>Above vs Below Bounds</h4>
+            </div>
+            <div id="rlmDeltaOobBar" class="chart chart--mini"></div>
+          </div>
+        </div>
+      </div>
+      <div class="rlm-delta-right">
+        <div class="delta-feet-cards delta-feet-cards--side">
+          <div class="delta-feet-card">
+            <p>Total feet</p>
+            <div class="delta-feet-card__value" id="rlmFeetTotal">--</div>
+          </div>
+          <div class="delta-feet-card">
+            <p>Good feet</p>
+            <div class="delta-feet-card__value delta-feet-card__value--good" id="rlmFeetGood">--</div>
+            <span class="delta-feet-card__percent" id="rlmFeetGoodPct">--</span>
+          </div>
+          <div class="delta-feet-card">
+            <p>Bad feet</p>
+            <div class="delta-feet-card__value delta-feet-card__value--bad" id="rlmFeetBad">--</div>
+            <span class="delta-feet-card__percent" id="rlmFeetBadPct">--</span>
+          </div>
+        </div>
+        <div class="chart-card chart-card--mini chart-card--feet">
+          <div class="chart-card-title">
+            <p class="chart-card__eyebrow">Reel Hotspots</p>
+            <h4>Feet In/Out-of-Bounds</h4>
+          </div>
+          <div id="rlmDeltaFeetBar" class="chart chart--mini chart--feet-bar"></div>
+        </div>
+      </div>
+      <div class="delta-table-card-wrapper">
+        <div class="table-card table-card--inline delta-table-card">
+          <div class="table-card-header delta-table-header">
+            <h4>Delta Details</h4>
+            <span class="table-count" id="rlmDeltaTableOobCount">0</span>
+          </div>
+          <div class="table-card-body table-card-body--wide">
+            <table id="rlmDeltaTable">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Job</th>
+                  <th>Reel</th>
+                  <th>Nominal</th>
+                  <th>Bounds</th>
+                  <th>Actual</th>
+                  <th>Delta</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="rlm-panel rlm-panel--tolerance">
+      <div class="panel-header">
+        <h2>Tolerance Intelligence</h2>
+      </div>
+      <div class="rlm-tolerance-grid">
+        <div class="rlm-tolerance-overview">
+          <div class="summary-grid" id="rlmToleranceSummary"></div>
+          <div class="chart-grid chart-grid--mini">
+            <div class="chart-card chart-card--mini">
+              <div class="chart-card-title">
+                <p class="chart-card__eyebrow">Breakdown</p>
+                <h4>Repeat Length Change Mix</h4>
+              </div>
+              <div id="rlmChangeMixChart" class="chart chart--mini"></div>
+            </div>
+            <div class="chart-card chart-card--mini">
+              <div class="chart-card-title">
+                <p class="chart-card__eyebrow">Insight</p>
+                <h4>Top Jobs by In-Reel Changes</h4>
+              </div>
+              <div id="rlmChangeJobChart" class="chart chart--mini"></div>
+            </div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-card-title">
+              <p class="chart-card__eyebrow">Trend View</p>
+              <h4>Raw Error Limits</h4>
+            </div>
+            <div id="rlmErrorTrendChart" class="chart"></div>
+            <div class="table-card table-card--inline">
+              <div class="table-card-header">
+                <h4>Error Limit Changes</h4>
+                <span class="table-count" id="rlmErrorChangeCount">0</span>
+              </div>
+              <div class="table-card-body table-card-body--compact">
+                <table id="rlmErrorChangeTable">
+                  <thead>
+                    <tr>
+                      <th>Job</th>
+                      <th>Reel</th>
+                      <th>Start</th>
+                      <th>End</th>
+                      <th>Err Shrink</th>
+                      <th>Err Expand</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="rlm-tolerance-deep">
+          <div class="chart-card chart-card--tall chart-card--tall-wide">
+            <div class="chart-card-title">
+              <p class="chart-card__eyebrow">Trend View</p>
+              <h4>Tolerance Trend</h4>
+            </div>
+            <div id="rlmToleranceChart" class="chart"></div>
+            <div class="table-stack table-stack--compact">
+              <div class="table-card">
+                <div class="table-card-header">
+                  <h4>Reels with 1 change</h4>
+                  <span class="table-count" id="rlmChangeOnceCount">0</span>
+                </div>
+                <div class="table-card-body table-card-body--compact">
+                  <table id="rlmChangeTableOnce">
+                    <thead>
+                      <tr>
+                        <th>Job</th>
+                        <th>Reel</th>
+                        <th>Start</th>
+                        <th>End</th>
+                        <th>Changes</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="table-card">
+                <div class="table-card-header">
+                  <h4>Reels with 2+ changes</h4>
+                  <span class="table-count" id="rlmChangeMultiCount">0</span>
+                </div>
+                <div class="table-card-body table-card-body--compact">
+                  <table id="rlmChangeTableMulti">
+                    <thead>
+                      <tr>
+                        <th>Job</th>
+                        <th>Reel</th>
+                        <th>Start</th>
+                        <th>End</th>
+                        <th>Changes</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-card-title">
+              <p class="chart-card__eyebrow">Trend View</p>
+              <h4>Monitoring Points per Reel</h4>
+            </div>
+            <div id="rlmMonitoringTrendChart" class="chart chart--monitoring"></div>
+          </div>
+        </div>
+      </div>
+      <div class="tolerance-raw-table">
+          <div class="table-card table-card--wide">
+            <div class="table-card-header">
+              <h4>Raw Tolerance Data per Reel</h4>
+            </div>
+            <div class="table-card-body table-card-body--wide">
+              <table id="rlmRawTable">
+                <thead>
+                  <tr>
+                    <th>Job</th>
+                    <th>Reel</th>
+                    <th>Feet</th>
+                    <th>Start</th>
+                    <th>End</th>
+                    <th>Monitoring Points</th>
+                    <th>Nominal History</th>
+                    <th>Error Shrink</th>
+                    <th>Error Expand</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="rlmLoading" class="rlm-loading hidden">
+    <div class="rlm-spinner"></div>
+    <p>Loading RLM data…</p>
+  </div>
+
+  <script>
+    window.__RLM_BOOTSTRAP__ = {{ {
+      "machines": machines,
+      "defaultStart": default_start.isoformat(),
+      "defaultEnd": default_end.isoformat(),
+      "defaultStartDate": default_start_str,
+      "defaultEndDate": default_end_str,
+      "defaultMachineId": default_machine_id if default_machine_id else ""
+    } | tojson }};
+  </script>
+  <script src="{{ url_for('static', filename='js/rlm.js') }}"></script>
+</body>
+</html>
