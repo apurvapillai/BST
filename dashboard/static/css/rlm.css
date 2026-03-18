@@ -50,19 +50,12 @@ body {
 }
 
 main#rlmApp {
-  padding: 2rem 2.5rem 3rem;
+  padding: 2rem clamp(1rem, 2vw, 2rem) 3rem;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-  max-width: 1650px;
+  width: min(95vw, 2200px);
   margin: 0 auto;
-}
-
-.rlm-hero-grid {
-  display: grid;
-  grid-template-columns: minmax(320px, 0.85fr) minmax(420px, 1.15fr);
-  gap: 1.5rem;
-  align-items: stretch;
 }
 
 .rlm-panel {
@@ -72,6 +65,14 @@ main#rlmApp {
   box-shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
   border: 1px solid rgba(79, 70, 229, 0.08);
 }
+
+.rlm-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.85fr) minmax(420px, 1.15fr);
+  gap: 1.5rem;
+  align-items: stretch;
+}
+
 
 .rlm-panel--highlight {
   border: 1px solid #c7d2fe;
