@@ -57,6 +57,7 @@
     elements.errExpandOverride = document.getElementById("rlmErrExpandOverride");
     elements.deltaAxisMin = document.getElementById("rlmDeltaAxisMin");
     elements.deltaAxisMax = document.getElementById("rlmDeltaAxisMax");
+    elements.deltaBoundsApply = document.getElementById("rlmDeltaBoundsApply");
     elements.curlengthStats = document.getElementById("rlmCurlengthStats");
     elements.loading = document.getElementById("rlmLoading");
     elements.curlengthChart = document.getElementById("rlmCurlengthChart");
@@ -75,6 +76,7 @@
     elements.reelCountTotal = document.getElementById("rlmReelCountTotal");
     elements.reelCountGood = document.getElementById("rlmReelCountGood");
     elements.reelCountBad = document.getElementById("rlmReelCountBad");
+    elements.deltaChartLoader = document.getElementById("rlmDeltaChartLoader");
     elements.detailChart = document.getElementById("rlmDetailChart");
     elements.timelineBar = document.getElementById("rlmTimelineBar");
     elements.toleranceChart = document.getElementById("rlmToleranceChart");
@@ -124,25 +126,6 @@
         }
       });
     }
-    const limitInputs = [
-      elements.targetValue,
-      elements.minusTolerance,
-      elements.plusTolerance,
-      elements.errShrinkOverride,
-      elements.errExpandOverride,
-      elements.deltaAxisMin,
-      elements.deltaAxisMax,
-    ];
-    limitInputs.forEach((input) => {
-      ["input", "change"].forEach((evt) => {
-        if (!input) return;
-        input.addEventListener(evt, () => {
-          updateLimitState();
-          renderCurlengthChart(state.monitoringPoints);
-          renderDeltaChart(state.monitoringPoints);
-        });
-      });
-    });
     if (elements.deltaToggle) {
       elements.deltaToggle.checked = !!state.deltaShowOobOnly;
       elements.deltaToggle.addEventListener("change", () => {
@@ -150,13 +133,18 @@
         renderDeltaChart(state.monitoringPoints || []);
       });
     }
-    if (elements.deltaToggleBtn) {
-      elements.deltaToggleBtn.textContent = "Show out-of-bounds only";
-      elements.deltaToggleBtn.addEventListener("click", () => {
-        state.deltaShowOobOnly = !state.deltaShowOobOnly;
-        elements.deltaToggleBtn.textContent = state.deltaShowOobOnly ? "Show all points" : "Show out-of-bounds only";
-        renderDeltaTable(state.deltaRows || []);
-      });
+    elements.deltaChartLoader = document.getElementById("rlmDeltaChartLoader");
+
+    const handleDeltaLimitsUpdate = () => {
+      updateLimitState();
+      renderCurlengthChart(state.monitoringPoints);
+      renderDeltaChart(state.monitoringPoints);
+    };
+    if (elements.deltaAxisApply) {
+      elements.deltaAxisApply.addEventListener("click", handleDeltaLimitsUpdate);
+    }
+    if (elements.deltaBoundsApply) {
+      elements.deltaBoundsApply.addEventListener("click", handleDeltaLimitsUpdate);
     }
   }
 
@@ -381,6 +369,16 @@
 
   function hideLoading() {
     if (elements.loading) elements.loading.classList.add("hidden");
+  }
+
+  function showDeltaChartLoader() {
+    if (elements.deltaChartLoader) elements.deltaChartLoader.classList.remove("hidden");
+    else showLoading();
+  }
+
+  function hideDeltaChartLoader() {
+    if (elements.deltaChartLoader) elements.deltaChartLoader.classList.add("hidden");
+    else hideLoading();
   }
 
   async function apiGet(url) {
@@ -1527,9 +1525,12 @@
         {
           x: displayRows.map((row) => row.timestampIso),
           y: displayRows.map((row) => row.delta),
-          mode: "markers+lines",
+          mode: "lines+markers",
           line: { color: "#2563eb", width: 1.4 },
-          marker: { size: 8, color: displayRows.map((row) => (row.outOfRange ? "#ef4444" : "#2563eb")), line: { width: 1, color: "#ffffff" } },
+          marker: {
+            size: 8,
+            color: displayRows.map((row) => (row.outOfRange ? "#ef4444" : "rgba(0,0,0,0)")),
+          },
           hoverinfo: "text",
           text: displayRows.map((row) => row.hover),
         },
@@ -1584,8 +1585,8 @@
         ],
         paper_bgcolor: "#ffffff",
         plot_bgcolor: "#ffffff",
-        showlegend: false,
-      },
+      showlegend: false,
+    },
       { displayModeBar: true, responsive: true }
     );
 

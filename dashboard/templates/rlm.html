@@ -121,18 +121,32 @@
             Out-of-bounds only
           </label>
           <div class="delta-controls__inputs">
-            <div class="control control--overrides">
-              <label>Trend range (mm)</label>
-              <div class="override-inputs">
-                <input type="number" step="0.001" id="rlmDeltaAxisMin" placeholder="min">
-                <input type="number" step="0.001" id="rlmDeltaAxisMax" placeholder="max">
+            <div class="control-group control-group--boxed">
+              <div class="control-group__header">
+                <p class="control-group__eyebrow">Trend range</p>
+                <h5>Custom y-axis (mm)</h5>
+              </div>
+              <div class="control control--inline">
+                <label>Min / Max</label>
+                <div class="inline-inputs">
+                  <input type="number" step="0.001" id="rlmDeltaAxisMin" placeholder="min">
+                  <input type="number" step="0.001" id="rlmDeltaAxisMax" placeholder="max">
+                  <button type="button" class="btn btn--inline" id="rlmDeltaAxisApply">Apply</button>
+                </div>
               </div>
             </div>
-            <div class="control control--overrides">
-              <label>New error bounds (mm)</label>
-              <div class="override-inputs">
-                <input type="number" step="0.001" id="rlmErrShrinkOverride" placeholder="err shrink">
-                <input type="number" step="0.001" id="rlmErrExpandOverride" placeholder="err expand">
+            <div class="control-group control-group--boxed">
+              <div class="control-group__header">
+                <p class="control-group__eyebrow">Error limits</p>
+                <h5>Custom err bounds (mm)</h5>
+              </div>
+              <div class="control control--inline">
+                <label>Shrink / Expand</label>
+                <div class="inline-inputs">
+                  <input type="number" step="0.001" id="rlmErrShrinkOverride" placeholder="err shrink">
+                  <input type="number" step="0.001" id="rlmErrExpandOverride" placeholder="err expand">
+                  <button type="button" class="btn btn--inline" id="rlmDeltaBoundsApply">Apply</button>
+                </div>
               </div>
             </div>
           </div>
@@ -142,6 +156,9 @@
         <div class="chart-card-title">
           <p class="chart-card__eyebrow">Delta Analysis</p>
           <h4>Repeat Length Delta</h4>
+        </div>
+        <div class="chart-loader hidden" id="rlmDeltaChartLoader">
+          <div class="chart-loader__spinner"></div>
         </div>
         <div id="rlmDeltaChart" class="chart chart--tall"></div>
       </div>
