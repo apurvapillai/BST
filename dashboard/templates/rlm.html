@@ -253,8 +253,42 @@
               <option value="">Select a reel with OOB points</option>
             </select>
             <p class="delta-reel-meta" id="rlmDeltaReelMeta">Pick a reel to explore where issues occur.</p>
+        </div>
+        <div class="delta-reel-summary">
+          <div class="delta-summary-card">
+            <h5>Feet</h5>
+            <div class="delta-summary-values">
+              <div><span>Prev</span><strong id="rlmSummaryFeetPrev">--</strong></div>
+              <div><span>Current</span><strong id="rlmSummaryFeetCurrent">--</strong></div>
+              <div><span>Next</span><strong id="rlmSummaryFeetNext">--</strong></div>
+            </div>
           </div>
-          <div class="delta-reel-charts">
+          <div class="delta-summary-card">
+            <h5>Monitoring Points</h5>
+            <div class="delta-summary-values">
+              <div><span>Prev</span><strong id="rlmSummaryPointsPrev">--</strong></div>
+              <div><span>Current</span><strong id="rlmSummaryPointsCurrent">--</strong></div>
+              <div><span>Next</span><strong id="rlmSummaryPointsNext">--</strong></div>
+            </div>
+          </div>
+          <div class="delta-summary-card">
+            <h5>Out-of-Bounds Points</h5>
+            <div class="delta-summary-values">
+              <div><span>Prev</span><strong id="rlmSummaryOobPrev">--</strong></div>
+              <div><span>Current</span><strong id="rlmSummaryOobCurrent">--</strong></div>
+              <div><span>Next</span><strong id="rlmSummaryOobNext">--</strong></div>
+            </div>
+          </div>
+          <div class="delta-summary-card">
+            <h5>Avg Delta</h5>
+            <div class="delta-summary-values">
+              <div><span>Prev</span><strong id="rlmSummaryDeltaPrev">--</strong></div>
+              <div><span>Current</span><strong id="rlmSummaryDeltaCurrent">--</strong></div>
+              <div><span>Next</span><strong id="rlmSummaryDeltaNext">--</strong></div>
+            </div>
+          </div>
+        </div>
+        <div class="delta-reel-charts">
             <div class="chart-card chart-card--tall delta-reel-chart">
               <div class="chart-card-title">
                 <p class="chart-card__eyebrow">Roll Position</p>
@@ -274,6 +308,16 @@
             <div class="chart-card-title">
               <p class="chart-card__eyebrow">Adjacent Reels</p>
               <h4>Position Context (Prev · Current · Next)</h4>
+              <div class="reel-range-inputs">
+                <label>
+                  Min
+                  <input type="number" id="rlmContextRangeMin" placeholder="auto">
+                </label>
+                <label>
+                  Max
+                  <input type="number" id="rlmContextRangeMax" placeholder="auto">
+                </label>
+              </div>
             </div>
             <div id="rlmDeltaReelContext" class="chart chart--reel-context"></div>
           </div>

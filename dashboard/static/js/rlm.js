@@ -27,6 +27,7 @@
     targetValue: null,
     minusTolerance: null,
     plusTolerance: null,
+    contextRange: { min: null, max: null },
     selectedReelId: "",
     reelOobOptions: [],
     reelOobLookup: {},
@@ -82,6 +83,20 @@
     elements.deltaReelCurl = document.getElementById("rlmDeltaReelCurl");
     elements.deltaReelDelta = document.getElementById("rlmDeltaReelDelta");
     elements.deltaReelContext = document.getElementById("rlmDeltaReelContext");
+    elements.contextRangeMin = document.getElementById("rlmContextRangeMin");
+    elements.contextRangeMax = document.getElementById("rlmContextRangeMax");
+    elements.summaryFeetPrev = document.getElementById("rlmSummaryFeetPrev");
+    elements.summaryFeetCurrent = document.getElementById("rlmSummaryFeetCurrent");
+    elements.summaryFeetNext = document.getElementById("rlmSummaryFeetNext");
+    elements.summaryPointsPrev = document.getElementById("rlmSummaryPointsPrev");
+    elements.summaryPointsCurrent = document.getElementById("rlmSummaryPointsCurrent");
+    elements.summaryPointsNext = document.getElementById("rlmSummaryPointsNext");
+    elements.summaryOobPrev = document.getElementById("rlmSummaryOobPrev");
+    elements.summaryOobCurrent = document.getElementById("rlmSummaryOobCurrent");
+    elements.summaryOobNext = document.getElementById("rlmSummaryOobNext");
+    elements.summaryDeltaPrev = document.getElementById("rlmSummaryDeltaPrev");
+    elements.summaryDeltaCurrent = document.getElementById("rlmSummaryDeltaCurrent");
+    elements.summaryDeltaNext = document.getElementById("rlmSummaryDeltaNext");
     elements.reelCountTotal = document.getElementById("rlmReelCountTotal");
     elements.reelCountGood = document.getElementById("rlmReelCountGood");
     elements.reelCountBad = document.getElementById("rlmReelCountBad");
@@ -115,6 +130,7 @@
     if (elements.machine) {
       elements.machine.addEventListener("change", async () => {
         clearJobFilters();
+        state.selectedReelId = "";
         updateMachineBadge();
         updateRangeLabel();
         try {
@@ -160,6 +176,19 @@
         renderDeltaReelCharts();
       });
     }
+    [elements.contextRangeMin, elements.contextRangeMax].forEach((input, idx) => {
+      if (input) {
+        input.addEventListener("input", () => {
+          state.contextRange = state.contextRange || { min: null, max: null };
+          if (idx === 0) {
+            state.contextRange.min = input.value !== "" ? Number(input.value) : null;
+          } else {
+            state.contextRange.max = input.value !== "" ? Number(input.value) : null;
+          }
+          renderDeltaReelContext(state.selectedReelId);
+        });
+      }
+    });
   }
 
   function updateLimitState() {
@@ -337,6 +366,7 @@
     if (!elements.app) return;
     showLoading();
     readFilters();
+    state.selectedReelId = "";
     updateRangeLabel();
     try {
       const baseQuery = buildParams();
@@ -1628,10 +1658,10 @@
     }
 
     if (elements.deltaToggle) elements.deltaToggle.checked = !!state.deltaShowOobOnly;
-    renderDeltaReelCharts();
     renderDeltaFeetBar(reelAggregates);
     renderDeltaPointBar(reelAggregates);
-    updateDeltaReelSelect(reelAggregates);
+    updateDeltaReelOptions();
+    renderDeltaReelCharts();
   }
 
   function renderDeltaFeetBar(reelAggregates) {
@@ -1738,6 +1768,8 @@
     const entries = Object.entries(reelAggregates)
       .map(([reelDbId, data]) => {
         if (!data || data.total <= 0) return null;
+        const hasRows = (state.deltaRows || []).some((row) => Number(row.reelDbId) === Number(reelDbId));
+        if (!hasRows) return null;
         const meta = state.reelMeta[Number(reelDbId)] || {};
         const startDate = determineStartDate(data, meta);
         return {
@@ -1828,58 +1860,75 @@
     );
   }
 
-  function updateDeltaReelSelect(reelAggregates) {
+  function updateDeltaReelOptions() {
     if (!elements.deltaReelSelect) return;
-    const entries = Object.entries(reelAggregates || {})
-      .map(([reelDbId, data]) => {
-        if (!data || data.oob <= 0) return null;
+    const rowsByReel = (state.deltaRows || []).reduce((acc, row) => {
+      const reelId = Number(row.reelDbId);
+      if (!Number.isFinite(reelId)) return acc;
+      acc[reelId] = acc[reelId] || [];
+      acc[reelId].push(row);
+      return acc;
+    }, {});
+    const entries = Object.entries(rowsByReel)
+      .map(([reelDbId, rows]) => {
+        if (!rows || !rows.length) return null;
         const meta = state.reelMeta[Number(reelDbId)] || {};
-        const startDate = determineStartDate(data, meta);
+        const startCandidate = rows.reduce((min, row) => {
+          if (!Number.isFinite(row.timestamp)) return min;
+          if (min === null || row.timestamp < min) return row.timestamp;
+          return min;
+        }, null);
+        const startDate = determineStartDate(
+          startCandidate !== null ? { startTs: startCandidate } : { startTs: null },
+          meta
+        );
         return {
           reelDbId: Number(reelDbId),
           label: meta.reelId || reelDbId,
-          jobName: meta.jobName || "Job",
+          jobName: meta.jobName || rows[0].jobName || "Job",
           start: startDate,
-          startValue: startDate ? startDate.getTime() : Number.POSITIVE_INFINITY,
-          totalFeet: data.feet,
-          oobPoints: data.oob,
-          totalPoints: data.total,
+          startValue: startDate
+            ? startDate.getTime()
+            : Number.isFinite(startCandidate)
+            ? startCandidate
+            : Number.POSITIVE_INFINITY,
+          totalFeet: meta.feet,
+          oobPoints: rows.filter((row) => row.outOfRange).length,
+          totalPoints: rows.length,
         };
       })
       .filter(Boolean)
-      .sort((a, b) => a.startValue - b.startValue);
+      .sort((a, b) => a.startValue - b.startValue || a.reelDbId - b.reelDbId);
     state.reelOobOptions = entries;
     state.reelOobLookup = entries.reduce((acc, entry) => {
       acc[entry.reelDbId] = entry;
       return acc;
     }, {});
     if (!entries.length) {
-      elements.deltaReelSelect.innerHTML = '<option value="">No reels with OOB points</option>';
+      elements.deltaReelSelect.innerHTML = '<option value="">No reels available</option>';
       elements.deltaReelSelect.disabled = true;
       state.selectedReelId = "";
-      if (elements.deltaReelMeta) elements.deltaReelMeta.textContent = "All reels are within bounds for this view.";
+      if (elements.deltaReelMeta) elements.deltaReelMeta.textContent = "No reels available for this view.";
       if (elements.deltaReelCurl) elements.deltaReelCurl.innerHTML = "<p>No reels to inspect.</p>";
       if (elements.deltaReelDelta) elements.deltaReelDelta.innerHTML = "<p>No reels to inspect.</p>";
       if (elements.deltaReelContext) elements.deltaReelContext.innerHTML = "<p>No reels to inspect.</p>";
       return;
     }
     elements.deltaReelSelect.disabled = false;
-    const optionsHtml = ['<option value="">Select a reel with OOB points</option>'].concat(
+    const optionsHtml = ['<option value="">Select a reel to investigate</option>'].concat(
       entries.map((entry) => {
         const startLabel = entry.start ? entry.start.toLocaleString() : "Unknown start";
-        return `<option value="${entry.reelDbId}">${escapeHtml(entry.label)} · ${escapeHtml(entry.jobName)} · ${escapeHtml(
+        const oobLabel = entry.oobPoints ? ` · OOB ${entry.oobPoints}` : "";
+        const optionClass = entry.oobPoints ? "option-oob" : "";
+        return `<option value="${entry.reelDbId}" class="${optionClass}">${escapeHtml(entry.label)} · ${escapeHtml(entry.jobName)} · ${escapeHtml(
           startLabel
-        )}</option>`;
+        )}${escapeHtml(oobLabel)}</option>`;
       })
     );
     elements.deltaReelSelect.innerHTML = optionsHtml.join("");
-    let nextSelection = state.selectedReelId;
-    if (!nextSelection || !state.reelOobLookup[Number(nextSelection)]) {
-      nextSelection = String(entries[0].reelDbId);
-    }
+    const nextSelection = entries[0] ? String(entries[0].reelDbId) : "";
     state.selectedReelId = nextSelection;
     elements.deltaReelSelect.value = nextSelection;
-    renderDeltaReelCharts();
   }
 
   function renderDeltaReelCharts() {
@@ -1888,29 +1937,46 @@
     if (!entries.length) {
       if (elements.deltaReelCurl) elements.deltaReelCurl.innerHTML = "<p>No reels to inspect.</p>";
       if (elements.deltaReelDelta) elements.deltaReelDelta.innerHTML = "<p>No reels to inspect.</p>";
+      updateInvestigateSummary([], -1);
       return;
     }
     let selectedId = state.selectedReelId;
-    if (!selectedId || !state.reelOobLookup[Number(selectedId)]) {
-      selectedId = String(entries[0].reelDbId);
-      state.selectedReelId = selectedId;
-      if (elements.deltaReelSelect) elements.deltaReelSelect.value = selectedId;
+    if (selectedId && !state.reelOobLookup[Number(selectedId)]) {
+      selectedId = "";
     }
-    const entry = state.reelOobLookup[Number(selectedId)];
+    if (!selectedId || !state.reelOobLookup[Number(selectedId)]) {
+      selectedId = entries.length ? String(entries[0].reelDbId) : "";
+    }
+    state.selectedReelId = selectedId;
+    if (elements.deltaReelSelect) elements.deltaReelSelect.value = state.selectedReelId || "";
+    let entry = state.reelOobLookup[Number(selectedId)];
     if (!entry) {
       if (elements.deltaReelCurl) elements.deltaReelCurl.innerHTML = "<p>No reel data available.</p>";
       if (elements.deltaReelDelta) elements.deltaReelDelta.innerHTML = "<p>No reel data available.</p>";
       if (elements.deltaReelContext) elements.deltaReelContext.innerHTML = "<p>No reel data available.</p>";
+      updateInvestigateSummary([], -1);
       return;
     }
-    const reelRows = (state.deltaRows || []).filter((row) => Number(row.reelDbId) === entry.reelDbId);
+    let reelRows = (state.deltaRows || []).filter((row) => Number(row.reelDbId) === entry.reelDbId);
+    if (!reelRows.length) {
+      const fallbackEntry = entries.find((candidate) => (state.deltaRows || []).some((row) => Number(row.reelDbId) === candidate.reelDbId));
+      if (fallbackEntry && fallbackEntry.reelDbId !== entry.reelDbId) {
+        state.selectedReelId = String(fallbackEntry.reelDbId);
+        if (elements.deltaReelSelect) elements.deltaReelSelect.value = state.selectedReelId;
+        renderDeltaReelCharts();
+        return;
+      }
+    }
     if (!reelRows.length) {
       if (elements.deltaReelCurl) elements.deltaReelCurl.innerHTML = "<p>No monitoring points for this reel.</p>";
       if (elements.deltaReelDelta) elements.deltaReelDelta.innerHTML = "<p>No monitoring points for this reel.</p>";
       if (elements.deltaReelContext) elements.deltaReelContext.innerHTML = "<p>No monitoring points for this view.</p>";
       if (elements.deltaReelMeta) elements.deltaReelMeta.textContent = "No monitoring data for the selected reel.";
+      updateInvestigateSummary(entries, entries.findIndex((item) => item.reelDbId === entry.reelDbId));
       return;
     }
+    const selectedIndex = entries.findIndex((item) => item.reelDbId === entry.reelDbId);
+    updateInvestigateSummary(entries, selectedIndex);
     const oobRows = reelRows.filter((row) => row.outOfRange);
     const formatValues = reelRows.map((row) => row.formatValue).filter((val) => Number.isFinite(val));
     const oobFormatValues = oobRows.map((row) => row.formatValue).filter((val) => Number.isFinite(val));
@@ -1947,6 +2013,8 @@
       size: 6,
       color: "#2563eb",
     };
+    const formatLabels = reelRows.map((row) => (Number.isFinite(row.formatValue) ? formatNumber(row.formatValue, 0) : "--"));
+    const feetLabels = reelRows.map((row) => (Number.isFinite(row.formatFeet) ? formatNumber(row.formatFeet, 0) : "--"));
     const curlTrace = {
       x: xPositions,
       y: reelRows.map((row) => row.actual),
@@ -1956,9 +2024,10 @@
       marker: markerConfig,
       hovertemplate:
         "<b>Curlength</b><br>" +
-        (hasFeetPositions ? "Feet: " : "Index: ") +
-        "%{x:.0f}<br>" +
+        "Format: %{customdata[0]}<br>" +
+        "Feet: %{customdata[1]}<br>" +
         "Curlength: %{y:.3f} mm<extra></extra>",
+      customdata: reelRows.map((row, idx) => [formatLabels[idx], feetLabels[idx]]),
     };
     const hasSpeed = reelRows.some((row) => Number.isFinite(row.webspeed));
     let speedTrace = null;
@@ -1969,36 +2038,39 @@
       const maxSpeed = finiteSpeeds.length ? Math.max(...finiteSpeeds) : 1;
       const speedRange = maxSpeed - minSpeed || 1;
       const scaledSpeed = speedValues.map((val) => (Number.isFinite(val) ? (val - minSpeed) / speedRange : null));
-      const curlMin = Math.min(...reelRows.map((row) => Number.isFinite(row.actual) ? row.actual : 0));
-      const curlMax = Math.max(...reelRows.map((row) => Number.isFinite(row.actual) ? row.actual : 0));
-      const curlRange = curlMax - curlMin || 1;
-      const upperBand = curlMin + curlRange * 0.25;
-      const lowerBand = curlMin + curlRange * 0.05;
       speedTrace = {
         x: xPositions,
-        y: scaledSpeed.map((val) => (val !== null ? lowerBand + val * (upperBand - lowerBand) : null)),
+        y: scaledSpeed,
         mode: "lines",
         name: "Webspeed (scaled)",
         line: { color: "#16a34a", width: 1.5, dash: "dot" },
-        hovertemplate:
-          "<b>Webspeed</b><br>" +
-          (hasFeetPositions ? "Feet: " : "Index: ") +
-          "%{x:.0f}<br>Speed: %{customdata:.3f} m/s<extra></extra>",
+        hoverinfo: "skip",
         customdata: speedValues,
-        yaxis: "y",
+        yaxis: "y2",
+        showlegend: false,
       };
     }
     const curlLayout = {
       margin: { t: 40, r: 60, b: 50, l: 60 },
       height: 360,
       yaxis: { title: "Curlength (mm)" },
+      yaxis2: hasSpeed
+        ? {
+            title: "Webspeed (scaled)",
+            overlaying: "y",
+            side: "right",
+            showgrid: false,
+            zeroline: false,
+            range: [0, 1],
+          }
+        : undefined,
       xaxis: { title: axisTitle },
       paper_bgcolor: "#ffffff",
       plot_bgcolor: "#ffffff",
+      showlegend: !!speedTrace,
     };
-    curlLayout.showlegend = !!speedTrace;
     const curlTraces = speedTrace ? [curlTrace, speedTrace] : [curlTrace];
-    Plotly.react(elements.deltaReelCurl, curlTraces, curlLayout, { displayModeBar: true, responsive: true });
+    redrawInvestigatePlot(elements.deltaReelCurl, curlTraces, curlLayout);
 
     const lower = reelRows[0].lower;
     const upper = reelRows[0].upper;
@@ -2043,9 +2115,10 @@
       },
       hovertemplate:
         "<b>Delta</b><br>" +
-        (hasFeetPositions ? "Feet: " : "Index: ") +
-        "%{x:.0f}<br>" +
+        "Format: %{customdata[0]}<br>" +
+        "Feet: %{customdata[1]}<br>" +
         "Delta: %{y:.3f} mm<extra></extra>",
+      customdata: reelRows.map((row, idx) => [formatLabels[idx], feetLabels[idx]]),
     };
     const oobTrace =
       oobRows.length > 0
@@ -2073,41 +2146,82 @@
       plot_bgcolor: "#ffffff",
     };
     const deltaTraces = oobTrace ? [deltaTrace, oobTrace] : [deltaTrace];
-    Plotly.react(elements.deltaReelDelta, deltaTraces, deltaLayout, { displayModeBar: true, responsive: true });
+    redrawInvestigatePlot(elements.deltaReelDelta, deltaTraces, deltaLayout);
 
     renderDeltaReelContext(selectedId);
   }
 
+  function updateInvestigateSummary(entries, selectedIndex) {
+    const positions = {
+      Prev: selectedIndex > 0 ? entries[selectedIndex - 1] : null,
+      Current: selectedIndex >= 0 ? entries[selectedIndex] : null,
+      Next: selectedIndex < entries.length - 1 ? entries[selectedIndex + 1] : null,
+    };
+    Object.entries(positions).forEach(([label, entry]) => {
+      const stats = computeInvestigateStats(entry);
+      const feetEl = elements[`summaryFeet${label}`];
+      const pointsEl = elements[`summaryPoints${label}`];
+      const oobEl = elements[`summaryOob${label}`];
+      const deltaEl = elements[`summaryDelta${label}`];
+      if (feetEl) feetEl.textContent = stats.feet;
+      if (pointsEl) pointsEl.textContent = stats.points;
+      if (oobEl) oobEl.textContent = stats.oob;
+      if (deltaEl) deltaEl.textContent = stats.deltaAvg;
+    });
+  }
+
+  function computeInvestigateStats(entry) {
+    if (!entry) {
+      return { feet: "--", points: "--", oob: "--", deltaAvg: "--" };
+    }
+    const rows = (state.deltaRows || []).filter((row) => Number(row.reelDbId) === entry.reelDbId);
+    const feetLabel = Number.isFinite(entry.totalFeet) ? `${formatNumber(entry.totalFeet, 0)} ft` : "--";
+    const pointCount = rows.length;
+    const oobCount = rows.filter((row) => row.outOfRange).length;
+    const avgDelta =
+      pointCount > 0 ? formatMm(rows.reduce((sum, row) => sum + row.delta, 0) / pointCount, 3) : "--";
+    return {
+      feet: feetLabel,
+      points: formatNumber(pointCount, 0),
+      oob: formatNumber(oobCount, 0),
+      deltaAvg: avgDelta,
+    };
+  }
+
   function renderDeltaReelContext(selectedReelId) {
     if (!elements.deltaReelContext) return;
-    const orderedReels = Object.entries(state.reelMeta || {})
-      .map(([id, meta]) => ({
-        id: Number(id),
-        startValue: meta.start instanceof Date ? meta.start.getTime() : meta.start ? new Date(meta.start).getTime() : Number.POSITIVE_INFINITY,
-        label: meta.reelId || id,
-        jobName: meta.jobName || "Job",
-      }))
-      .sort((a, b) => a.startValue - b.startValue || a.id - b.id);
-    if (!orderedReels.length) {
+    const contextRange = state.contextRange || { min: null, max: null };
+    if (elements.contextRangeMin) {
+      elements.contextRangeMin.value =
+        contextRange.min !== null && Number.isFinite(contextRange.min) ? contextRange.min : "";
+    }
+    if (elements.contextRangeMax) {
+      elements.contextRangeMax.value =
+        contextRange.max !== null && Number.isFinite(contextRange.max) ? contextRange.max : "";
+    }
+    const available = state.reelOobOptions || [];
+    if (!available.length) {
       elements.deltaReelContext.innerHTML = "<p>No reel context available.</p>";
       return;
     }
-    const idx = orderedReels.findIndex((entry) => entry.id === Number(selectedReelId));
+    const idx = available.findIndex((entry) => entry.reelDbId === Number(selectedReelId));
     if (idx === -1) {
       elements.deltaReelContext.innerHTML = "<p>No reel context available.</p>";
       return;
     }
     const contextEntries = [];
-    if (idx > 0) contextEntries.push({ ...orderedReels[idx - 1], role: "Previous" });
-    contextEntries.push({ ...orderedReels[idx], role: "Selected" });
-    if (idx < orderedReels.length - 1) contextEntries.push({ ...orderedReels[idx + 1], role: "Next" });
+    if (idx > 0) contextEntries.push({ ...available[idx - 1], id: available[idx - 1].reelDbId, role: "Previous" });
+    contextEntries.push({ ...available[idx], id: available[idx].reelDbId, role: "Selected" });
+    if (idx < available.length - 1) contextEntries.push({ ...available[idx + 1], id: available[idx + 1].reelDbId, role: "Next" });
     const colors = { Previous: "#0ea5e9", Selected: "#2563eb", Next: "#f97316" };
     const traces = [];
     let hasFormatPositions = false;
     let hasFeetPositions = false;
     contextEntries.forEach((entry) => {
       const rows = (state.deltaRows || []).filter((row) => Number(row.reelDbId) === entry.id);
-      if (!rows.length) return;
+      if (!rows.length) {
+        return;
+      }
       const entryHasFormat = rows.some((row) => Number.isFinite(row.formatValue));
       const entryHasFeet = rows.some((row) => Number.isFinite(row.formatFeet));
       if (entryHasFormat) hasFormatPositions = true;
@@ -2124,13 +2238,59 @@
       return;
     }
     const axisTitle = hasFormatPositions ? "Format value" : hasFeetPositions ? "Feet along reel" : "Point index";
-    const plotTraces = traces.map(({ entry, rows, hasFormat, hasFeet }) => {
+    const allDeltaValues = traces.flatMap(({ rows }) => rows.map((row) => (Number.isFinite(row.delta) ? row.delta : 0)));
+    const deltaMin = allDeltaValues.length ? Math.min(...allDeltaValues) : 0;
+    const deltaMax = allDeltaValues.length ? Math.max(...allDeltaValues) : 0;
+    const deltaRange = deltaMax - deltaMin || 1;
+    const allSpeedValues = traces
+      .flatMap(({ rows }) => rows.map((row) => (Number.isFinite(row.webspeed) ? row.webspeed : null)))
+      .filter((val) => Number.isFinite(val));
+    const speedMin = allSpeedValues.length ? Math.min(...allSpeedValues) : 0;
+    const speedMax = allSpeedValues.length ? Math.max(...allSpeedValues) : 1;
+    const speedRange = speedMax - speedMin || 1;
+    const combinedSpeedTrace = {
+      x: [],
+      y: [],
+      mode: "lines",
+      name: "Webspeed (scaled)",
+      line: { color: "#16a34a", width: 1.5, dash: "dot" },
+      hoverinfo: "skip",
+      customdata: [],
+      yaxis: "y2",
+      showlegend: false,
+    };
+    let selectedRange = null;
+
+    const plotTraceSets = traces.map(({ entry, rows }) => {
       const xValues = rows.map((row, index) => {
         if (hasFormatPositions && Number.isFinite(row.formatValue)) return row.formatValue;
         if (!hasFormatPositions && hasFeetPositions && Number.isFinite(row.formatFeet)) return row.formatFeet;
         return index;
       });
-      return {
+      if (entry.role === "Selected" && xValues.length) {
+        const minX = Math.min(...xValues);
+        const maxX = Math.max(...xValues);
+        if (Number.isFinite(minX) && Number.isFinite(maxX)) {
+          selectedRange = { min: minX, max: maxX };
+        }
+      }
+      const jobName = state.reelMeta[entry.id]?.jobName || rows[0].jobName || "Job";
+      const formatVals = rows.map((row, idx) =>
+        Number.isFinite(row.formatValue)
+          ? formatNumber(row.formatValue, 0)
+          : hasFormatPositions
+          ? formatNumber(xValues[idx], 0)
+          : "--"
+      );
+      const feetVals = rows.map((row, idx) =>
+        Number.isFinite(row.formatFeet)
+          ? formatNumber(row.formatFeet, 0)
+          : hasFeetPositions
+          ? formatNumber(xValues[idx], 0)
+          : "--"
+      );
+      const speedValues = rows.map((row) => (Number.isFinite(row.webspeed) ? row.webspeed : null));
+      const deltaTrace = {
         x: xValues,
         y: rows.map((row) => row.delta),
         mode: "lines+markers",
@@ -2141,26 +2301,79 @@
           color: rows.map((row) => (row.outOfRange ? "#dc2626" : colors[entry.role] || "#2563eb")),
         },
         hovertemplate:
-          "<b>%{text}</b><br>" +
-          "Position: %{x:.0f}<br>" +
+          "<b>%{customdata[0]}</b><br>" +
+          "Job: %{customdata[1]}<br>" +
+          "Format: %{customdata[2]}<br>" +
+          "Feet: %{customdata[3]}<br>" +
           "Delta: %{y:.3f} mm<extra></extra>",
-        text: rows.map((row) => state.reelMeta[entry.id]?.jobName || "Job"),
+        customdata: rows.map((row, idx) => [entry.label, jobName, formatVals[idx], feetVals[idx]]),
       };
+      speedValues.forEach((speedVal, idx) => {
+        if (!Number.isFinite(speedVal)) return;
+        combinedSpeedTrace.x.push(xValues[idx]);
+        combinedSpeedTrace.y.push((speedVal - speedMin) / speedRange);
+        combinedSpeedTrace.customdata.push([entry.label, jobName, feetVals[idx], speedVal]);
+      });
+      combinedSpeedTrace.x.push(null);
+      combinedSpeedTrace.y.push(null);
+      combinedSpeedTrace.customdata.push([entry.label, jobName, null, null]);
+      return [deltaTrace];
     });
-    Plotly.react(
-      elements.deltaReelContext,
-      plotTraces,
-      {
-        margin: { t: 40, r: 30, b: 50, l: 60 },
-        height: 360,
-        yaxis: { title: "Delta (mm)" },
-        xaxis: { title: axisTitle },
-        showlegend: true,
-        paper_bgcolor: "#ffffff",
-        plot_bgcolor: "#ffffff",
-      },
-      { displayModeBar: true, responsive: true }
-    );
+    const flattened = plotTraceSets.flat();
+    if (allSpeedValues.length) {
+      flattened.push(combinedSpeedTrace);
+    }
+    const shapes =
+      selectedRange && Number.isFinite(selectedRange.min) && Number.isFinite(selectedRange.max)
+        ? [
+            {
+              type: "rect",
+              xref: "x",
+              yref: "paper",
+              x0: selectedRange.min,
+              x1: selectedRange.max,
+              y0: 0,
+              y1: 1,
+              fillcolor: "rgba(248,113,113,0.12)",
+              line: { width: 0 },
+            },
+          ]
+        : undefined;
+    const yAxisConfig = { title: "Delta (mm)" };
+    if ((state.contextRange && Number.isFinite(state.contextRange.min)) || Number.isFinite(state.contextRange?.max)) {
+      const rangeMin =
+        Number.isFinite(state.contextRange?.min) && state.contextRange.min !== null
+          ? state.contextRange.min
+          : deltaMin - deltaRange * 0.05;
+      const rangeMax =
+        Number.isFinite(state.contextRange?.max) && state.contextRange.max !== null
+          ? state.contextRange.max
+          : deltaMax + deltaRange * 0.05;
+      yAxisConfig.range = [rangeMin, rangeMax];
+    }
+    redrawInvestigatePlot(elements.deltaReelContext, flattened, {
+      margin: { t: 40, r: 30, b: 50, l: 60 },
+      height: 360,
+      yaxis: yAxisConfig,
+      xaxis: { title: axisTitle },
+      showlegend: true,
+      paper_bgcolor: "#ffffff",
+      plot_bgcolor: "#ffffff",
+      yaxis2: allSpeedValues.length
+        ? { title: "Webspeed (scaled)", overlaying: "y", side: "right", showgrid: false, zeroline: false, range: [0, 1] }
+        : undefined,
+      shapes,
+    });
+
+  }
+
+  function redrawInvestigatePlot(container, traces, layout) {
+    if (!container || !window.Plotly) return;
+    window.Plotly.purge(container);
+    container.innerHTML = "";
+    requestAnimationFrame(() => {
+      window.Plotly.newPlot(container, traces, layout, { displayModeBar: true, responsive: true });
+    });
   }
 
   function buildTrace(points, label, color) {

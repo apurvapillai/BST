@@ -795,6 +795,72 @@ main#rlmApp {
   grid-column: 1 / -1;
 }
 
+.delta-reel-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.delta-summary-card {
+  background: #ffffff;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 0.75rem;
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+}
+
+.delta-summary-card h5 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #0f172a;
+}
+
+.delta-summary-values {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+.delta-summary-values div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  align-items: flex-start;
+}
+
+.delta-summary-values strong {
+  font-size: 1.05rem;
+  color: #0f172a;
+}
+
+.reel-range-inputs {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.25rem;
+}
+
+.reel-range-inputs label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.75rem;
+  color: #475569;
+}
+
+.reel-range-inputs input {
+  width: 100px;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid #cbd5f5;
+  border-radius: 0.4rem;
+  font-size: 0.85rem;
+}
+
 .delta-reel-filter {
   background: #f8fafc;
   border: 1px solid rgba(148, 163, 184, 0.35);
@@ -822,6 +888,11 @@ main#rlmApp {
   font-size: 0.95rem;
   font-weight: 500;
   color: #0f172a;
+}
+
+#rlmDeltaReelSelect option.option-oob {
+  color: #dc2626;
+  font-weight: 600;
 }
 
 .delta-reel-meta {
