@@ -22,6 +22,7 @@ RLM_DEFAULT_RANGE_DAYS = 2
 RLM_MAX_MONITORING_POINTS = 2000
 RLM_MAX_REEL_ROWS = 60
 RLM_MAX_TOLERANCE_ROWS = 200
+RLM_FEET_CONVERSION = 3.0417
 
 rlm_bp = Blueprint("rlm", __name__)
 
@@ -111,7 +112,9 @@ def _apply_reel_filters(query, filters):
     if min_feet:
         query = query.filter(RLMReel.reel_start.isnot(None))
         query = query.filter(RLMReel.reel_end.isnot(None))
-        query = query.filter(func.abs(RLMReel.reel_end - RLMReel.reel_start) >= min_feet)
+        query = query.filter(
+            func.abs(RLMReel.reel_end - RLMReel.reel_start) * RLM_FEET_CONVERSION >= min_feet
+        )
     return query
 
 
@@ -138,7 +141,9 @@ def _monitorings_query(session, filters):
     if min_feet:
         query = query.filter(RLMReel.reel_start.isnot(None))
         query = query.filter(RLMReel.reel_end.isnot(None))
-        query = query.filter(func.abs(RLMReel.reel_end - RLMReel.reel_start) >= min_feet)
+        query = query.filter(
+            func.abs(RLMReel.reel_end - RLMReel.reel_start) * RLM_FEET_CONVERSION >= min_feet
+        )
     return query
 
 
@@ -174,7 +179,7 @@ def rlm_home():
             (
                 machine
                 for machine in machines
-                if (machine.machine_name or "").strip().lower() == "press 7"
+                if (machine.machine_name or "").strip().lower() == "press 11"
             ),
             machines[0] if machines else None,
         )
@@ -376,6 +381,8 @@ def rlm_monitorings():
                 RLMMonitoring.format_value,
                 RLMReel.job_name,
                 RLMReel.order_number,
+                RLMReel.reel_id,
+                RLMReel.production_start_dt,
                 RLMMachine.machine_id,
                 RLMMachine.machine_name,
             )
@@ -395,10 +402,12 @@ def rlm_monitorings():
             "formatValue": _to_float(fmt_value),
             "jobName": job_name,
             "orderNumber": order_number,
+            "reelId": reel_code,
+            "productionStart": _iso(prod_start),
             "machineId": machine_id,
             "machineName": machine_name,
         }
-        for mid, reel_id, ts, curlength, webspeed, fmt_value, job_name, order_number, machine_id, machine_name in points
+        for mid, reel_id, ts, curlength, webspeed, fmt_value, job_name, order_number, reel_code, prod_start, machine_id, machine_name in points
     ]
 
     return jsonify({"points": payload, "perReel": per_reel})
@@ -423,7 +432,7 @@ def rlm_tolerances():
 
     with RLMSessionLocal() as session:
         query = (
-            session.query(RLMTolerance, RLMReel.job_name, RLMReel.order_number)
+            session.query(RLMTolerance, RLMReel.job_name, RLMReel.order_number, RLMReel.reel_id)
             .join(RLMReel, RLMTolerance.reel_db_id == RLMReel.reel_db_id)
         )
         query = _apply_reel_filters(query, filters)
@@ -448,8 +457,9 @@ def rlm_tolerances():
             "timestamp": _iso(tolerance.tolerance_time),
             "jobName": job_name,
             "orderNumber": order_number,
+            "reelId": reel_code,
         }
-        for tolerance, job_name, order_number in rows
+        for tolerance, job_name, order_number, reel_code in rows
     ]
     return jsonify({"tolerances": payload})
 

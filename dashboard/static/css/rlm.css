@@ -769,9 +769,65 @@ main#rlmApp {
   padding: 1rem 1rem 0.95rem;
 }
 
+.chart-card--points {
+  margin-bottom: 1rem;
+}
+
 .delta-table-card-wrapper {
   grid-column: 1 / -1;
   margin-top: 0.85rem;
+  }
+
+.delta-reel-investigate {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.delta-reel-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+}
+
+.delta-reel-chart--wide {
+  grid-column: 1 / -1;
+}
+
+.delta-reel-filter {
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 0.9rem;
+  padding: 0.85rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.delta-reel-filter label {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #475569;
+  margin-bottom: 0.2rem;
+}
+
+.delta-reel-filter select {
+  min-height: 44px;
+  border-radius: 0.65rem;
+  border: 1px solid #cbd5f5;
+  background: #fff;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #0f172a;
+}
+
+.delta-reel-meta {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #64748b;
 }
 
 .chart-card--full {
@@ -846,6 +902,18 @@ main#rlmApp {
 
 .chart--feet-bar {
   min-height: 320px;
+}
+
+.chart--points-bar {
+  min-height: 260px;
+}
+
+.chart--reel-position {
+  min-height: 360px;
+}
+
+.chart--reel-context {
+  min-height: 360px;
 }
 
 .chart-card--feet {

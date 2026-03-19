@@ -4,6 +4,7 @@
   const MACHINE_COLORS = ["#2563eb", "#f97316", "#10b981", "#ef4444", "#a855f7", "#0ea5e9", "#f59e0b", "#14b8a6", "#6366f1", "#dc2626"];
   const JOB_COLORS = ["#0ea5e9", "#f97316", "#34d399", "#f43f5e", "#a855f7", "#14b8a6", "#f59e0b", "#6366f1", "#ec4899", "#22d3ee"];
   const jobColorMap = new Map();
+  const FEET_PER_FORMAT_UNIT = 3.0417;
 
   const state = {
     machineId: bootstrap.defaultMachineId ? String(bootstrap.defaultMachineId) : "",
@@ -26,6 +27,9 @@
     targetValue: null,
     minusTolerance: null,
     plusTolerance: null,
+    selectedReelId: "",
+    reelOobOptions: [],
+    reelOobLookup: {},
   };
 
   const elements = {};
@@ -67,12 +71,17 @@
     elements.deltaAvg = document.getElementById("rlmDeltaAvg");
     elements.deltaMin = document.getElementById("rlmDeltaMin");
     elements.deltaMax = document.getElementById("rlmDeltaMax");
-    elements.deltaTableOobCount = document.getElementById("rlmDeltaTableOobCount");
     elements.deltaFeetGood = document.getElementById("rlmFeetGood");
     elements.deltaFeetBad = document.getElementById("rlmFeetBad");
     elements.deltaFeetTotal = document.getElementById("rlmFeetTotal");
     elements.deltaFeetGoodPct = document.getElementById("rlmFeetGoodPct");
     elements.deltaFeetBadPct = document.getElementById("rlmFeetBadPct");
+    elements.deltaPointBar = document.getElementById("rlmDeltaPointBar");
+    elements.deltaReelSelect = document.getElementById("rlmDeltaReelSelect");
+    elements.deltaReelMeta = document.getElementById("rlmDeltaReelMeta");
+    elements.deltaReelCurl = document.getElementById("rlmDeltaReelCurl");
+    elements.deltaReelDelta = document.getElementById("rlmDeltaReelDelta");
+    elements.deltaReelContext = document.getElementById("rlmDeltaReelContext");
     elements.reelCountTotal = document.getElementById("rlmReelCountTotal");
     elements.reelCountGood = document.getElementById("rlmReelCountGood");
     elements.reelCountBad = document.getElementById("rlmReelCountBad");
@@ -92,7 +101,6 @@
     elements.changeMultiCount = document.getElementById("rlmChangeMultiCount");
     elements.errorChangeTable = document.querySelector("#rlmErrorChangeTable tbody");
     elements.errorChangeCount = document.getElementById("rlmErrorChangeCount");
-    elements.deltaTable = document.querySelector("#rlmDeltaTable tbody");
     elements.deltaToggle = document.getElementById("rlmDeltaToggle");
   }
 
@@ -145,6 +153,12 @@
     }
     if (elements.deltaBoundsApply) {
       elements.deltaBoundsApply.addEventListener("click", handleDeltaLimitsUpdate);
+    }
+    if (elements.deltaReelSelect) {
+      elements.deltaReelSelect.addEventListener("change", () => {
+        state.selectedReelId = elements.deltaReelSelect.value;
+        renderDeltaReelCharts();
+      });
     }
   }
 
@@ -805,29 +819,6 @@
       .map((entry) => entry.row);
   }
 
-  function renderDeltaTable(rows) {
-    if (!elements.deltaTable) return;
-    const filtered = (rows || []).filter((row) => (state.deltaShowOobOnly ? row.outOfRange : true));
-    if (!filtered.length) {
-      elements.deltaTable.innerHTML = "<tr><td colspan=\"7\">No delta points available.</td></tr>";
-      return;
-    }
-    elements.deltaTable.innerHTML = filtered
-      .map(
-        (row) => `
-          <tr>
-            <td>${escapeHtml(row.timestampLabel || "--")}</td>
-            <td>${escapeHtml(row.jobName)}</td>
-            <td>${escapeHtml(row.displayReel || row.reelId)}</td>
-            <td>${formatMm(row.nominal, 3)}</td>
-            <td>${escapeHtml(row.boundsLabel)}</td>
-            <td>${formatMm(row.actual, 3)}</td>
-            <td>${formatMm(row.delta, 3)}</td>
-          </tr>`
-      )
-      .join("");
-  }
-
   function renderDeltaMiniCharts(outOfBounds, totalPoints, shrinkCount, expandCount) {
     const pieTarget = document.getElementById("rlmDeltaOobPie");
     const barTarget = document.getElementById("rlmDeltaOobBar");
@@ -1350,7 +1341,6 @@
       if (elements.deltaMin) elements.deltaMin.textContent = "--";
       if (elements.deltaMax) elements.deltaMax.textContent = "--";
       if (elements.deltaStd) elements.deltaStd.textContent = "--";
-      if (elements.deltaTable) elements.deltaTable.innerHTML = "<tr><td colspan=\"7\">No delta points available.</td></tr>";
       renderDeltaMiniCharts(0, 0, 0, 0);
       if (elements.deltaToggle) elements.deltaToggle.checked = !!state.deltaShowOobOnly;
     };
@@ -1380,6 +1370,8 @@
       const upper = Math.abs(errExpand);
       const outOfRange = delta < lower || delta > upper;
       const meta = state.reelMeta[point.reelDbId] || {};
+      const formatValue = toNumber(point.formatValue);
+      const formatFeetLocation = Number.isFinite(formatValue) ? computeFeetFromValues(meta.formatStart, formatValue) : null;
       totalPoints += 1;
       if (outOfRange) outOfRangeCount += 1;
       const reelLabel = meta.reelId || point.reelId || tolerance.reelId || point.reelDbId;
@@ -1391,18 +1383,24 @@
         jobName: point.jobName || tolerance.jobName || meta.jobName || "Job",
         reelId: reelLabel,
         displayReel: reelLabel,
+        productionStart: point.productionStart || (meta.start ? meta.start.toISOString() : null),
         nominal: tolerance.nominalLength,
         lower,
         upper,
         actual: point.curlength,
         delta,
+        formatValue,
+        formatFeet: formatFeetLocation,
+        webspeed: Number.isFinite(point.webspeed) ? Number(point.webspeed) : null,
         outOfRange,
         shrink: delta < lower,
         expand: delta > upper,
         boundsLabel: `Shr ${formatMm(lower, 3)} / Exp ${formatMm(upper, 3)}`,
         hover: [
-          `Job: ${escapeHtml(point.jobName || tolerance.jobName || meta.jobName || "Job")}`,
           `Reel: ${escapeHtml(point.reelId || tolerance.reelId || meta.reelId || point.reelDbId)}`,
+          `Start: ${formatTime(point.productionStart || meta.start)}`,
+          `Location: ${formatFeetLocation !== null ? `${formatNumber(formatFeetLocation, 0)} ft` : "Unknown"}`,
+          `Job: ${escapeHtml(point.jobName || tolerance.jobName || meta.jobName || "Job")}`,
           `Feet: ${formatFeet(meta.feet)}`,
           `Bounds: ${formatMm(lower, 3)} → ${formatMm(upper, 3)}`,
           `Nominal: ${formatMm(tolerance.nominalLength, 3)}`,
@@ -1424,14 +1422,22 @@
       if (!row.reelDbId) return;
       if (!reelAggregates[row.reelDbId]) {
         const meta = state.reelMeta[row.reelDbId] || {};
+        const startDate = meta.start || null;
         reelAggregates[row.reelDbId] = {
           total: 0,
           oob: 0,
           feet: Number.isFinite(meta.feet) ? meta.feet : null,
+          startDate,
+          startTs: null,
         };
       }
-      reelAggregates[row.reelDbId].total += 1;
-      if (row.outOfRange) reelAggregates[row.reelDbId].oob += 1;
+      const aggregate = reelAggregates[row.reelDbId];
+      aggregate.total += 1;
+      if (row.outOfRange) aggregate.oob += 1;
+      if (Number.isFinite(row.timestamp) && row.timestamp > 0) {
+        aggregate.startTs =
+          aggregate.startTs === null || row.timestamp < aggregate.startTs ? row.timestamp : aggregate.startTs;
+      }
     });
     let approxFeetOob = null;
     let goodReelCount = 0;
@@ -1495,8 +1501,6 @@
       if (elements.deltaMax) elements.deltaMax.textContent = "--";
       if (elements.deltaStd) elements.deltaStd.textContent = "--";
       renderDeltaMiniCharts(0, 0, 0, 0);
-      renderDeltaTable(state.deltaRows);
-      if (elements.deltaTableOobCount) elements.deltaTableOobCount.textContent = "0 / 0";
       if (elements.deltaSummary) {
         const boundLabel =
           lower !== null && upper !== null ? `${formatMm(lower, 3)} → ${formatMm(upper, 3)}` : "per-reel bounds";
@@ -1624,11 +1628,10 @@
     }
 
     if (elements.deltaToggle) elements.deltaToggle.checked = !!state.deltaShowOobOnly;
-    if (elements.deltaTableOobCount) {
-      elements.deltaTableOobCount.textContent = `${displayOutOfRange} / ${displayTotal}`;
-    }
-    renderDeltaTable(state.deltaShowOobOnly ? displayRows : state.deltaRows);
+    renderDeltaReelCharts();
     renderDeltaFeetBar(reelAggregates);
+    renderDeltaPointBar(reelAggregates);
+    updateDeltaReelSelect(reelAggregates);
   }
 
   function renderDeltaFeetBar(reelAggregates) {
@@ -1640,53 +1643,74 @@
         const good = Math.max(((data.total - data.oob) / data.total) * data.feet, 0);
         const bad = Math.max((data.oob / data.total) * data.feet, 0);
         const meta = state.reelMeta[Number(reelDbId)] || {};
+        const startDate = determineStartDate(data, meta);
         return {
           label: meta.reelId || reelDbId,
           jobName: meta.jobName || "Job",
           totalFeet: data.feet,
           good,
           bad,
+          start: startDate,
+          startValue: startDate ? startDate.getTime() : Number.POSITIVE_INFINITY,
         };
       })
-      .filter(Boolean);
+      .filter(Boolean)
+      .sort((a, b) => a.startValue - b.startValue);
     if (!entries.length) {
       if (window.Plotly) Plotly.purge(target);
       target.innerHTML = '<div class="chart-empty">All reels are within bounds.</div>';
       return;
     }
-    const labels = entries.map((entry) => entry.label);
+    const tickValues = entries.map((_, idx) => idx);
+    const tickLabels = entries.map((entry) => entry.label);
     const goodValues = entries.map((entry) => entry.good);
     const badValues = entries.map((entry) => entry.bad);
     Plotly.react(
       target,
       [
         {
-          x: labels,
+          x: tickValues,
           y: goodValues,
           name: "Good feet",
           type: "bar",
           marker: { color: "#16a34a" },
-          customdata: entries.map((entry) => [entry.jobName, entry.totalFeet, entry.good, entry.bad]),
+          customdata: entries.map((entry) => [
+            entry.label,
+            entry.start ? formatTime(entry.start) : "--",
+            entry.jobName,
+            entry.totalFeet,
+            entry.good,
+            entry.bad,
+          ]),
           hovertemplate:
-            "<b>Reel: %{x}</b><br>" +
-            "Job: %{customdata[0]}<br>" +
-            "Total feet: %{customdata[1]:,.0f}<br>" +
-            "Good feet: %{customdata[2]:,.0f}<br>" +
-            "Bad feet: %{customdata[3]:,.0f}<extra></extra>",
+            "<b>Reel: %{customdata[0]}</b><br>" +
+            "Start: %{customdata[1]}<br>" +
+            "Job: %{customdata[2]}<br>" +
+            "Total feet: %{customdata[3]:,.0f}<br>" +
+            "Good feet: %{customdata[4]:,.0f}<br>" +
+            "Bad feet: %{customdata[5]:,.0f}<extra></extra>",
         },
         {
-          x: labels,
+          x: tickValues,
           y: badValues,
           name: "Bad feet",
           type: "bar",
           marker: { color: "#dc2626" },
-          customdata: entries.map((entry) => [entry.jobName, entry.totalFeet, entry.good, entry.bad]),
+          customdata: entries.map((entry) => [
+            entry.label,
+            entry.start ? formatTime(entry.start) : "--",
+            entry.jobName,
+            entry.totalFeet,
+            entry.good,
+            entry.bad,
+          ]),
           hovertemplate:
-            "<b>Reel: %{x}</b><br>" +
-            "Job: %{customdata[0]}<br>" +
-            "Total feet: %{customdata[1]:,.0f}<br>" +
-            "Good feet: %{customdata[2]:,.0f}<br>" +
-            "Bad feet: %{customdata[3]:,.0f}<extra></extra>",
+            "<b>Reel: %{customdata[0]}</b><br>" +
+            "Start: %{customdata[1]}<br>" +
+            "Job: %{customdata[2]}<br>" +
+            "Total feet: %{customdata[3]:,.0f}<br>" +
+            "Good feet: %{customdata[4]:,.0f}<br>" +
+            "Bad feet: %{customdata[5]:,.0f}<extra></extra>",
         },
       ],
       {
@@ -1694,10 +1718,448 @@
         margin: { t: 50, r: 30, b: 80, l: 50 },
         height: 320,
         yaxis: { title: "Feet" },
+        xaxis: {
+          title: "Reel",
+          type: "category",
+          tickmode: "array",
+          tickvals: tickValues,
+          ticktext: tickLabels,
+        },
         hovermode: "closest",
         showlegend: true,
       },
       { displayModeBar: false, responsive: true }
+    );
+  }
+
+  function renderDeltaPointBar(reelAggregates) {
+    const target = elements.deltaPointBar || document.getElementById("rlmDeltaPointBar");
+    if (!target) return;
+    const entries = Object.entries(reelAggregates)
+      .map(([reelDbId, data]) => {
+        if (!data || data.total <= 0) return null;
+        const meta = state.reelMeta[Number(reelDbId)] || {};
+        const startDate = determineStartDate(data, meta);
+        return {
+          label: meta.reelId || reelDbId,
+          jobName: meta.jobName || "Job",
+          start: startDate,
+          startValue: startDate ? startDate.getTime() : Number.POSITIVE_INFINITY,
+          totalFeet: data.feet,
+          good: Math.max(data.total - data.oob, 0),
+          bad: Math.max(data.oob, 0),
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.startValue - b.startValue);
+    if (!entries.length) {
+      if (window.Plotly) Plotly.purge(target);
+      target.innerHTML = '<div class="chart-empty">No monitoring points detected.</div>';
+      return;
+    }
+    const tickValues = entries.map((_, idx) => idx);
+    const tickLabels = entries.map((entry) => entry.label);
+    const goodValues = entries.map((entry) => entry.good);
+    const badValues = entries.map((entry) => entry.bad);
+    Plotly.react(
+      target,
+      [
+        {
+          x: tickValues,
+          y: goodValues,
+          name: "In bounds",
+          type: "bar",
+          marker: { color: "#16a34a" },
+          customdata: entries.map((entry) => [
+            entry.label,
+            entry.start ? formatTime(entry.start) : "--",
+            entry.jobName,
+            entry.good,
+            entry.bad,
+            entry.totalFeet,
+          ]),
+          hovertemplate:
+            "<b>Reel: %{customdata[0]}</b><br>" +
+            "Start: %{customdata[1]}<br>" +
+            "Job: %{customdata[2]}<br>" +
+            "In-bounds points: %{customdata[3]:,.0f}<br>" +
+            "Out-of-bounds points: %{customdata[4]:,.0f}<br>" +
+            "Total feet: %{customdata[5]:,.0f}<extra></extra>",
+        },
+        {
+          x: tickValues,
+          y: badValues,
+          name: "Out of bounds",
+          type: "bar",
+          marker: { color: "#dc2626" },
+          customdata: entries.map((entry) => [
+            entry.label,
+            entry.start ? formatTime(entry.start) : "--",
+            entry.jobName,
+            entry.good,
+            entry.bad,
+            entry.totalFeet,
+          ]),
+          hovertemplate:
+            "<b>Reel: %{customdata[0]}</b><br>" +
+            "Start: %{customdata[1]}<br>" +
+            "Job: %{customdata[2]}<br>" +
+            "In-bounds points: %{customdata[3]:,.0f}<br>" +
+            "Out-of-bounds points: %{customdata[4]:,.0f}<br>" +
+            "Total feet: %{customdata[5]:,.0f}<extra></extra>",
+        },
+      ],
+      {
+        barmode: "stack",
+        margin: { t: 50, r: 30, b: 80, l: 50 },
+        height: 300,
+        yaxis: { title: "Monitoring points" },
+        xaxis: {
+          title: "Reel",
+          type: "category",
+          tickmode: "array",
+          tickvals: tickValues,
+          ticktext: tickLabels,
+        },
+        hovermode: "closest",
+        showlegend: true,
+      },
+      { displayModeBar: false, responsive: true }
+    );
+  }
+
+  function updateDeltaReelSelect(reelAggregates) {
+    if (!elements.deltaReelSelect) return;
+    const entries = Object.entries(reelAggregates || {})
+      .map(([reelDbId, data]) => {
+        if (!data || data.oob <= 0) return null;
+        const meta = state.reelMeta[Number(reelDbId)] || {};
+        const startDate = determineStartDate(data, meta);
+        return {
+          reelDbId: Number(reelDbId),
+          label: meta.reelId || reelDbId,
+          jobName: meta.jobName || "Job",
+          start: startDate,
+          startValue: startDate ? startDate.getTime() : Number.POSITIVE_INFINITY,
+          totalFeet: data.feet,
+          oobPoints: data.oob,
+          totalPoints: data.total,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.startValue - b.startValue);
+    state.reelOobOptions = entries;
+    state.reelOobLookup = entries.reduce((acc, entry) => {
+      acc[entry.reelDbId] = entry;
+      return acc;
+    }, {});
+    if (!entries.length) {
+      elements.deltaReelSelect.innerHTML = '<option value="">No reels with OOB points</option>';
+      elements.deltaReelSelect.disabled = true;
+      state.selectedReelId = "";
+      if (elements.deltaReelMeta) elements.deltaReelMeta.textContent = "All reels are within bounds for this view.";
+      if (elements.deltaReelCurl) elements.deltaReelCurl.innerHTML = "<p>No reels to inspect.</p>";
+      if (elements.deltaReelDelta) elements.deltaReelDelta.innerHTML = "<p>No reels to inspect.</p>";
+      if (elements.deltaReelContext) elements.deltaReelContext.innerHTML = "<p>No reels to inspect.</p>";
+      return;
+    }
+    elements.deltaReelSelect.disabled = false;
+    const optionsHtml = ['<option value="">Select a reel with OOB points</option>'].concat(
+      entries.map((entry) => {
+        const startLabel = entry.start ? entry.start.toLocaleString() : "Unknown start";
+        return `<option value="${entry.reelDbId}">${escapeHtml(entry.label)} · ${escapeHtml(entry.jobName)} · ${escapeHtml(
+          startLabel
+        )}</option>`;
+      })
+    );
+    elements.deltaReelSelect.innerHTML = optionsHtml.join("");
+    let nextSelection = state.selectedReelId;
+    if (!nextSelection || !state.reelOobLookup[Number(nextSelection)]) {
+      nextSelection = String(entries[0].reelDbId);
+    }
+    state.selectedReelId = nextSelection;
+    elements.deltaReelSelect.value = nextSelection;
+    renderDeltaReelCharts();
+  }
+
+  function renderDeltaReelCharts() {
+    if (!elements.deltaReelCurl || !elements.deltaReelDelta) return;
+    const entries = state.reelOobOptions || [];
+    if (!entries.length) {
+      if (elements.deltaReelCurl) elements.deltaReelCurl.innerHTML = "<p>No reels to inspect.</p>";
+      if (elements.deltaReelDelta) elements.deltaReelDelta.innerHTML = "<p>No reels to inspect.</p>";
+      return;
+    }
+    let selectedId = state.selectedReelId;
+    if (!selectedId || !state.reelOobLookup[Number(selectedId)]) {
+      selectedId = String(entries[0].reelDbId);
+      state.selectedReelId = selectedId;
+      if (elements.deltaReelSelect) elements.deltaReelSelect.value = selectedId;
+    }
+    const entry = state.reelOobLookup[Number(selectedId)];
+    if (!entry) {
+      if (elements.deltaReelCurl) elements.deltaReelCurl.innerHTML = "<p>No reel data available.</p>";
+      if (elements.deltaReelDelta) elements.deltaReelDelta.innerHTML = "<p>No reel data available.</p>";
+      if (elements.deltaReelContext) elements.deltaReelContext.innerHTML = "<p>No reel data available.</p>";
+      return;
+    }
+    const reelRows = (state.deltaRows || []).filter((row) => Number(row.reelDbId) === entry.reelDbId);
+    if (!reelRows.length) {
+      if (elements.deltaReelCurl) elements.deltaReelCurl.innerHTML = "<p>No monitoring points for this reel.</p>";
+      if (elements.deltaReelDelta) elements.deltaReelDelta.innerHTML = "<p>No monitoring points for this reel.</p>";
+      if (elements.deltaReelContext) elements.deltaReelContext.innerHTML = "<p>No monitoring points for this view.</p>";
+      if (elements.deltaReelMeta) elements.deltaReelMeta.textContent = "No monitoring data for the selected reel.";
+      return;
+    }
+    const oobRows = reelRows.filter((row) => row.outOfRange);
+    const formatValues = reelRows.map((row) => row.formatValue).filter((val) => Number.isFinite(val));
+    const oobFormatValues = oobRows.map((row) => row.formatValue).filter((val) => Number.isFinite(val));
+    const feetValues = reelRows.map((row) => row.formatFeet).filter((val) => Number.isFinite(val));
+    const oobFeetValues = oobRows.map((row) => row.formatFeet).filter((val) => Number.isFinite(val));
+    if (elements.deltaReelMeta) {
+      const startLabel = entry.start ? entry.start.toLocaleString() : "Unknown start";
+      const feetLabel = Number.isFinite(entry.totalFeet) ? formatFeet(entry.totalFeet) : "--";
+      const formatSpanLabel = formatValues.length
+        ? `Format span: ${formatNumber(Math.min(...formatValues), 0)} → ${formatNumber(Math.max(...formatValues), 0)}`
+        : "Format span: Unknown";
+      const oobFormatLabel = oobFormatValues.length
+        ? `OOB format: ${formatNumber(Math.min(...oobFormatValues), 0)} → ${formatNumber(Math.max(...oobFormatValues), 0)}`
+        : "OOB format: Unknown";
+      const feetSpanLabel = feetValues.length
+        ? `Feet span: ${formatNumber(Math.min(...feetValues), 0)} ft → ${formatNumber(Math.max(...feetValues), 0)} ft`
+        : "Feet span: Unknown";
+      elements.deltaReelMeta.textContent = `${entry.label} · ${entry.jobName} · Start ${startLabel} · Feet ${feetLabel} · ${formatSpanLabel} · ${oobFormatLabel} · ${feetSpanLabel}`;
+    }
+    const hasFeetPositions = reelRows.some((row) => Number.isFinite(row.formatFeet));
+    const xPositions = [];
+    const indexMap = new Map();
+    reelRows.forEach((row, idx) => {
+      const pos = Number.isFinite(row.formatFeet) ? row.formatFeet : idx;
+      xPositions.push(pos);
+      indexMap.set(row, idx);
+    });
+    const axisTitle = hasFeetPositions ? "Feet along reel" : "Monitoring point index";
+    const oobXPositions = oobRows.map((row) => {
+      const idx = indexMap.get(row) || 0;
+      return xPositions[idx];
+    });
+    const markerConfig = {
+      size: 6,
+      color: "#2563eb",
+    };
+    const curlTrace = {
+      x: xPositions,
+      y: reelRows.map((row) => row.actual),
+      mode: "lines+markers",
+      name: "Curlength",
+      line: { color: "#2563eb", width: 1.5 },
+      marker: markerConfig,
+      hovertemplate:
+        "<b>Curlength</b><br>" +
+        (hasFeetPositions ? "Feet: " : "Index: ") +
+        "%{x:.0f}<br>" +
+        "Curlength: %{y:.3f} mm<extra></extra>",
+    };
+    const hasSpeed = reelRows.some((row) => Number.isFinite(row.webspeed));
+    let speedTrace = null;
+    if (hasSpeed) {
+      const speedValues = reelRows.map((row) => (Number.isFinite(row.webspeed) ? row.webspeed : null));
+      const finiteSpeeds = speedValues.filter((val) => Number.isFinite(val));
+      const minSpeed = finiteSpeeds.length ? Math.min(...finiteSpeeds) : 0;
+      const maxSpeed = finiteSpeeds.length ? Math.max(...finiteSpeeds) : 1;
+      const speedRange = maxSpeed - minSpeed || 1;
+      const scaledSpeed = speedValues.map((val) => (Number.isFinite(val) ? (val - minSpeed) / speedRange : null));
+      const curlMin = Math.min(...reelRows.map((row) => Number.isFinite(row.actual) ? row.actual : 0));
+      const curlMax = Math.max(...reelRows.map((row) => Number.isFinite(row.actual) ? row.actual : 0));
+      const curlRange = curlMax - curlMin || 1;
+      const upperBand = curlMin + curlRange * 0.25;
+      const lowerBand = curlMin + curlRange * 0.05;
+      speedTrace = {
+        x: xPositions,
+        y: scaledSpeed.map((val) => (val !== null ? lowerBand + val * (upperBand - lowerBand) : null)),
+        mode: "lines",
+        name: "Webspeed (scaled)",
+        line: { color: "#16a34a", width: 1.5, dash: "dot" },
+        hovertemplate:
+          "<b>Webspeed</b><br>" +
+          (hasFeetPositions ? "Feet: " : "Index: ") +
+          "%{x:.0f}<br>Speed: %{customdata:.3f} m/s<extra></extra>",
+        customdata: speedValues,
+        yaxis: "y",
+      };
+    }
+    const curlLayout = {
+      margin: { t: 40, r: 60, b: 50, l: 60 },
+      height: 360,
+      yaxis: { title: "Curlength (mm)" },
+      xaxis: { title: axisTitle },
+      paper_bgcolor: "#ffffff",
+      plot_bgcolor: "#ffffff",
+    };
+    curlLayout.showlegend = !!speedTrace;
+    const curlTraces = speedTrace ? [curlTrace, speedTrace] : [curlTrace];
+    Plotly.react(elements.deltaReelCurl, curlTraces, curlLayout, { displayModeBar: true, responsive: true });
+
+    const lower = reelRows[0].lower;
+    const upper = reelRows[0].upper;
+    const shapes = [];
+    if (Number.isFinite(lower)) {
+      shapes.push({
+        type: "line",
+        x0: Math.min(...xPositions),
+        x1: Math.max(...xPositions),
+        y0: lower,
+        y1: lower,
+        line: { color: "#f97316", dash: "dot" },
+      });
+    }
+    if (Number.isFinite(upper)) {
+      shapes.push({
+        type: "line",
+        x0: Math.min(...xPositions),
+        x1: Math.max(...xPositions),
+        y0: upper,
+        y1: upper,
+        line: { color: "#f97316", dash: "dot" },
+      });
+    }
+    shapes.push({
+      type: "line",
+      x0: Math.min(...xPositions),
+      x1: Math.max(...xPositions),
+      y0: 0,
+      y1: 0,
+      line: { color: "#94a3b8", dash: "solid" },
+    });
+    const deltaTrace = {
+      x: xPositions,
+      y: reelRows.map((row) => row.delta),
+      mode: "lines+markers",
+      name: "Delta",
+      line: { color: "#2563eb", width: 1.5 },
+      marker: {
+        size: 6,
+        color: reelRows.map((row) => (row.outOfRange ? "#dc2626" : "#2563eb")),
+      },
+      hovertemplate:
+        "<b>Delta</b><br>" +
+        (hasFeetPositions ? "Feet: " : "Index: ") +
+        "%{x:.0f}<br>" +
+        "Delta: %{y:.3f} mm<extra></extra>",
+    };
+    const oobTrace =
+      oobRows.length > 0
+        ? {
+            x: oobXPositions,
+            y: oobRows.map((row) => row.delta),
+            mode: "markers",
+            name: "Out of bounds",
+            marker: { color: "#dc2626", size: 8, symbol: "circle-open" },
+          hovertemplate:
+            "<b>OOB</b><br>" +
+            (hasFeetPositions ? "Feet: " : "Index: ") +
+            "%{x:.0f}<br>" +
+            "Delta: %{y:.3f} mm<extra></extra>",
+          }
+        : null;
+    const deltaLayout = {
+      margin: { t: 40, r: 30, b: 50, l: 60 },
+      height: 360,
+      yaxis: { title: "Delta (mm)" },
+      xaxis: { title: axisTitle },
+      shapes,
+      showlegend: !!oobTrace,
+      paper_bgcolor: "#ffffff",
+      plot_bgcolor: "#ffffff",
+    };
+    const deltaTraces = oobTrace ? [deltaTrace, oobTrace] : [deltaTrace];
+    Plotly.react(elements.deltaReelDelta, deltaTraces, deltaLayout, { displayModeBar: true, responsive: true });
+
+    renderDeltaReelContext(selectedId);
+  }
+
+  function renderDeltaReelContext(selectedReelId) {
+    if (!elements.deltaReelContext) return;
+    const orderedReels = Object.entries(state.reelMeta || {})
+      .map(([id, meta]) => ({
+        id: Number(id),
+        startValue: meta.start instanceof Date ? meta.start.getTime() : meta.start ? new Date(meta.start).getTime() : Number.POSITIVE_INFINITY,
+        label: meta.reelId || id,
+        jobName: meta.jobName || "Job",
+      }))
+      .sort((a, b) => a.startValue - b.startValue || a.id - b.id);
+    if (!orderedReels.length) {
+      elements.deltaReelContext.innerHTML = "<p>No reel context available.</p>";
+      return;
+    }
+    const idx = orderedReels.findIndex((entry) => entry.id === Number(selectedReelId));
+    if (idx === -1) {
+      elements.deltaReelContext.innerHTML = "<p>No reel context available.</p>";
+      return;
+    }
+    const contextEntries = [];
+    if (idx > 0) contextEntries.push({ ...orderedReels[idx - 1], role: "Previous" });
+    contextEntries.push({ ...orderedReels[idx], role: "Selected" });
+    if (idx < orderedReels.length - 1) contextEntries.push({ ...orderedReels[idx + 1], role: "Next" });
+    const colors = { Previous: "#0ea5e9", Selected: "#2563eb", Next: "#f97316" };
+    const traces = [];
+    let hasFormatPositions = false;
+    let hasFeetPositions = false;
+    contextEntries.forEach((entry) => {
+      const rows = (state.deltaRows || []).filter((row) => Number(row.reelDbId) === entry.id);
+      if (!rows.length) return;
+      const entryHasFormat = rows.some((row) => Number.isFinite(row.formatValue));
+      const entryHasFeet = rows.some((row) => Number.isFinite(row.formatFeet));
+      if (entryHasFormat) hasFormatPositions = true;
+      if (entryHasFeet) hasFeetPositions = true;
+      traces.push({
+        entry,
+        rows,
+        hasFormat: entryHasFormat,
+        hasFeet: entryHasFeet,
+      });
+    });
+    if (!traces.length) {
+      elements.deltaReelContext.innerHTML = "<p>No monitoring data for adjacent reels.</p>";
+      return;
+    }
+    const axisTitle = hasFormatPositions ? "Format value" : hasFeetPositions ? "Feet along reel" : "Point index";
+    const plotTraces = traces.map(({ entry, rows, hasFormat, hasFeet }) => {
+      const xValues = rows.map((row, index) => {
+        if (hasFormatPositions && Number.isFinite(row.formatValue)) return row.formatValue;
+        if (!hasFormatPositions && hasFeetPositions && Number.isFinite(row.formatFeet)) return row.formatFeet;
+        return index;
+      });
+      return {
+        x: xValues,
+        y: rows.map((row) => row.delta),
+        mode: "lines+markers",
+        name: `${entry.label} (${entry.role})`,
+        line: { color: colors[entry.role] || "#2563eb", width: entry.role === "Selected" ? 2 : 1 },
+        marker: {
+          size: 6,
+          color: rows.map((row) => (row.outOfRange ? "#dc2626" : colors[entry.role] || "#2563eb")),
+        },
+        hovertemplate:
+          "<b>%{text}</b><br>" +
+          "Position: %{x:.0f}<br>" +
+          "Delta: %{y:.3f} mm<extra></extra>",
+        text: rows.map((row) => state.reelMeta[entry.id]?.jobName || "Job"),
+      };
+    });
+    Plotly.react(
+      elements.deltaReelContext,
+      plotTraces,
+      {
+        margin: { t: 40, r: 30, b: 50, l: 60 },
+        height: 360,
+        yaxis: { title: "Delta (mm)" },
+        xaxis: { title: axisTitle },
+        showlegend: true,
+        paper_bgcolor: "#ffffff",
+        plot_bgcolor: "#ffffff",
+      },
+      { displayModeBar: true, responsive: true }
     );
   }
 
@@ -1752,10 +2214,14 @@
 
   function computeFeetFromReel(reel) {
     if (!reel) return null;
-    const start = toNumber(reel.reelStart);
-    const end = toNumber(reel.reelEnd);
+    const start = toNumber(reel.reelStart ?? reel.reel_start);
+    const end = toNumber(reel.reelEnd ?? reel.reel_end);
+    return computeFeetFromValues(start, end);
+  }
+
+  function computeFeetFromValues(start, end) {
     if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
-    return Math.abs(end - start);
+    return Math.abs(end - start) * FEET_PER_FORMAT_UNIT;
   }
 
   function formatNumber(value, digits = 0) {
@@ -2086,7 +2552,9 @@
         reelId: reel.reelId || reel.reelCode || reel.reelDbId,
         start: reel.productionStart ? new Date(reel.productionStart) : null,
         end: reel.productionEnd ? new Date(reel.productionEnd) : null,
-        feet: startLen !== null && endLen !== null ? Math.abs(endLen - startLen) : null,
+        feet: computeFeetFromValues(startLen, endLen),
+        formatStart: startLen,
+        formatEnd: endLen,
       };
     });
     return map;
@@ -2175,6 +2643,20 @@
     return distribution
       .map((entry) => `${formatMm(entry.nominal, 3)} · ${formatNumber(entry.count)} reels`)
       .join("\n");
+  }
+
+  function determineStartDate(aggregate, meta) {
+    const metaStart = meta && meta.start ? meta.start : null;
+    if (metaStart instanceof Date) return metaStart;
+    if (metaStart) {
+      const parsed = new Date(metaStart);
+      if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+    if (aggregate && Number.isFinite(aggregate.startTs)) {
+      const tsDate = new Date(aggregate.startTs);
+      if (!Number.isNaN(tsDate.getTime())) return tsDate;
+    }
+    return null;
   }
 
   document.addEventListener("DOMContentLoaded", init);

@@ -239,26 +239,43 @@
         </div>
       </div>
       <div class="delta-table-card-wrapper">
-        <div class="table-card table-card--inline delta-table-card">
-          <div class="table-card-header delta-table-header">
-            <h4>Delta Details</h4>
-            <span class="table-count" id="rlmDeltaTableOobCount">0</span>
+        <div class="chart-card chart-card--mini chart-card--points">
+          <div class="chart-card-title">
+            <p class="chart-card__eyebrow">Monitoring Density</p>
+            <h4>Points In/Out-of-Bounds</h4>
           </div>
-          <div class="table-card-body table-card-body--wide">
-            <table id="rlmDeltaTable">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Job</th>
-                  <th>Reel</th>
-                  <th>Nominal</th>
-                  <th>Bounds</th>
-                  <th>Actual</th>
-                  <th>Delta</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
+          <div id="rlmDeltaPointBar" class="chart chart--mini chart--points-bar"></div>
+        </div>
+        <div class="delta-reel-investigate">
+          <div class="delta-reel-filter">
+            <label for="rlmDeltaReelSelect">Investigate reel</label>
+            <select id="rlmDeltaReelSelect">
+              <option value="">Select a reel with OOB points</option>
+            </select>
+            <p class="delta-reel-meta" id="rlmDeltaReelMeta">Pick a reel to explore where issues occur.</p>
+          </div>
+          <div class="delta-reel-charts">
+            <div class="chart-card chart-card--tall delta-reel-chart">
+              <div class="chart-card-title">
+                <p class="chart-card__eyebrow">Roll Position</p>
+                <h4>Curlength & Webspeed</h4>
+              </div>
+              <div id="rlmDeltaReelCurl" class="chart chart--reel-position"></div>
+            </div>
+            <div class="chart-card chart-card--tall delta-reel-chart">
+              <div class="chart-card-title">
+                <p class="chart-card__eyebrow">Roll Position</p>
+                <h4>Delta vs Bounds</h4>
+              </div>
+              <div id="rlmDeltaReelDelta" class="chart chart--reel-position"></div>
+            </div>
+          </div>
+          <div class="chart-card chart-card--tall delta-reel-chart delta-reel-chart--wide">
+            <div class="chart-card-title">
+              <p class="chart-card__eyebrow">Adjacent Reels</p>
+              <h4>Position Context (Prev · Current · Next)</h4>
+            </div>
+            <div id="rlmDeltaReelContext" class="chart chart--reel-context"></div>
           </div>
         </div>
       </div>
