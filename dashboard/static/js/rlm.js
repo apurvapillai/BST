@@ -5,6 +5,7 @@
   const JOB_COLORS = ["#0ea5e9", "#f97316", "#34d399", "#f43f5e", "#a855f7", "#14b8a6", "#f59e0b", "#6366f1", "#ec4899", "#22d3ee"];
   const jobColorMap = new Map();
   const FEET_PER_FORMAT_UNIT = 3.0417;
+    const SPEED_TRACE_BAND = 0.33;
 
   const state = {
     machineId: bootstrap.defaultMachineId ? String(bootstrap.defaultMachineId) : "",
@@ -1553,22 +1554,49 @@
       yAxisConfig.range[1] = state.deltaYMax;
     }
 
+    const deltaValues = displayRows.map((row) => row.delta);
+    const plotMin = deltaValues.length ? Math.min(...deltaValues) : 0;
+    const plotMax = deltaValues.length ? Math.max(...deltaValues) : 0;
+    const plotSpan = plotMax - plotMin || 1;
+    const rawSpeeds = displayRows.map((row) => (Number.isFinite(row.webspeed) ? Number(row.webspeed) : null));
+    const finiteSpeeds = rawSpeeds.filter((val) => Number.isFinite(val));
+    const speedMinVal = finiteSpeeds.length ? Math.min(...finiteSpeeds) : 0;
+    const speedMaxVal = finiteSpeeds.length ? Math.max(...finiteSpeeds) : 0;
+    const speedSpan = speedMaxVal - speedMinVal || 1;
+    const mappedSpeedValues = rawSpeeds.map((speed) => {
+      if (!Number.isFinite(speed)) return null;
+      const normalized = speedSpan ? (speed - speedMinVal) / speedSpan : 0;
+      return plotMin + normalized * (plotSpan * SPEED_TRACE_BAND);
+    });
+    const deltaSeries = [
+      {
+        x: displayRows.map((row) => row.timestampIso),
+        y: deltaValues,
+        mode: "lines+markers",
+        line: { color: "#2563eb", width: 1.4 },
+        marker: {
+          size: 8,
+          color: displayRows.map((row) => (row.outOfRange ? "#ef4444" : "rgba(0,0,0,0)")),
+        },
+        hoverinfo: "text",
+        text: displayRows.map((row) => row.hover),
+      },
+    ];
+    if (finiteSpeeds.length) {
+      deltaSeries.push({
+        x: displayRows.map((row) => row.timestampIso),
+        y: mappedSpeedValues,
+        mode: "lines",
+        name: "Webspeed (scaled)",
+        line: { color: "#16a34a", width: 1.5, dash: "dot" },
+        hovertemplate: "<b>Webspeed</b><br>%{customdata:.3f} m/s<extra></extra>",
+        customdata: rawSpeeds,
+      });
+    }
+
     Plotly.react(
       elements.deltaChart,
-      [
-        {
-          x: displayRows.map((row) => row.timestampIso),
-          y: displayRows.map((row) => row.delta),
-          mode: "lines+markers",
-          line: { color: "#2563eb", width: 1.4 },
-          marker: {
-            size: 8,
-            color: displayRows.map((row) => (row.outOfRange ? "#ef4444" : "rgba(0,0,0,0)")),
-          },
-          hoverinfo: "text",
-          text: displayRows.map((row) => row.hover),
-        },
-      ],
+      deltaSeries,
       {
         margin: { t: 65, r: 30, b: 50, l: 70 },
         title: { text: "", x: 0.5 },
@@ -1619,8 +1647,8 @@
         ],
         paper_bgcolor: "#ffffff",
         plot_bgcolor: "#ffffff",
-      showlegend: false,
-    },
+        showlegend: finiteSpeeds.length > 0,
+      },
       { displayModeBar: true, responsive: true }
     );
 
@@ -1982,20 +2010,6 @@
     const oobFormatValues = oobRows.map((row) => row.formatValue).filter((val) => Number.isFinite(val));
     const feetValues = reelRows.map((row) => row.formatFeet).filter((val) => Number.isFinite(val));
     const oobFeetValues = oobRows.map((row) => row.formatFeet).filter((val) => Number.isFinite(val));
-    if (elements.deltaReelMeta) {
-      const startLabel = entry.start ? entry.start.toLocaleString() : "Unknown start";
-      const feetLabel = Number.isFinite(entry.totalFeet) ? formatFeet(entry.totalFeet) : "--";
-      const formatSpanLabel = formatValues.length
-        ? `Format span: ${formatNumber(Math.min(...formatValues), 0)} → ${formatNumber(Math.max(...formatValues), 0)}`
-        : "Format span: Unknown";
-      const oobFormatLabel = oobFormatValues.length
-        ? `OOB format: ${formatNumber(Math.min(...oobFormatValues), 0)} → ${formatNumber(Math.max(...oobFormatValues), 0)}`
-        : "OOB format: Unknown";
-      const feetSpanLabel = feetValues.length
-        ? `Feet span: ${formatNumber(Math.min(...feetValues), 0)} ft → ${formatNumber(Math.max(...feetValues), 0)} ft`
-        : "Feet span: Unknown";
-      elements.deltaReelMeta.textContent = `${entry.label} · ${entry.jobName} · Start ${startLabel} · Feet ${feetLabel} · ${formatSpanLabel} · ${oobFormatLabel} · ${feetSpanLabel}`;
-    }
     const hasFeetPositions = reelRows.some((row) => Number.isFinite(row.formatFeet));
     const xPositions = [];
     const indexMap = new Map();
@@ -2015,9 +2029,36 @@
     };
     const formatLabels = reelRows.map((row) => (Number.isFinite(row.formatValue) ? formatNumber(row.formatValue, 0) : "--"));
     const feetLabels = reelRows.map((row) => (Number.isFinite(row.formatFeet) ? formatNumber(row.formatFeet, 0) : "--"));
+    const curlValues = reelRows.map((row) => row.actual);
+    const curlMin = curlValues.length ? Math.min(...curlValues) : 0;
+    const curlMax = curlValues.length ? Math.max(...curlValues) : 0;
+    const curlSpan = curlMax - curlMin || 1;
+    const hasSpeed = reelRows.some((row) => Number.isFinite(row.webspeed));
+    let speedTrace = null;
+    speedValues = null;
+    if (hasSpeed) {
+      speedValues = reelRows.map((row) => (Number.isFinite(row.webspeed) ? row.webspeed : null));
+      const finiteSpeeds = speedValues.filter((val) => Number.isFinite(val));
+      const minSpeed = finiteSpeeds.length ? Math.min(...finiteSpeeds) : 0;
+      const maxSpeed = finiteSpeeds.length ? Math.max(...finiteSpeeds) : 0;
+      const speedRange = maxSpeed - minSpeed || 1;
+      const mappedSpeeds = speedValues.map((val) =>
+        Number.isFinite(val) ? curlMin + ((val - minSpeed) / speedRange) * (curlSpan * SPEED_TRACE_BAND) : null
+      );
+      speedTrace = {
+        x: xPositions,
+        y: mappedSpeeds,
+        mode: "lines",
+        name: "Webspeed (scaled)",
+        line: { color: "#16a34a", width: 1.5, dash: "dot" },
+        hovertemplate: "<b>Webspeed</b><br>%{customdata:.3f} m/s<extra></extra>",
+        customdata: speedValues,
+        showlegend: true,
+      };
+    }
     const curlTrace = {
       x: xPositions,
-      y: reelRows.map((row) => row.actual),
+      y: curlValues,
       mode: "lines+markers",
       name: "Curlength",
       line: { color: "#2563eb", width: 1.5 },
@@ -2029,41 +2070,34 @@
         "Curlength: %{y:.3f} mm<extra></extra>",
       customdata: reelRows.map((row, idx) => [formatLabels[idx], feetLabels[idx]]),
     };
-    const hasSpeed = reelRows.some((row) => Number.isFinite(row.webspeed));
-    let speedTrace = null;
-    if (hasSpeed) {
-      const speedValues = reelRows.map((row) => (Number.isFinite(row.webspeed) ? row.webspeed : null));
-      const finiteSpeeds = speedValues.filter((val) => Number.isFinite(val));
-      const minSpeed = finiteSpeeds.length ? Math.min(...finiteSpeeds) : 0;
-      const maxSpeed = finiteSpeeds.length ? Math.max(...finiteSpeeds) : 1;
-      const speedRange = maxSpeed - minSpeed || 1;
-      const scaledSpeed = speedValues.map((val) => (Number.isFinite(val) ? (val - minSpeed) / speedRange : null));
-      speedTrace = {
-        x: xPositions,
-        y: scaledSpeed,
-        mode: "lines",
-        name: "Webspeed (scaled)",
-        line: { color: "#16a34a", width: 1.5, dash: "dot" },
-        hoverinfo: "skip",
-        customdata: speedValues,
-        yaxis: "y2",
-        showlegend: false,
-      };
+    if (elements.deltaReelMeta) {
+      const startLabel = entry.start ? entry.start.toLocaleString() : "Unknown start";
+      const feetLabel = Number.isFinite(entry.totalFeet) ? formatFeet(entry.totalFeet) : "--";
+      const formatSpanLabel = formatValues.length
+        ? `Format span: ${formatNumber(Math.min(...formatValues), 0)} → ${formatNumber(Math.max(...formatValues), 0)}`
+        : "Format span: Unknown";
+      const oobFormatLabel = oobFormatValues.length
+        ? `OOB format: ${formatNumber(Math.min(...oobFormatValues), 0)} → ${formatNumber(Math.max(...oobFormatValues), 0)}`
+        : "OOB format: Unknown";
+      const feetSpanLabel = feetValues.length
+        ? `Feet span: ${formatNumber(Math.min(...feetValues), 0)} ft → ${formatNumber(Math.max(...feetValues), 0)} ft`
+        : "Feet span: Unknown";
+      const finiteSpeeds = (speedValues || []).filter((val) => Number.isFinite(val));
+      const speedLabel = finiteSpeeds.length
+        ? `Speed: ${formatNumber(Math.min(...finiteSpeeds), 3)} → ${formatNumber(
+            Math.max(...finiteSpeeds),
+            3
+          )} m/s (avg ${formatNumber(
+            finiteSpeeds.reduce((sum, val) => sum + val, 0) / finiteSpeeds.length,
+            3
+          )} m/s)`
+        : "Speed: --";
+      elements.deltaReelMeta.textContent = `${entry.label} · ${entry.jobName} · Start ${startLabel} · Feet ${feetLabel} · ${formatSpanLabel} · ${oobFormatLabel} · ${feetSpanLabel} · ${speedLabel}`;
     }
     const curlLayout = {
       margin: { t: 40, r: 60, b: 50, l: 60 },
       height: 360,
       yaxis: { title: "Curlength (mm)" },
-      yaxis2: hasSpeed
-        ? {
-            title: "Webspeed (scaled)",
-            overlaying: "y",
-            side: "right",
-            showgrid: false,
-            zeroline: false,
-            range: [0, 1],
-          }
-        : undefined,
       xaxis: { title: axisTitle },
       paper_bgcolor: "#ffffff",
       plot_bgcolor: "#ffffff",
@@ -2103,9 +2137,25 @@
       y1: 0,
       line: { color: "#94a3b8", dash: "solid" },
     });
+    const deltaSeriesValues = reelRows.map((row) => row.delta);
+    const reelPlotMin = deltaSeriesValues.length ? Math.min(...deltaSeriesValues) : 0;
+    const reelPlotMax = deltaSeriesValues.length ? Math.max(...deltaSeriesValues) : 0;
+    const reelPlotSpan = reelPlotMax - reelPlotMin || 1;
+    const reelSpeedValues = (speedValues || []).map((value) => (Number.isFinite(value) ? Number(value) : null));
+    const finiteReelSpeeds = reelSpeedValues.filter((val) => Number.isFinite(val));
+    const reelSpeedMin = finiteReelSpeeds.length ? Math.min(...finiteReelSpeeds) : 0;
+    const reelSpeedMax = finiteReelSpeeds.length ? Math.max(...finiteReelSpeeds) : 0;
+    const reelSpeedSpan = reelSpeedMax - reelSpeedMin || 1;
+    const deltaSpeedBand = 0.7;
+    const deltaSpeedOffset = -0.35;
+    const mappedReelSpeed = reelSpeedValues.map((speed) => {
+      if (!Number.isFinite(speed)) return null;
+      const normalized = reelSpeedSpan ? (speed - reelSpeedMin) / reelSpeedSpan : 0;
+      return reelPlotMin + (deltaSpeedOffset * reelPlotSpan) + normalized * (reelPlotSpan * deltaSpeedBand);
+    });
     const deltaTrace = {
       x: xPositions,
-      y: reelRows.map((row) => row.delta),
+      y: deltaSeriesValues,
       mode: "lines+markers",
       name: "Delta",
       line: { color: "#2563eb", width: 1.5 },
@@ -2120,6 +2170,18 @@
         "Delta: %{y:.3f} mm<extra></extra>",
       customdata: reelRows.map((row, idx) => [formatLabels[idx], feetLabels[idx]]),
     };
+    const deltaSpeedTrace =
+      finiteReelSpeeds.length > 0
+        ? {
+            x: xPositions,
+            y: mappedReelSpeed,
+            mode: "lines",
+            name: "Webspeed (scaled)",
+            line: { color: "#16a34a", width: 1.5, dash: "dot" },
+            hovertemplate: "<b>Webspeed</b><br>%{customdata:.3f} m/s<extra></extra>",
+            customdata: reelSpeedValues,
+          }
+        : null;
     const oobTrace =
       oobRows.length > 0
         ? {
@@ -2141,11 +2203,13 @@
       yaxis: { title: "Delta (mm)" },
       xaxis: { title: axisTitle },
       shapes,
-      showlegend: !!oobTrace,
+      showlegend: !!oobTrace || !!deltaSpeedTrace,
       paper_bgcolor: "#ffffff",
       plot_bgcolor: "#ffffff",
     };
-    const deltaTraces = oobTrace ? [deltaTrace, oobTrace] : [deltaTrace];
+    const deltaTraces = [deltaTrace];
+    if (oobTrace) deltaTraces.push(oobTrace);
+    if (deltaSpeedTrace) deltaTraces.push(deltaSpeedTrace);
     redrawInvestigatePlot(elements.deltaReelDelta, deltaTraces, deltaLayout);
 
     renderDeltaReelContext(selectedId);
@@ -2254,9 +2318,8 @@
       mode: "lines",
       name: "Webspeed (scaled)",
       line: { color: "#16a34a", width: 1.5, dash: "dot" },
-      hoverinfo: "skip",
+      hovertemplate: "<b>Webspeed</b><br>%{customdata:.3f} m/s<extra></extra>",
       customdata: [],
-      yaxis: "y2",
       showlegend: false,
     };
     let selectedRange = null;
@@ -2310,13 +2373,14 @@
       };
       speedValues.forEach((speedVal, idx) => {
         if (!Number.isFinite(speedVal)) return;
+        const normalized = speedRange ? (speedVal - speedMin) / speedRange : 0;
         combinedSpeedTrace.x.push(xValues[idx]);
-        combinedSpeedTrace.y.push((speedVal - speedMin) / speedRange);
-        combinedSpeedTrace.customdata.push([entry.label, jobName, feetVals[idx], speedVal]);
+        combinedSpeedTrace.y.push(deltaMin + normalized * (deltaRange * SPEED_TRACE_BAND));
+        combinedSpeedTrace.customdata.push(speedVal);
       });
       combinedSpeedTrace.x.push(null);
       combinedSpeedTrace.y.push(null);
-      combinedSpeedTrace.customdata.push([entry.label, jobName, null, null]);
+      combinedSpeedTrace.customdata.push(null);
       return [deltaTrace];
     });
     const flattened = plotTraceSets.flat();
@@ -2359,9 +2423,6 @@
       showlegend: true,
       paper_bgcolor: "#ffffff",
       plot_bgcolor: "#ffffff",
-      yaxis2: allSpeedValues.length
-        ? { title: "Webspeed (scaled)", overlaying: "y", side: "right", showgrid: false, zeroline: false, range: [0, 1] }
-        : undefined,
       shapes,
     });
 
