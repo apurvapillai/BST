@@ -2,7 +2,7 @@
 body {
   font-family: Arial, sans-serif;
   margin: 0;
-  padding: 24px;
+  padding: 0;
   background: #f4f7fb;
   color: #333;
 }
@@ -11,6 +11,7 @@ body {
   max-width: 1800px;
   margin: 0 auto;
   position: relative;
+  padding: 0 clamp(1rem, 3vw, 2.5rem) 2.5rem;
 }
 
 .app-header {

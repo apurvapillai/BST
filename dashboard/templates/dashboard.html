@@ -2,11 +2,35 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Press Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nav.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
   <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
 </head>
 <body>
+  {% set nav_dashboard_active = request.path.startswith('/dashboard') %}
+  <nav class="pg-nav">
+    <div class="pg-nav__inner">
+      <a href="/dashboard" class="pg-nav__brand" aria-label="ProcessGuard Vision">
+        <span class="pg-nav__logo">PG</span>
+        <span class="pg-nav__brand-text">
+          <span class="pg-nav__eyebrow">ProcessGuard</span>
+          <span class="pg-nav__title">Operations Suite</span>
+        </span>
+      </a>
+      <button class="pg-nav__toggle" type="button" aria-expanded="false" aria-label="Open navigation">
+        Menu
+        <span class="pg-nav__toggle-bars" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </span>
+      </button>
+      <div class="pg-nav__links">
+        <a href="/dashboard" class="pg-nav__link {% if nav_dashboard_active %}pg-nav__link--active{% endif %}">Operations Dashboard</a>
+        <a href="/rlm" class="pg-nav__link {% if request.path.startswith('/rlm') %}pg-nav__link--active{% endif %}">Repeat Length Monitoring</a>
+      </div>
+    </div>
+  </nav>
   <!-- Image Modal -->
   <div id="imageModal">
     <span class="closeBtn" onclick="closeModal()">&times;</span>
@@ -815,6 +839,7 @@
 
   <div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="true"></div>
 
+  <script src="{{ url_for('static', filename='js/nav.js') }}"></script>
   <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 </body>
 </html>

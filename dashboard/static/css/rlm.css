@@ -6,56 +6,53 @@ body {
   color: #0f172a;
 }
 
-.rlm-header {
+.app-shell {
+  max-width: 1800px;
+  margin: 0 auto;
+  padding: 0 clamp(1rem, 3vw, 2.5rem) 2.5rem;
+}
+
+.app-header {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 2rem 2.5rem 1.5rem;
-  background: #ffffff;
-  border-bottom: 1px solid #e2e8f0;
+  align-items: center;
+  gap: 18px;
+  padding: 1.5rem 0 0.75rem;
 }
 
-.rlm-brand h1 {
-  margin: 0.2rem 0 0.35rem;
-  font-size: 2rem;
-  color: #0f172a;
+.app-logo {
+  width: 68px;
+  height: auto;
+  object-fit: contain;
 }
 
-.rlm-tagline {
+.app-title {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.app-title__eyebrow {
   margin: 0;
-  color: #475569;
-  font-size: 0.95rem;
-}
-
-.rlm-eyebrow {
-  margin: 0;
+  font-size: 0.8rem;
+  letter-spacing: 0.25em;
   text-transform: uppercase;
-  letter-spacing: 0.2em;
-  font-size: 0.75rem;
-  color: #64748b;
+  color: #94a3b8;
+  font-weight: 600;
 }
 
-.rlm-header-meta {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.rlm-badge {
-  border-radius: 999px;
-  padding: 0.35rem 0.9rem;
-  font-size: 0.85rem;
-  background: #edf2ff;
-  color: #3949ab;
-  border: 1px solid #c7d2fe;
+.app-title h1 {
+  margin: 0;
+  font-size: 1.9rem;
+  color: #0f172a;
+  letter-spacing: -0.025em;
 }
 
 main#rlmApp {
-  padding: 2rem clamp(1rem, 2vw, 2rem) 3rem;
+  padding: 2rem 0 3rem;
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-  width: min(95vw, 2200px);
-  margin: 0 auto;
+  width: 100%;
 }
 
 .rlm-panel {
