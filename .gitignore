@@ -14,7 +14,7 @@ env/
 .env
 
 # ---- Data and logs ----
-data/*.zip
+data/*/*.zip
 logs/
 *.log
 
@@ -30,5 +30,4 @@ dashboard/static/images/**
 Thumbs.db
 
 # ---- Sync state ----
-data/Press 5/.sync_state.json
-data/Press 14/.sync_state.json
+data/*/.sync_state.json
