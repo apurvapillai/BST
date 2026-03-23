@@ -1,21 +1,31 @@
 import os
 from datetime import datetime
+from pathlib import Path
+
 from parser.extract_one import extract_one
 
-DATA_DIR = "data"
+DATA_DIR = Path("data")
 
-# --- 👇 Adjustable cutoff date (edit anytime) ---
-CUTOFF_DATE = datetime(2025, 10, 30)  # only process ZIPs newer than this
+MACHINES = [
+    "Press 5",
+    "Press 14",
+]
+
+CUTOFF_DATE = datetime(2025, 10, 30)
 
 
 def extract_all():
-    """Loop through all zip files in DATA_DIR and insert into DB."""
-    for root, _, files in os.walk(DATA_DIR):
-        for fname in files:
+    for machine_name in MACHINES:
+        machine_dir = DATA_DIR / machine_name
+
+        if not machine_dir.exists():
+            print(f"⚠️ Skipping {machine_name}: folder not found -> {machine_dir}")
+            continue
+
+        for fname in os.listdir(machine_dir):
             if not fname.lower().endswith(".zip"):
                 continue
 
-            # --- Extract date from filename (format: YYYY-MM-DD_...) ---
             try:
                 date_part = fname.split("_")[0]
                 file_date = datetime.strptime(date_part, "%Y-%m-%d")
@@ -23,20 +33,15 @@ def extract_all():
                 print(f"⚠️ Skipping {fname}: could not parse date from filename.")
                 continue
 
-            # --- Skip if before cutoff ---
             if file_date < CUTOFF_DATE:
                 print(f"⏩ Skipping {fname}: {file_date.date()} < cutoff {CUTOFF_DATE.date()}")
                 continue
 
-            zip_path = os.path.join(root, fname)
-            print(f"📦 Processing {zip_path} ...")
+            zip_path = machine_dir / fname
+            print(f"📦 Processing {zip_path} for {machine_name} ...")
+
             try:
-                extract_one(zip_path)
-
-                # Uncomment if you want to delete files after processing
-                # os.remove(zip_path)
-                # print(f"🗑️ Deleted {zip_path} after successful import")
-
+                extract_one(str(zip_path), machine_name)
             except Exception as e:
                 print(f"❌ Failed on {zip_path}: {e}")
 

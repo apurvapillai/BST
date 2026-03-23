@@ -22,21 +22,11 @@ from db.models import (
     RLMMonitoring,
 )
 
-# ---------------------------
-# Configuration
-# ---------------------------
-
-MACHINE_NAME = "Press 5"  # must exist in your DB
-
 # Flask static root
 STATIC_ROOT = os.path.join("dashboard", "static")
-# Images live under: dashboard/static/images/<MACHINE_NAME>/<YYYY-MM-DD>/{defects,reference}/...
+# Images live under: dashboard/static/images/<machine_name>/<YYYY-MM-DD>/{defects,reference}/...
 DASHBOARD_IMG_DIR = os.path.join(STATIC_ROOT, "images")
 
-
-# ---------------------------
-# Helpers
-# ---------------------------
 
 def _ensure_day_dirs(machine_name: str, date_str: str) -> Dict[str, str]:
     """
@@ -52,7 +42,6 @@ def _ensure_day_dirs(machine_name: str, date_str: str) -> Dict[str, str]:
 
 
 def parse_datetime(date_str: str, time_str: str) -> datetime:
-    """Parse 'YYYY-MM-DD' + 'HH:MM:SS' into a datetime."""
     return datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M:%S")
 
 
@@ -76,7 +65,6 @@ def attr_as_float(node: Optional[ET.Element], attr: str) -> Optional[float]:
 
 
 def parse_float_list(text: Optional[str]) -> Optional[List[float]]:
-    """Turn a comma/space separated string into a list of floats."""
     if not text:
         return None
     floats: List[float] = []
@@ -92,10 +80,6 @@ def parse_float_list(text: Optional[str]) -> Optional[List[float]]:
 
 
 def safe_join_relpath(abs_path: str, static_root: str = STATIC_ROOT) -> str:
-    """
-    Return a path suitable for Flask's url_for('static', filename=...).
-    Converts absolute file path under dashboard/static into a relative "static" path.
-    """
     return os.path.relpath(abs_path, start=static_root).replace("\\", "/")
 
 
@@ -104,11 +88,6 @@ def build_intervals(
     final_end_time: Optional[datetime],
     final_end_format: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
-    """
-    Given events (each with time, format, phase), return time-ranged intervals.
-    Each event: {"phase": str, "time": datetime, "format": Optional[float], "refimgid": Optional[str]}
-    Intervals are [this.time, next.time); last interval ends at final_end_time / final_end_format.
-    """
     if not events:
         return []
     events_sorted = sorted(events, key=lambda e: e["time"])
@@ -140,14 +119,12 @@ def build_intervals(
 
 
 def dict_from_element(el: ET.Element) -> Dict[str, Any]:
-    """
-    Convert an XML element (1-level children) to a python dict capturing attributes/text.
-    Useful for storing RLM config/tolerances as JSON without overfitting schema.
-    """
     data: Dict[str, Any] = {"_tag": el.tag, "_attrs": dict(el.attrib)}
     children = []
     for child in el:
-        children.append({"_tag": child.tag, "_attrs": dict(child.attrib), "_text": (child.text or "").strip()})
+        children.append(
+            {"_tag": child.tag, "_attrs": dict(child.attrib), "_text": (child.text or "").strip()}
+        )
     if children:
         data["_children"] = children
     else:
@@ -155,52 +132,36 @@ def dict_from_element(el: ET.Element) -> Dict[str, Any]:
     return data
 
 
-# ---------------------------
-# Core
-# ---------------------------
-
-def extract_one(zip_path: str):
+def extract_one(zip_path: str, machine_name: str):
     """
-    Extract a single report ZIP:
-      - Parse report.xml
-      - Insert Reel, SensitivitySet (only sId_mmx_stand), Defects (+copy images)
-      - Save Reference Images (+copy)
-      - Write InspectionPhase intervals from statusprotocol
-      - Capture Masks (sId_mmx_noinsp + noinspection="true")
-      - Parse RLM module (config, phases, monitoring)
+    Extract one report ZIP for a specific machine.
     """
     tmp_dir = tempfile.mkdtemp(prefix="bst_")
 
     try:
-        # 1) Unzip
         with zipfile.ZipFile(zip_path, "r") as zf:
             xml_name_candidates = [n for n in zf.namelist() if n.lower().endswith("report.xml")]
             if not xml_name_candidates:
                 print(f"⚠️ No report.xml found in {zip_path}. Skipping.")
                 return
-            xml_name = xml_name_candidates[0]
 
-            # Extract XML
+            xml_name = xml_name_candidates[0]
             zf.extract(xml_name, tmp_dir)
             xml_path = os.path.join(tmp_dir, xml_name)
 
-            # Extract all images to tmp (both defects and reference images)
             for member in zf.namelist():
                 lower = member.lower()
                 if lower.endswith(".jpg") or lower.endswith(".jpeg") or lower.endswith(".png"):
                     zf.extract(member, tmp_dir)
 
-        # 2) Parse XML
         tree = ET.parse(xml_path)
         root = tree.getroot()
 
-        # Order / job
         order_node = root.find("order")
         job_node = root.find("order/job")
         order_number = order_node.attrib.get("number") if order_node is not None else None
         job_name = job_node.attrib.get("name") if job_node is not None else None
 
-        # Reel code (root is <reel ...>)
         reel_code = None
         if root.tag.endswith("reel"):
             reel_code = root.attrib.get("id")
@@ -209,11 +170,9 @@ def extract_one(zip_path: str):
             if reel_node is not None:
                 reel_code = reel_node.attrib.get("id")
 
-        # Whole-file format dims
         format_length = text_as_float(root.find("order/job/formatlength"))
         format_width = text_as_float(root.find("order/job/formatwidth"))
 
-        # Production window and reel format edges
         reelstart_node = root.find("production/reelstart")
         reelend_node = root.find("production/reelend")
         reel_start = attr_as_float(reelstart_node, "format")
@@ -227,14 +186,11 @@ def extract_one(zip_path: str):
         time_start = parse_datetime(start_node.attrib["date"], start_node.attrib["time"])
         time_end = parse_datetime(end_node.attrib["date"], end_node.attrib["time"])
 
-        # 3) DB work
         with Session(engine) as session:
-            # Machine
-            machine = session.query(Machine).filter_by(name=MACHINE_NAME).first()
+            machine = session.query(Machine).filter_by(name=machine_name).first()
             if not machine:
-                raise ValueError(f"Machine {MACHINE_NAME} not found in DB")
+                raise ValueError(f"Machine {machine_name} not found in DB")
 
-            # Duplicate reel guard
             exists = session.query(Reel).filter_by(
                 machine_id=machine.machine_id,
                 order_number=order_number,
@@ -245,10 +201,11 @@ def extract_one(zip_path: str):
                 time_end=time_end,
             ).first()
             if exists:
-                print(f"⚠️ Reel already exists (machine={MACHINE_NAME}, order={order_number}, job={job_name}). Skipping insert.")
+                print(
+                    f"⚠️ Reel already exists (machine={machine_name}, order={order_number}, job={job_name}). Skipping insert."
+                )
                 return
 
-            # Insert Reel
             reel = Reel(
                 machine_id=machine.machine_id,
                 reel_code=reel_code,
@@ -262,25 +219,19 @@ def extract_one(zip_path: str):
                 format_width=format_width,
             )
             session.add(reel)
-            session.commit()  # get reel_id
+            session.commit()
 
-            # ---------------------------
-            # Prepare per-machine/day image folders
-            # ---------------------------
             date_str = time_start.strftime("%Y-%m-%d")
-            img_dirs = _ensure_day_dirs(MACHINE_NAME, date_str)
+            img_dirs = _ensure_day_dirs(machine_name, date_str)
             DEFECT_IMG_DIR = img_dirs["defects"]
             REFERENCE_IMG_DIR = img_dirs["reference"]
 
-            # ---------------------------
-            # Sensitivity Sets (standard only)
-            # ---------------------------
             for sset in root.findall("inspection/sensitivitysets/set"):
                 set_name = sset.attrib.get("id")
                 if set_name != "sId_mmx_stand":
                     continue
 
-                is_standard = (sset.attrib.get("standard") == "true")
+                is_standard = sset.attrib.get("standard") == "true"
                 for val in sset.findall("value"):
                     defect_class = val.attrib.get("name")
                     warn = float(val.attrib.get("warnthres", "0") or 0)
@@ -297,9 +248,6 @@ def extract_one(zip_path: str):
                         )
                     )
 
-            # ---------------------------
-            # Defects (+copy images)
-            # ---------------------------
             for defect in root.findall(".//defect"):
                 class_node = defect.find("class")
                 class_name = class_node.attrib.get("name") if class_node is not None else None
@@ -309,7 +257,6 @@ def extract_one(zip_path: str):
                 defect_time = parse_datetime(defect.attrib["date"], defect.attrib["time"])
                 format_position = float(defect.attrib.get("format", 0) or 0)
 
-                # Image (if present)
                 image_src_rel = None
                 img_node = defect.find("image")
                 if img_node is not None:
@@ -342,24 +289,14 @@ def extract_one(zip_path: str):
                     )
                 )
 
-            # ---------------------------
-            # Reference Images (+copy)
-            # ---------------------------
             ref_entries: List[Dict[str, str]] = []
 
-            # XML-declared references
             for ref_node in root.findall(".//reference_images/*"):
                 attrs = dict(ref_node.attrib)
-                path = (
-                    attrs.get("src")
-                    or attrs.get("href")
-                    or attrs.get("file")
-                    or attrs.get("name")
-                )
+                path = attrs.get("src") or attrs.get("href") or attrs.get("file") or attrs.get("name")
                 if path:
                     ref_entries.append({"path": path.replace("../", "").replace("\\", "/")})
 
-            # Fallback: scan tmp for filenames containing "reference"
             if not ref_entries:
                 for root_dir, _, files in os.walk(tmp_dir):
                     for fn in files:
@@ -368,7 +305,6 @@ def extract_one(zip_path: str):
                             rel = os.path.relpath(os.path.join(root_dir, fn), start=tmp_dir).replace("\\", "/")
                             ref_entries.append({"path": rel})
 
-            # Copy and insert
             seen_ref_basenames = set()
             for ref in ref_entries:
                 src_path = os.path.join(tmp_dir, ref["path"])
@@ -391,18 +327,15 @@ def extract_one(zip_path: str):
                     )
                 )
 
-            # ---------------------------
-            # Inspection statusprotocol → phases
-            # ---------------------------
             status_events = []
             for st in root.findall("inspection/statusprotocol/*"):
-                phase = st.tag  # inactive / active / learn / ...
+                phase = st.tag
                 try:
                     start_time = parse_datetime(st.attrib["date"], st.attrib["time"])
                 except Exception:
                     continue
                 fmt = attr_as_float(st, "format")
-                refimgid = st.attrib.get("refimgid")  # sometimes on <active ...>
+                refimgid = st.attrib.get("refimgid")
                 status_events.append(
                     {"phase": phase, "time": start_time, "format": fmt, "refimgid": refimgid}
                 )
@@ -421,11 +354,7 @@ def extract_one(zip_path: str):
                     )
                 )
 
-            # ---------------------------
-            # Masks (sId_mmx_noinsp + noinspection=true)
-            # ---------------------------
             for m in root.findall(".//masks//mask"):
-                # Attributes may be directly on <mask> or nested under a <properties> node
                 props = dict(m.attrib)
                 prop_node = m.find(".//properties")
                 if prop_node is not None:
@@ -464,18 +393,13 @@ def extract_one(zip_path: str):
                     )
                 )
 
-            # ---------------------------
-            # RLM module (repeat length monitoring)
-            # ---------------------------
             rlm = root.find(".//rlmmodule")
             if rlm is not None:
-                # 1) Config/tolerances → JSON
                 cfg: Dict[str, Any] = {"_tag": rlm.tag, "_attrs": dict(rlm.attrib)}
                 for child in rlm:
                     cfg[child.tag] = dict_from_element(child)
                 session.add(RLMConfig(reel_id=reel.reel_id, config_json=cfg))
 
-                # 2) RLM phases (active/inactive intervals)
                 rlm_status_events = []
                 for st in rlm.findall(".//statusprotocol/*"):
                     phase = st.tag
@@ -499,16 +423,14 @@ def extract_one(zip_path: str):
                         )
                     )
 
-                # 3) RLM monitoring points (<monitorings><monpoint .../></monitorings>)
                 for mon in rlm.findall(".//monitorings/*"):
                     _insert_rlm_monitor_if_possible(mon, session, reel.reel_id)
 
-            # Commit everything
             session.commit()
-            print(f"✅ Inserted Reel {reel.reel_id} ({order_number}/{job_name}) and all related data.")
+            print(f"✅ Inserted Reel {reel.reel_id} ({machine_name}: {order_number}/{job_name}) and all related data.")
 
     except Exception as e:
-        print(f"❌ Failed on {zip_path}: {e}")
+        print(f"❌ Failed on {zip_path} for {machine_name}: {e}")
         raise
     finally:
         try:
@@ -518,10 +440,6 @@ def extract_one(zip_path: str):
 
 
 def _insert_rlm_monitor_if_possible(node: ET.Element, session: Session, reel_id: int):
-    """
-    Parse and insert one RLMMonitoring row from a node (<monpoint .../>).
-    Needs: date, time. Reads curlength/webspeed (aliases allowed).
-    """
     attrs = node.attrib
     date_str = attrs.get("date")
     time_str = attrs.get("time")
@@ -559,6 +477,5 @@ def _insert_rlm_monitor_if_possible(node: ET.Element, session: Session, reel_id:
 
 
 if __name__ == "__main__":
-    # Local quick test (adjust path as needed)
-    test_file = "data/2025-09-16_23-32_903286_11.zip"
-    extract_one(test_file)
+    test_file = "data/Press 5/2025-09-16_23-32_903286_11.zip"
+    extract_one(test_file, "Press 5")
