@@ -30,4 +30,5 @@ dashboard/static/images/**
 Thumbs.db
 
 # ---- Sync state ----
-data/.sync_state.json
+data/Press 5/.sync_state.json
+data/Press 14/.sync_state.json

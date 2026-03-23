@@ -51,7 +51,7 @@ def create_app() -> Flask:
 
     # Logging
     setup_logging(app)
-    app.logger.info("🚀 Flask app started")
+    app.logger.info("Flask app started")
     app.logger.info(f"Templates: {app.template_folder}")
     app.logger.info(f"Static dir: {app.static_folder} -> served at {app.static_url_path}")
 
@@ -61,4 +61,4 @@ def create_app() -> Flask:
 if __name__ == "__main__":
     app = create_app()
     # Bind to your LAN IP as requested
-    app.run(host="127.0.0.1", port=8000, debug=True)
+    app.run(host="10.8.10.220", port=8000, debug=True)
