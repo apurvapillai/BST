@@ -841,28 +841,25 @@ function renderHistory() {
 
 function initFilters() {
   filterControls.root = document.getElementById("rlmFilters");
-  if (!filterControls.root) return;
+  if (!filterControls.root) {
+    state.selectedMachineId = null;
+    state.selectedSeverity = null;
+    state.selectedAlertType = null;
+    state.filterStartRaw = "";
+    state.filterEndRaw = "";
+    renderAll();
+    return;
+  }
   filterControls.machine = document.getElementById("rlmFilterMachine");
   filterControls.start = document.getElementById("rlmFilterStart");
   filterControls.end = document.getElementById("rlmFilterEnd");
   filterControls.severity = document.getElementById("rlmFilterSeverity");
   filterControls.alertType = document.getElementById("rlmFilterAlertType");
-  filterControls.chips = document.getElementById("rlmFilterChips");
-  filterControls.applyButtons = [document.getElementById("rlmFiltersApply"), document.getElementById("rlmFiltersRun")].filter(Boolean);
-  filterControls.clearButton = document.getElementById("rlmFiltersClear");
   filters.defaults.machineId = parseMachineId(filterControls.root.dataset.defaultMachine || "");
   filters.defaults.start = normalizeDateTimeInput(filterControls.root.dataset.defaultStart || "");
   filters.defaults.end = normalizeDateTimeInput(filterControls.root.dataset.defaultEnd || "", "23:59");
   hydrateFilterStateFromStore();
   syncFilterInputs();
-  filterControls.applyButtons.forEach(btn => btn.addEventListener("click", () => applyFilters()));
-  if (filterControls.clearButton) {
-    filterControls.clearButton.addEventListener("click", resetFilters);
-  }
-  if (filterControls.chips) {
-    filterControls.chips.addEventListener("click", handleFilterChipClick);
-  }
-  renderFilterChips();
   applyFilters({ skipInputRead: true, skipRender: true });
 }
 

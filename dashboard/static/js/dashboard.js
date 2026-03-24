@@ -123,7 +123,6 @@
 
   function initTabs() {
     // normalizeDashboardUrl(); // disabled to preserve incoming hashes
-    updateSidebarHighlight("overview");
     bindTabNav();
     setupJobModal();
     Filters.init();
@@ -140,6 +139,11 @@
     Router.register("heatmap", HeatmapTab);
     Router.init();
     resolveDeferredTab();
+    const initialTab = typeof Router.current === "function" ? Router.current() : "overview";
+    if (initialTab) {
+      updateSidebarHighlight(initialTab);
+      setRequiresJobClass(initialTab);
+    }
     window.addEventListener("dashboard:tab-change", (event) => {
       const tab = event && event.detail && event.detail.tab;
       if (tab) {

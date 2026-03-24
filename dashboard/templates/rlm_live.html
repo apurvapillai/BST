@@ -17,64 +17,6 @@
         {% set header_title = 'Repeat Length Monitoring · Live Dashboard' %}
         {% include 'partials/app_header.html' %}
         <div class="rlm-live-shell">
-        <div class="filters filters--with-header" id="rlmFilters"
-             data-default-machine="{{ default_machine_id or '' }}"
-             data-default-start="{{ default_start_value or '' }}"
-             data-default-end="{{ default_end_value or '' }}">
-          <div class="filters-header">
-            <div>
-              <p class="kpi-section__title">Global Filters</p>
-              <small>Dial in on a specific press, alert severity, or time window. These filters control the live alerts below.</small>
-            </div>
-            <button type="button" class="filters-clear-btn" id="rlmFiltersApply">Apply Filters</button>
-          </div>
-          <div class="filters-body">
-            <div class="filter-grid">
-              <div class="filter-card">
-                <label for="rlmFilterMachine">Machine</label>
-                <select id="rlmFilterMachine">
-                  <option value="">All presses</option>
-                  {% for machine in machines %}
-                  <option value="{{ machine.machine_id }}" {% if machine.machine_id == default_machine_id %}selected{% endif %}>
-                    {{ machine.machine_name }}
-                  </option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="filter-card">
-                <label for="rlmFilterStart">Start</label>
-                <input type="datetime-local" id="rlmFilterStart" value="{{ default_start_value or '' }}">
-              </div>
-              <div class="filter-card">
-                <label for="rlmFilterEnd">End</label>
-                <input type="datetime-local" id="rlmFilterEnd" value="{{ default_end_value or '' }}">
-              </div>
-              <div class="filter-card">
-                <label for="rlmFilterSeverity">Severity</label>
-                <select id="rlmFilterSeverity">
-                  <option value="">All severity</option>
-                  <option value="info">Info</option>
-                  <option value="warning">Warning</option>
-                  <option value="critical">Critical</option>
-                </select>
-              </div>
-              <div class="filter-card">
-                <label for="rlmFilterAlertType">Alert Type</label>
-                <select id="rlmFilterAlertType">
-                  <option value="">All alert types</option>
-                  {% for alert in alert_type_choices %}
-                  <option value="{{ alert.value }}">{{ alert.label }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="filter-card filter-card--actions">
-                <button type="button" class="btn" id="rlmFiltersRun">Refresh Live View</button>
-                <button type="button" class="filters-clear-btn filters-clear-btn--ghost" id="rlmFiltersClear">Reset</button>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="filter-chips hidden" id="rlmFilterChips"></div>
 
         <header class="topbar">
           <div>
