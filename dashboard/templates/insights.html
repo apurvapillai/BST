@@ -4,44 +4,64 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Process BST — Insights & Comparisons</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/insights.css') }}">
   <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <script src="{{ url_for('static', filename='js/filter_state.js') }}"></script>
 </head>
 <body>
-  <header class="insights-header">
-    <div class="brand">
-      <span class="eyebrow">Process BST Module</span>
-      <h1>Insights &amp; Comparisons</h1>
-    </div>
-  </header>
+  <div class="app-layout">
+    {% include 'partials/sidebar.html' %}
+    <div class="app-main">
+      <div class="app-shell">
+        {% set header_eyebrow = 'ProcessGuard AI - Five Star Management' %}
+        {% set header_title = 'Insights & Comparisons' %}
+        {% include 'partials/app_header.html' %}
 
-  <main class="insights-page" id="insightsApp">
-    <section class="insights-panel">
-      <div class="panel-header">
-        <h2>Analysis Filters</h2>
+        <main class="insights-page" id="insightsApp">
+    <div class="filters filters--with-header" id="insightsFilters">
+      <div class="filters-header">
+        <div>
+          <p class="kpi-section__title">Global Filters</p>
+          <small>Pick a machine, date range, and base selections for analysis.</small>
+        </div>
+        <button type="button" class="filters-clear-btn" id="insightsClear">Run Comparison</button>
       </div>
-      <div class="insights-filters">
-        <div class="filter-card">
-          <label for="insightsStart">Start Date</label>
-          <input type="datetime-local" id="insightsStart">
-        </div>
-        <div class="filter-card">
-          <label for="insightsEnd">End Date</label>
-          <input type="datetime-local" id="insightsEnd">
-        </div>
-        <div class="filter-card">
-          <label for="insightsPrimary">Primary Selection</label>
-          <select id="insightsPrimary"></select>
-        </div>
-        <div class="filter-card">
-          <label for="insightsSecondary">Comparison Selection</label>
-          <select id="insightsSecondary"></select>
-        </div>
-        <div class="filter-actions">
-          <button type="button" class="btn" id="insightsApply">Run Comparison</button>
+      <div class="filters-body">
+        <div class="filter-grid">
+          <div class="filter-card">
+            <label for="insightsMachine">Machine</label>
+            <select id="insightsMachine">
+              {% for m in machines %}
+              <option value="{{ m.machine_id }}" {% if m.machine_id == default_machine_id %}selected{% endif %}>
+                {{ m.name }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="filter-card">
+            <label for="insightsStart">Start Date</label>
+            <input type="datetime-local" id="insightsStart">
+          </div>
+          <div class="filter-card">
+            <label for="insightsEnd">End Date</label>
+            <input type="datetime-local" id="insightsEnd">
+          </div>
+          <div class="filter-card">
+            <label for="insightsPrimary">Primary Selection</label>
+            <select id="insightsPrimary"></select>
+          </div>
+          <div class="filter-card">
+            <label for="insightsSecondary">Comparison Selection</label>
+            <select id="insightsSecondary"></select>
+          </div>
+          <div class="filter-card filter-card--actions">
+            <button type="button" class="btn" id="insightsApply">Run Comparison</button>
+          </div>
         </div>
       </div>
-    </section>
+    </div>
+    <div class="filter-chips hidden" id="insightsFilterChips"></div>
 
     <section class="insights-panel">
       <div class="panel-header">
@@ -100,13 +120,17 @@
         <div id="insightsCumulativeByType" class="cumulative-types"></div>
       </div>
     </section>
-  </main>
+        </main>
+      </div> <!-- /.app-shell -->
+    </div> <!-- /.app-main -->
+  </div> <!-- /.app-layout -->
 
   <div class="insights-loading hidden" id="insightsLoading">
     <div class="insights-loading__spinner"></div>
     <div class="insights-loading__text">Loading comparison…</div>
   </div>
 
+  <script src="{{ url_for('static', filename='js/nav.js') }}"></script>
   <script src="{{ url_for('static', filename='js/insights.js') }}"></script>
 </body>
 </html>

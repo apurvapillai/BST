@@ -1,16 +1,49 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 from flask import Blueprint, jsonify, render_template, request
 
 from services.rlm_live_service import RLMLiveService
+from db.rlm_connection import RLMSessionLocal
+from db.rlm_models import RLMMachine
 
 rlm_live_bp = Blueprint("rlm_live", __name__)
 service = RLMLiveService()
 
+ALERT_TYPE_CHOICES = [
+    {"value": "BAD_DELTA_REEL", "label": "Bad Reel / Repeat Length"},
+    {"value": "ZERO_MONITORING", "label": "Zero Monitoring"},
+    {"value": "LOW_MONITORING_DENSITY", "label": "Low Monitoring Density"},
+    {"value": "ROLLING_BAD_FEET", "label": "Rolling Bad Feet %"},
+    {"value": "ROLLING_OOB_POINTS", "label": "Rolling OOB %"},
+    {"value": "ROLLING_DELTA_DEVIATION", "label": "Rolling Delta Deviation"},
+    {"value": "CONSECUTIVE_BAD_REELS", "label": "Consecutive Bad Reels"},
+    {"value": "WEBSPEED_CONTRIBUTION", "label": "Webspeed Contribution"},
+]
+
 
 @rlm_live_bp.route("/")
 def live_home():
-    return render_template("rlm_live.html")
+    with RLMSessionLocal() as session:
+        machines = session.query(RLMMachine).order_by(RLMMachine.machine_name.asc()).all()
+    default_machine = next((m for m in machines if (m.machine_name or "").lower() == "press 5"), machines[0] if machines else None)
+    default_machine_id = default_machine.machine_id if default_machine else None
+    now = datetime.utcnow()
+    default_end = now.replace(second=0, microsecond=0)
+    default_start = (default_end - timedelta(hours=6)).replace(second=0, microsecond=0)
+
+    def _fmt(dt: datetime) -> str:
+        return dt.strftime("%Y-%m-%dT%H:%M")
+
+    return render_template(
+        "rlm_live.html",
+        machines=machines,
+        default_machine_id=default_machine_id,
+        default_start_value=_fmt(default_start),
+        default_end_value=_fmt(default_end),
+        alert_type_choices=ALERT_TYPE_CHOICES,
+    )
 
 
 @rlm_live_bp.route("/api/overview")

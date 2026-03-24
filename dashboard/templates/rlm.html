@@ -4,90 +4,72 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Repeat Length Monitoring</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/nav.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/rlm.css') }}">
   <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <script src="{{ url_for('static', filename='js/filter_state.js') }}"></script>
 </head>
-<body>
-  {% set nav_rlm_active = request.path.startswith('/rlm') %}
-  <nav class="pg-nav">
-    <div class="pg-nav__inner">
-      <a href="/dashboard" class="pg-nav__brand" aria-label="ProcessGuard Vision">
-        <span class="pg-nav__logo">PG</span>
-        <span class="pg-nav__brand-text">
-          <span class="pg-nav__eyebrow">ProcessGuard</span>
-          <span class="pg-nav__title">Operations Suite</span>
-        </span>
-      </a>
-      <button class="pg-nav__toggle" type="button" aria-expanded="false" aria-label="Open navigation">
-        Menu
-        <span class="pg-nav__toggle-bars" aria-hidden="true">
-          <span></span><span></span><span></span>
-        </span>
-      </button>
-      <div class="pg-nav__links">
-        <a href="/dashboard" class="pg-nav__link {% if request.path.startswith('/dashboard') %}pg-nav__link--active{% endif %}">Operations Dashboard</a>
-        <a href="/rlm" class="pg-nav__link {% if nav_rlm_active %}pg-nav__link--active{% endif %}">Repeat Length Monitoring</a>
-      </div>
-    </div>
-  </nav>
-  <div class="app-shell">
-    <header class="app-header">
-      <img
-        src="{{ url_for('static', filename='images/ProcessGuard_Logo.png') }}"
-        alt="ProcessGuard Vision logo"
-        class="app-logo"
-      >
-      <div class="app-title">
-        <p class="app-title__eyebrow">ProcessGuard AI - Five Star Management</p>
-        <h1>ProcessGuard Vision · Repeat Length Module</h1>
-      </div>
-    </header>
+<body class="rlm-page">
+  <div class="app-layout">
+    {% include 'partials/sidebar.html' %}
+    <div class="app-main">
+      <div class="app-shell">
+        {% set header_eyebrow = 'ProcessGuard AI - Five Star Management' %}
+        {% set header_title = 'ProcessGuard Vision · Repeat Length Module' %}
+        {% include 'partials/app_header.html' %}
 
-    <main id="rlmApp"
-          data-default-start="{{ default_start_str }}"
-          data-default-end="{{ default_end_str }}"
-          data-default-machine="{{ default_machine_id if default_machine_id else '' }}">
-    <section class="rlm-hero-grid">
-      <div class="rlm-panel rlm-panel--filters">
-        <div class="panel-header">
-          <h2>Filters</h2>
-        </div>
-        <div class="filters-grid">
-          <div class="filter-control">
-            <label for="rlmMachine">Machine</label>
-            <select id="rlmMachine">
-              {% for machine in machines %}
-              <option value="{{ machine.machine_id }}" {% if machine.machine_id == default_machine_id %}selected{% endif %}>
-                {{ machine.machine_name }}
-              </option>
-              {% endfor %}
-            </select>
+        <main class="rlm-app"
+              data-rlm-app="true"
+              data-default-start="{{ default_start_str }}"
+              data-default-end="{{ default_end_str }}"
+              data-default-machine="{{ default_machine_id if default_machine_id else '' }}">
+          <div class="filters filters--with-header" id="rlmFilters"
+               data-default-machine="{{ default_machine_id if default_machine_id else '' }}"
+               data-default-start="{{ default_start_str }}"
+               data-default-end="{{ default_end_str }}">
+            <div class="filters-header">
+              <div>
+                <p class="kpi-section__title">Global Filters</p>
+                <small>Pick a press, time window, and optional job context to drive the RLM panels below.</small>
+              </div>
+              <button type="button" id="rlmRefresh" class="filters-clear-btn">Apply Filters</button>
+            </div>
+            <div class="filters-body">
+              <div class="filter-grid">
+                <div class="filter-card">
+                  <label for="rlmMachine">Machine</label>
+                  <select id="rlmMachine">
+                    {% for machine in machines %}
+                    <option value="{{ machine.machine_id }}" {% if machine.machine_id == default_machine_id %}selected{% endif %}>
+                      {{ machine.machine_name }}
+                    </option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="filter-card">
+                  <label for="rlmStart">Start date</label>
+                  <input type="date" id="rlmStart" value="{{ default_start_str }}">
+                </div>
+                <div class="filter-card">
+                  <label for="rlmEnd">End date</label>
+                  <input type="date" id="rlmEnd" value="{{ default_end_str }}">
+                </div>
+                <div class="filter-card">
+                  <label for="rlmJob">Job</label>
+                  <select id="rlmJob">
+                    <option value="">All</option>
+                  </select>
+                </div>
+                <div class="filter-card">
+                  <label for="rlmMinFeet">Min reel feet</label>
+                  <input type="number" id="rlmMinFeet" min="0" step="10" placeholder="e.g. 1000">
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="filter-control">
-            <label for="rlmStart">Start date</label>
-            <input type="date" id="rlmStart" value="{{ default_start_str }}">
-          </div>
-          <div class="filter-control">
-            <label for="rlmEnd">End date</label>
-            <input type="date" id="rlmEnd" value="{{ default_end_str }}">
-          </div>
-        <div class="filter-control">
-          <label for="rlmJob">Job / Reel</label>
-          <select id="rlmJob">
-            <option value="">Add job filter…</option>
-          </select>
-        </div>
-        <div class="filter-control">
-          <label for="rlmMinFeet">Min reel feet</label>
-          <input type="number" id="rlmMinFeet" min="0" step="10" placeholder="e.g. 1000">
-        </div>
-        <div class="filter-control filter-action">
-          <button type="button" id="rlmRefresh" class="btn">Submit</button>
-        </div>
-        <div class="job-chips hidden" id="rlmJobChips"></div>
-      </div>
-      </div>
+          <div class="filter-chips hidden" id="rlmFilterChips"></div>
+
+          <section class="rlm-hero-grid">
       <div class="rlm-panel rlm-panel--summary">
         <div class="panel-header">
           <h2>Summary</h2>
@@ -493,8 +475,11 @@
       </div>
     </section>
 
-  </main>
-  </div>
+        </main>
+      </div> <!-- /.app-shell -->
+    </div> <!-- /.app-main -->
+  </div> <!-- /.app-layout -->
+
   <div id="rlmLoading" class="rlm-loading hidden">
     <div class="rlm-spinner"></div>
     <p>Loading RLM data…</p>

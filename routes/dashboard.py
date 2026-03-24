@@ -585,10 +585,11 @@ def _build_review_summary_payload(
 
     latest_review_subq = (
         session.query(
-            ReelReview.reel_code.label("reel_code"),
+            ReelReview.reel_id.label("reel_id"),
             func.max(ReelReview.review_id).label("max_id"),
         )
-        .group_by(ReelReview.reel_code)
+        .filter(ReelReview.reel_id.isnot(None))
+        .group_by(ReelReview.reel_id)
         .subquery()
     )
     review_query = (
@@ -601,8 +602,7 @@ def _build_review_summary_payload(
         )
         .join(
             latest_review_subq,
-            collate(Reel.reel_code, "utf8mb4_unicode_ci")
-            == collate(latest_review_subq.c.reel_code, "utf8mb4_unicode_ci"),
+            Reel.reel_id == latest_review_subq.c.reel_id,
         )
         .join(ReelReview, ReelReview.review_id == latest_review_subq.c.max_id)
         .filter(ReelReview.decision.in_(("pass", "fail")))
@@ -1060,8 +1060,7 @@ def _reel_status_overview(
         session.query(Reel.reel_id, ReelReview.decision)
         .join(
             latest_review_subq,
-            collate(Reel.reel_code, "utf8mb4_unicode_ci")
-            == collate(latest_review_subq.c.reel_code, "utf8mb4_unicode_ci"),
+            Reel.reel_id == latest_review_subq.c.reel_id,
         )
         .join(ReelReview, ReelReview.review_id == latest_review_subq.c.max_id)
         .filter(Reel.reel_id.in_(reel_ids))
@@ -1394,7 +1393,6 @@ def api_filters():
             ).all()
         )
         reel_ids = [row.reel_id for row in status_rows if row.reel_id is not None]
-        reel_codes = [row.reel_code for row in status_rows if row.reel_code]
         defect_counts: Dict[int, int] = {}
         if reel_ids:
             defect_counts = {
@@ -1406,22 +1404,22 @@ def api_filters():
                     .all()
                 )
             }
-        latest_reviews: Dict[str, Optional[str]] = {}
-        if reel_codes:
+        latest_reviews: Dict[int, Optional[str]] = {}
+        if reel_ids:
             latest_review_subq = (
                 session.query(
-                    ReelReview.reel_code.label("reel_code"),
+                    ReelReview.reel_id.label("reel_id"),
                     func.max(ReelReview.review_id).label("max_id"),
                 )
-                .filter(ReelReview.reel_code.in_(reel_codes))
-                .group_by(ReelReview.reel_code)
+                .filter(ReelReview.reel_id.in_(reel_ids))
+                .group_by(ReelReview.reel_id)
                 .subquery()
             )
             latest_reviews = {
-                code: decision
-                for code, decision in (
+                reviewed_reel_id: decision
+                for reviewed_reel_id, decision in (
                     session.query(
-                        latest_review_subq.c.reel_code,
+                        latest_review_subq.c.reel_id,
                         ReelReview.decision,
                     )
                     .join(
@@ -1440,7 +1438,7 @@ def api_filters():
             if reel_id is None:
                 continue
             defect_total = int(defect_counts.get(reel_id, 0))
-            decision = (latest_reviews.get(row.reel_code or "", "") or "").strip().lower()
+            decision = (latest_reviews.get(reel_id, "") or "").strip().lower()
             if defect_total == 0:
                 status = "no_defects"
             elif decision in {"pass", "fail"}:
@@ -2685,20 +2683,20 @@ def api_job_explorer():
                 break
 
         REVIEW_DECISION_COLLATION = "utf8mb4_unicode_ci"
-        review_code_expr = ReelReview.reel_code.collate(REVIEW_DECISION_COLLATION)
         latest_review_subq = (
             session.query(
-                review_code_expr.label("lrr_code"),
+                ReelReview.reel_id.label("lrr_reel_id"),
                 func.max(ReelReview.review_id).label("lrr_review_id"),
             )
-            .group_by(review_code_expr)
+            .filter(ReelReview.reel_id.isnot(None))
+            .group_by(ReelReview.reel_id)
             .subquery()
         )
 
         base_query = (
             base_query.outerjoin(
                 latest_review_subq,
-                Reel.reel_code.collate(REVIEW_DECISION_COLLATION) == latest_review_subq.c.lrr_code,
+                Reel.reel_id == latest_review_subq.c.lrr_reel_id,
             )
             .outerjoin(
                 ReelReview,
@@ -2738,19 +2736,18 @@ def api_job_explorer():
         )
 
         baseline_cache: Dict[Tuple[str, str], Optional[Reel]] = {}
-        reel_code_to_review: Dict[str, ReelReview] = {}
-        reel_codes = [reel.reel_code for reel in reels if reel and reel.reel_code]
-        if reel_codes:
+        reel_id_to_review: Dict[int, ReelReview] = {}
+        reel_ids = [reel.reel_id for reel in reels if reel and reel.reel_id]
+        if reel_ids:
             review_rows = (
                 session.query(ReelReview)
-                .filter(ReelReview.reel_code.in_(reel_codes))
-                .order_by(ReelReview.reel_code.asc(), ReelReview.created_at.desc(), ReelReview.review_id.desc())
+                .filter(ReelReview.reel_id.in_(reel_ids))
+                .order_by(ReelReview.reel_id.asc(), ReelReview.created_at.desc(), ReelReview.review_id.desc())
                 .all()
             )
             for review in review_rows:
-                code = review.reel_code
-                if code and code not in reel_code_to_review:
-                    reel_code_to_review[code] = review
+                if review.reel_id and review.reel_id not in reel_id_to_review:
+                    reel_id_to_review[review.reel_id] = review
         items: List[Dict[str, object]] = []
 
         for reel in reels:
@@ -2850,7 +2847,7 @@ def api_job_explorer():
                 if _defect_within_window(d, filters["start"], filters["end"])
             ]
 
-            latest_review_obj = reel_code_to_review.get(reel.reel_code or "")
+            latest_review_obj = reel_id_to_review.get(reel.reel_id)
             serialized_review = _serialize_review(latest_review_obj)
             if serialized_review:
                 decision_value = (serialized_review.get("decision") or "").lower()
@@ -3035,15 +3032,12 @@ def api_reel_summary(reel_id: int):
             "defects_summary": defects_summary,
             "defects": defects_payload,
         }
-        if reel.reel_code:
-            latest_review = (
-                session.query(ReelReview)
-                .filter(ReelReview.reel_code == reel.reel_code)
-                .order_by(ReelReview.created_at.desc(), ReelReview.review_id.desc())
-                .first()
-            )
-        else:
-            latest_review = None
+        latest_review = (
+            session.query(ReelReview)
+            .filter(ReelReview.reel_id == reel.reel_id)
+            .order_by(ReelReview.created_at.desc(), ReelReview.review_id.desc())
+            .first()
+        )
         response["review"] = _serialize_review(latest_review)
         return jsonify(response)
 
@@ -3085,7 +3079,7 @@ def api_reel_review(reel_id: int):
         if request.method == "GET":
             reviews = (
                 session.query(ReelReview)
-                .filter(ReelReview.reel_code == reel.reel_code)
+                .filter(ReelReview.reel_id == reel.reel_id)
                 .order_by(ReelReview.created_at.desc(), ReelReview.review_id.desc())
                 .all()
             )
@@ -3576,18 +3570,18 @@ def api_qc_review():
 
         latest_review_subq = (
             session.query(
-                ReelReview.reel_code.label("reel_code"),
+                ReelReview.reel_id.label("reel_id"),
                 func.max(ReelReview.review_id).label("max_id"),
             )
-            .group_by(ReelReview.reel_code)
+            .filter(ReelReview.reel_id.isnot(None))
+            .group_by(ReelReview.reel_id)
             .subquery()
         )
         finalized_reels_subq = (
             session.query(Reel.reel_id)
             .join(
                 latest_review_subq,
-                collate(Reel.reel_code, "utf8mb4_unicode_ci")
-                == collate(latest_review_subq.c.reel_code, "utf8mb4_unicode_ci"),
+                Reel.reel_id == latest_review_subq.c.reel_id,
             )
             .join(
                 ReelReview,
@@ -3726,17 +3720,12 @@ def api_qc_review():
                 for cls, counts in sorted(type_breakdown.items(), key=lambda item: item[0])
             ]
 
-            latest_review = None
-            if reel.reel_code:
-                latest_review = (
-                    session.query(ReelReview)
-                    .filter(
-                        collate(ReelReview.reel_code, "utf8mb4_unicode_ci")
-                        == collate(reel.reel_code, "utf8mb4_unicode_ci")
-                    )
-                    .order_by(ReelReview.created_at.desc(), ReelReview.review_id.desc())
-                    .first()
-                )
+            latest_review = (
+                session.query(ReelReview)
+                .filter(ReelReview.reel_id == reel.reel_id)
+                .order_by(ReelReview.created_at.desc(), ReelReview.review_id.desc())
+                .first()
+            )
 
             next_defect_payload: Optional[Dict[str, Any]] = None
             if next_defect_row:
@@ -3891,18 +3880,18 @@ def api_qc_review_jobs_overview():
 
         latest_review_subq = (
             session.query(
-                ReelReview.reel_code.label("reel_code"),
+                ReelReview.reel_id.label("reel_id"),
                 func.max(ReelReview.review_id).label("max_id"),
             )
-            .group_by(ReelReview.reel_code)
+            .filter(ReelReview.reel_id.isnot(None))
+            .group_by(ReelReview.reel_id)
             .subquery()
         )
         finalized_reels_subq = (
             session.query(Reel.reel_id)
             .join(
                 latest_review_subq,
-                collate(Reel.reel_code, "utf8mb4_unicode_ci")
-                == collate(latest_review_subq.c.reel_code, "utf8mb4_unicode_ci"),
+                Reel.reel_id == latest_review_subq.c.reel_id,
             )
             .join(
                 ReelReview,

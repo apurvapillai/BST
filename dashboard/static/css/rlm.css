@@ -1,58 +1,10 @@
-body {
-  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  margin: 0;
-  padding: 0;
-  background-color: #eef2ff;
-  color: #0f172a;
-}
-
-.app-shell {
-  max-width: 1800px;
-  margin: 0 auto;
-  padding: 0 clamp(1rem, 3vw, 2.5rem) 2.5rem;
-}
-
-.app-header {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  padding: 1.5rem 0 0.75rem;
-}
-
-.app-logo {
-  width: 68px;
-  height: auto;
-  object-fit: contain;
-}
-
-.app-title {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.app-title__eyebrow {
-  margin: 0;
-  font-size: 0.8rem;
-  letter-spacing: 0.25em;
-  text-transform: uppercase;
-  color: #94a3b8;
-  font-weight: 600;
-}
-
-.app-title h1 {
-  margin: 0;
-  font-size: 1.9rem;
-  color: #0f172a;
-  letter-spacing: -0.025em;
-}
-
-main#rlmApp {
-  padding: 2rem 0 3rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
+.rlm-app {
+  padding: 0 0 3rem;
   width: 100%;
+}
+
+.rlm-app > section {
+  margin-top: 1.5rem;
 }
 
 .rlm-panel {
@@ -92,27 +44,6 @@ main#rlmApp {
   margin: 0.2rem 0 0;
   color: #64748b;
   font-size: 0.95rem;
-}
-
-.filters-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 1.25rem;
-  background: #ffffff;
-  border-radius: 1rem;
-  padding: 1.25rem;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
-}
-
-.filters-grid .job-chips {
-  grid-column: 1 / -1;
-  margin-top: 0;
-}
-
-.rlm-panel--filters .filters-grid {
-  border: 1px dashed rgba(148, 163, 184, 0.4);
-  box-shadow: none;
 }
 
 .filter-control {
@@ -167,35 +98,6 @@ main#rlmApp {
 
 .rlm-panel--summary .summary-grid {
   margin-top: 0.75rem;
-}
-
-.job-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
-}
-
-.job-chip {
-  background: #eef2ff;
-  color: #312e81;
-  border: 1px solid #c7d2fe;
-  border-radius: 999px;
-  padding: 0.2rem 0.75rem;
-  font-size: 0.9rem;
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.job-chip button {
-  border: none;
-  background: transparent;
-  color: #4c1d95;
-  cursor: pointer;
-  font-size: 0.85rem;
-  padding: 0;
-  line-height: 1;
 }
 
 .rlm-timeline-strip {
@@ -1312,7 +1214,7 @@ main#rlmApp {
     gap: 1rem;
   }
 
-  main#rlmApp {
+  .rlm-app {
     padding: 1.5rem;
   }
 

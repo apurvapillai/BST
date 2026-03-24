@@ -4,88 +4,68 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Press Dashboard</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/nav.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
   <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <script src="{{ url_for('static', filename='js/filter_state.js') }}"></script>
 </head>
 <body>
-  {% set nav_dashboard_active = request.path.startswith('/dashboard') %}
-  <nav class="pg-nav">
-    <div class="pg-nav__inner">
-      <a href="/dashboard" class="pg-nav__brand" aria-label="ProcessGuard Vision">
-        <span class="pg-nav__logo">PG</span>
-        <span class="pg-nav__brand-text">
-          <span class="pg-nav__eyebrow">ProcessGuard</span>
-          <span class="pg-nav__title">Operations Suite</span>
-        </span>
-      </a>
-      <button class="pg-nav__toggle" type="button" aria-expanded="false" aria-label="Open navigation">
-        Menu
-        <span class="pg-nav__toggle-bars" aria-hidden="true">
-          <span></span><span></span><span></span>
-        </span>
-      </button>
-      <div class="pg-nav__links">
-        <a href="/dashboard" class="pg-nav__link {% if nav_dashboard_active %}pg-nav__link--active{% endif %}">Operations Dashboard</a>
-        <a href="/rlm" class="pg-nav__link {% if request.path.startswith('/rlm') %}pg-nav__link--active{% endif %}">Repeat Length Monitoring</a>
-      </div>
-    </div>
-  </nav>
-  <!-- Image Modal -->
-  <div id="imageModal">
-    <span class="closeBtn" onclick="closeModal()">&times;</span>
-    <div id="modalDecisionBar" class="hidden">
-      <div id="modalDecisionStatus"></div>
-    </div>
-    <img id="modalImage" alt="Defect preview">
-    <div id="modalMetaBar" class="hidden">
-      <button type="button" class="modal-nav-btn" id="modalPrevButton" aria-label="Previous image">&#10094;</button>
-      <div id="modalMeta"></div>
-      <button type="button" class="modal-nav-btn" id="modalNextButton" aria-label="Next image">&#10095;</button>
-    </div>
-  </div>
-
-  <div id="footprintModal">
-    <div class="footprint-modal-content">
-      <span class="closeBtn" onclick="closeFootprintModal()">&times;</span>
-      <div class="footprint-modal-header">
-        <h3 id="footprintModalTitle">Footprint Preview</h3>
-      </div>
-      <div class="footprint-modal-body" id="footprintModalBody">
-        <div id="footprintModalCanvas"></div>
-      </div>
-      <div class="footprint-modal-footer">
-        <div class="footprint-modal-actions">
-          <button type="button" class="footprint-zoom-btn" id="footprintZoomOut" aria-label="Zoom out">−</button>
-          <button type="button" class="footprint-zoom-btn" id="footprintZoomReset" aria-label="Reset zoom">100%</button>
-          <button type="button" class="footprint-zoom-btn" id="footprintZoomIn" aria-label="Zoom in">+</button>
+  <div class="app-layout">
+    {% include 'partials/sidebar.html' %}
+    <div class="app-main">
+      <div id="imageModal">
+        <span class="closeBtn" onclick="closeModal()">&times;</span>
+        <div id="modalDecisionBar" class="hidden">
+          <div id="modalDecisionStatus"></div>
+        </div>
+        <img id="modalImage" alt="Defect preview">
+        <div id="modalMetaBar" class="hidden">
+          <button type="button" class="modal-nav-btn" id="modalPrevButton" aria-label="Previous image">&#10094;</button>
+          <div id="modalMeta"></div>
+          <button type="button" class="modal-nav-btn" id="modalNextButton" aria-label="Next image">&#10095;</button>
         </div>
       </div>
-    </div>
-  </div>
 
-  <div class="app-shell">
-    <header class="app-header">
-      <img
-        src="{{ url_for('static', filename='images/ProcessGuard_Logo.png') }}"
-        alt="ProcessGuard Vision logo"
-        class="app-logo"
-      >
-      <div class="app-title">
-        <p class="app-title__eyebrow">PROCESSGUARD AI - FIVE STAR MANAGEMENT</p>
-        <h1>ProcessGuard Vision - BST Module</h1>
+      <div id="footprintModal">
+        <div class="footprint-modal-content">
+          <span class="closeBtn" onclick="closeFootprintModal()">&times;</span>
+          <div class="footprint-modal-header">
+            <h3 id="footprintModalTitle">Footprint Preview</h3>
+          </div>
+          <div class="footprint-modal-body" id="footprintModalBody">
+            <div id="footprintModalCanvas"></div>
+          </div>
+          <div class="footprint-modal-footer">
+            <div class="footprint-modal-actions">
+              <button type="button" class="footprint-zoom-btn" id="footprintZoomOut" aria-label="Zoom out">−</button>
+              <button type="button" class="footprint-zoom-btn" id="footprintZoomReset" aria-label="Reset zoom">100%</button>
+              <button type="button" class="footprint-zoom-btn" id="footprintZoomIn" aria-label="Zoom in">+</button>
+            </div>
+          </div>
+        </div>
       </div>
-    </header>
+
+      <div class="app-shell">
+    {% set header_eyebrow = 'ProcessGuard AI - Five Star Management' %}
+    {% set header_title = 'ProcessGuard Vision - BST Module' %}
+    {% include 'partials/app_header.html' %}
     <div id="globalLoading" class="loading-overlay hidden">
       <div class="loading-spinner"></div>
       <p>Loading…</p>
     </div>
     <!-- Global Filters -->
-    <div class="filters" id="globalFilters"
+      <div class="filters filters--with-header" id="globalFilters"
          data-default-machine="{{ default_machine_id }}"
          data-default-start-date="{{ default_start_date if default_start_date else '' }}"
-         data-default-end-date="{{ default_end_date if default_end_date else '' }}"
-         data-default-job="{{ default_job or '' }}">
+         data-default-end-date="{{ default_end_date if default_end_date else '' }}">
+      <div class="filters-header">
+        <div>
+          <p class="kpi-section__title">Global Filters</p>
+          <small>Pick a machine, date window, and optional job/order context. These filters drive every tab in the BST module.</small>
+        </div>
+        <button type="button" id="filtersClearButton" class="filters-clear-btn">Clear Filters</button>
+      </div>
+      <div class="filters-body">
       <div class="filter-grid">
         <div class="filter-card">
           <label for="filterMachine">Machine</label>
@@ -110,26 +90,27 @@
                  value="{{ default_end_date if default_end_date else '' }}">
         </div>
 
-        <div class="filter-card">
+        <div class="filter-card filter-card--select">
           <label for="filterJob">Job</label>
-          <select id="filterJob" size="6" class="filter-select-list">
+          <select id="filterJob">
             <option value="">All</option>
           </select>
         </div>
 
-        <div class="filter-card">
+        <div class="filter-card filter-card--select">
           <label for="filterOrder">Order</label>
-          <select id="filterOrder" size="6" class="filter-select-list">
+          <select id="filterOrder">
             <option value="">All</option>
           </select>
         </div>
 
-        <div class="filter-card">
+        <div class="filter-card filter-card--select">
           <label for="filterReel">Reel Code</label>
-          <select id="filterReel" multiple>
+          <select id="filterReel">
             <option value="">All</option>
           </select>
         </div>
+      </div>
       </div>
 
     </div>
@@ -137,70 +118,102 @@
     <div class="filter-chips" id="activeFilterChips"></div>
 
     <!-- Tabs -->
-    <div class="tabs" id="tabNav">
-      <button class="tab tab-active" data-tab="overview">Overview</button>
-      <button class="tab" data-tab="job">Job Explorer</button>
-      <button class="tab" data-tab="defects">Defect Explorer</button>
-      <button class="tab tab--align-right" data-tab="qc-review">QC Review</button>
-      <button class="tab" data-tab="heatmap">Heatmap</button>
+    <div class="tabs tabs-muted" id="tabNav" aria-label="Defects sections">
+      <button type="button" class="tab tab-active" data-tab="overview">Overview</button>
+      <button type="button" class="tab" data-tab="job">Job Explorer</button>
+      <button type="button" class="tab" data-tab="defects">Defect Explorer</button>
+      <button type="button" class="tab" data-tab="qc-review">QC Review</button>
+      <button type="button" class="tab" data-tab="heatmap">Heatmap</button>
     </div>
     <div class="filter-chips hidden" id="defectLocalChips"></div>
 
     <!-- Overview Tab -->
     <section id="tab-overview" class="tab-content">
-      <div class="kpis" id="overviewKpis">
-        <div class="kpi-card" data-kpi="total_jobs">
-          <h3>Total Jobs</h3>
-          <p>--</p>
+      <div class="kpi-sections" id="overviewKpis">
+        <div class="kpi-sections-grid">
+          <div class="kpi-section kpi-section--compact">
+            <div class="kpi-section__header">
+              <div>
+                <p class="kpi-section__title">Production Totals</p>
+                <small>Total footage tracked across the selected window.</small>
+              </div>
+            </div>
+            <div class="kpi-grid">
+              <div class="kpi-card" data-kpi="total_jobs">
+                <h3>Total Jobs</h3>
+                <p>--</p>
+              </div>
+              <div class="kpi-card" data-kpi="total_length">
+                <h3>Total Length</h3>
+                <p>--</p>
+              </div>
+              <div class="kpi-card" data-kpi="active_length">
+                <h3>Active Length</h3>
+                <p>--</p>
+              </div>
+              <div class="kpi-card" data-kpi="inactive_length">
+                <h3>Inactive Length</h3>
+                <p>--</p>
+              </div>
+              <div class="kpi-card" data-kpi="learn_length">
+                <h3>Learn Length</h3>
+                <p>--</p>
+              </div>
+            </div>
+          </div>
+          <div class="kpi-section kpi-section--compact">
+            <div class="kpi-section__header">
+              <div>
+                <p class="kpi-section__title">Inspection Mix</p>
+                <small>Percent of time spent in each inspection state.</small>
+              </div>
+            </div>
+            <div class="kpi-grid">
+              <div class="kpi-card" data-kpi="active_pct">
+                <h3>Active %</h3>
+                <p>--</p>
+              </div>
+              <div class="kpi-card" data-kpi="inactive_pct">
+                <h3>Inactive %</h3>
+                <p>--</p>
+              </div>
+              <div class="kpi-card" data-kpi="learn_pct">
+                <h3>Learn %</h3>
+                <p>--</p>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="kpi-card" data-kpi="total_length">
-          <h3>Total Length</h3>
-          <p>--</p>
-        </div>
-        <div class="kpi-card" data-kpi="active_pct">
-          <h3>Active %</h3>
-          <p>--</p>
-        </div>
-        <div class="kpi-card" data-kpi="inactive_pct">
-          <h3>Inactive %</h3>
-          <p>--</p>
-        </div>
-        <div class="kpi-card" data-kpi="learn_pct">
-          <h3>Learn %</h3>
-          <p>--</p>
-        </div>
-        <div class="kpi-card" data-kpi="active_length">
-          <h3>Active Length</h3>
-          <p>--</p>
-        </div>
-        <div class="kpi-card" data-kpi="inactive_length">
-          <h3>Inactive Length</h3>
-          <p>--</p>
-        </div>
-        <div class="kpi-card" data-kpi="learn_length">
-          <h3>Learn Length</h3>
-          <p>--</p>
-        </div>
-        <div class="kpi-card" data-kpi="total_defects">
-          <h3>Total Defects</h3>
-          <p>--</p>
-        </div>
-        <div class="kpi-card" data-kpi="defect_classes">
-          <h3>Defect Types</h3>
-          <p>--</p>
+        <div class="kpi-section kpi-section--defects">
+          <div class="kpi-section__header">
+            <div>
+              <p class="kpi-section__title">Defect Breakdown</p>
+              <small id="defectTypeSummary">Waiting for defect data…</small>
+            </div>
+            <div class="kpi-badge">
+              <span>Unique Types</span>
+              <strong data-kpi-highlight="defect_classes">--</strong>
+            </div>
+          </div>
+          <div class="kpi-grid kpi-grid--defects kpi-grid--summary" id="defectTypeBreakdown" aria-live="polite">
+            <div class="kpi-card kpi-card--highlight" data-kpi="total_defects">
+              <h3>Total Defects</h3>
+              <p>--</p>
+            </div>
+          </div>
         </div>
       </div>
 
       <div class="charts">
-        <div id="overviewDefectsByType" class="chart"></div>
-        <div id="overviewDefectsTrend" class="chart"></div>
-        <div id="overviewJobsMeters" class="chart"></div>
-        <div id="overviewJobsTime" class="chart"></div>
-        <div class="chart-row">
+        <div class="chart-row chart-row--four">
+          <div id="overviewDefectsByType" class="chart chart-medium"></div>
+          <div id="overviewDefectsTrend" class="chart chart-medium"></div>
+          <div id="overviewJobsMeters" class="chart chart-medium"></div>
+          <div id="overviewJobsTime" class="chart chart-medium"></div>
+        </div>
+        <div class="chart-row chart-row--four">
           <div id="overviewRefChangesByJob" class="chart chart-medium"></div>
           <div id="overviewRlmMonitorsByJob" class="chart chart-medium"></div>
-        </div>
-        <div class="chart-row">
           <div id="overviewDefectsByJob" class="chart chart-medium"></div>
           <div id="overviewMasksByJob" class="chart chart-medium"></div>
         </div>
@@ -811,6 +824,20 @@
       </div>
     </section>
 
+    <div class="modal-overlay hidden" id="jobSelectModal" role="dialog" aria-modal="true">
+      <div class="modal-dialog job-select-dialog">
+        <button type="button" class="modal-close-btn" id="jobSelectModalClose" aria-label="Close">&times;</button>
+        <h3>Select a Job</h3>
+        <p>Choose a job to open this tab.</p>
+        <div class="modal-field modal-field--full">
+          <label for="jobSelectModalInput">Job</label>
+          <select id="jobSelectModalInput">
+            <option value="">Select a job…</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
     <div class="heatmap-modal hidden" id="heatmapModal" role="dialog" aria-modal="true" aria-labelledby="heatmapModalTitle">
       <div class="heatmap-modal__dialog">
         <h3 id="heatmapModalTitle">Update Region Weight</h3>
@@ -824,7 +851,9 @@
       </div>
     </div>
 
-  </div>
+      </div> <!-- /.app-shell -->
+    </div> <!-- /.app-main -->
+  </div> <!-- /.app-layout -->
 
   <div class="modal-overlay hidden" id="jobSwitchModal" role="dialog" aria-modal="true">
     <div class="modal-dialog">
@@ -840,6 +869,15 @@
   <div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="true"></div>
 
   <script src="{{ url_for('static', filename='js/nav.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/dashboard_utils.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/defect_modals.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/dashboard_filters.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/dashboard_router.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/tabs/machine_overview.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/tabs/job_explorer.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/tabs/defect_explorer.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/tabs/qc_review.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/tabs/heatmap.js') }}"></script>
   <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 </body>
 </html>

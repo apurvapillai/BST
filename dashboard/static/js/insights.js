@@ -1,5 +1,6 @@
 (function () {
   const defaultState = () => ({
+    machineId: "",
     start: null,
     end: null,
     mode: "job",
@@ -7,6 +8,108 @@
     secondary: "",
     options: { jobs: [] },
   });
+
+  function readCssVar(name) {
+    return getComputedStyle(document.body).getPropertyValue(name).trim();
+  }
+
+  function getPlotlyTheme() {
+    return {
+      paper: readCssVar("--chart-paper-bg") || "#ffffff",
+      plot: readCssVar("--chart-plot-bg") || "#f8fafc",
+      font: readCssVar("--text-primary") || "#1f2937",
+      grid: readCssVar("--chart-grid-color") || "rgba(148,163,184,0.4)",
+      axis: readCssVar("--chart-axis-color") || "#94a3b8",
+    };
+  }
+
+  function applyPlotlyTheme(layout = {}) {
+    const theme = getPlotlyTheme();
+    const themed = {
+      ...layout,
+      paper_bgcolor: theme.paper,
+      plot_bgcolor: theme.plot,
+      font: { ...(layout.font || {}), color: theme.font },
+      hoverlabel: {
+        ...(layout.hoverlabel || {}),
+        bgcolor: theme.plot,
+        font: { ...(layout.hoverlabel?.font || {}), color: theme.font },
+      },
+      legend: {
+        ...(layout.legend || {}),
+        font: { ...(layout.legend?.font || {}), color: theme.font },
+      },
+    };
+    Object.keys(themed).forEach((key) => {
+      if (/^[xy]axis\d*/.test(key)) {
+        themed[key] = {
+          ...themed[key],
+          gridcolor: themed[key].gridcolor || theme.grid,
+          zerolinecolor: themed[key].zerolinecolor || theme.grid,
+          linecolor: themed[key].linecolor || theme.axis,
+          tickfont: { ...(themed[key].tickfont || {}), color: theme.font },
+        };
+        if (themed[key].title) {
+          themed[key] = {
+            ...themed[key],
+            title: {
+              ...themed[key].title,
+              font: { ...(themed[key].title.font || {}), color: theme.font },
+            },
+          };
+        }
+      }
+    });
+    return themed;
+  }
+
+  function refreshPlotlyTheme() {
+    if (!window.Plotly) return;
+    const theme = getPlotlyTheme();
+    document.querySelectorAll(".js-plotly-plot").forEach((node) => {
+      const layout = node.layout || {};
+      const update = {
+        paper_bgcolor: theme.paper,
+        plot_bgcolor: theme.plot,
+        "legend.font.color": theme.font,
+        "hoverlabel.bgcolor": theme.plot,
+        "hoverlabel.font.color": theme.font,
+      };
+      Object.keys(layout).forEach((key) => {
+        if (/^[xy]axis\d*/.test(key)) {
+          update[`${key}.gridcolor`] = theme.grid;
+          update[`${key}.zerolinecolor`] = theme.grid;
+          update[`${key}.linecolor`] = theme.axis;
+          update[`${key}.tickfont.color`] = theme.font;
+          if (layout[key]?.title) {
+            update[`${key}.title.font.color`] = theme.font;
+          }
+        }
+      });
+      window.Plotly.relayout(node, update);
+    });
+  }
+
+  window.addEventListener("bst:themechange", refreshPlotlyTheme);
+
+  function ensurePlotlyPatched() {
+    if (!window.Plotly || window.Plotly.__bstThemed) return;
+    const originalReact = window.Plotly.react;
+    const originalNewPlot = window.Plotly.newPlot;
+    window.Plotly.react = function patchedReact(gd, data, layout, config) {
+      return originalReact.call(this, gd, data, layout ? applyPlotlyTheme(layout) : layout, config);
+    };
+    window.Plotly.newPlot = function patchedNewPlot(gd, data, layout, config) {
+      return originalNewPlot.call(this, gd, data, layout ? applyPlotlyTheme(layout) : layout, config);
+    };
+    window.Plotly.__bstThemed = true;
+  }
+
+  if (window.Plotly) {
+    ensurePlotlyPatched();
+  } else {
+    window.addEventListener("load", ensurePlotlyPatched, { once: true });
+  }
 
   const InsightsPage = (() => {
     let state = defaultState();
@@ -17,10 +120,7 @@
     function init() {
       cacheDom();
       if (!elements.root) return;
-      if (elements.mode) {
-        elements.mode.value = "job";
-      }
-      setDefaultDates();
+      hydrateFromGlobalFilters();
       hydrateSelectors();
       bindEvents();
       fetchFilters().then(() => {
@@ -35,8 +135,11 @@
       elements.end = document.getElementById("insightsEnd");
       elements.primary = document.getElementById("insightsPrimary");
       elements.secondary = document.getElementById("insightsSecondary");
+      elements.machine = document.getElementById("insightsMachine");
       elements.apply = document.getElementById("insightsApply");
+      elements.clear = document.getElementById("insightsClear");
       elements.rangeLabel = document.getElementById("insightsRangeLabel");
+      elements.chips = document.getElementById("insightsFilterChips");
       elements.summary = document.getElementById("insightsSummary");
       elements.topDefects = document.getElementById("insightsTopDefects");
       elements.trendChart = document.getElementById("insightsTrendChart");
@@ -51,27 +154,42 @@
 
     function bindEvents() {
       if (elements.apply) {
-        elements.apply.addEventListener("click", () => {
-          readState();
-          fetchFilters().then(() => {
-            hydrateSelectors();
-            refresh();
-          });
+        elements.apply.addEventListener("click", handleApply);
+      }
+      if (elements.clear) {
+        elements.clear.addEventListener("click", handleApply);
+      }
+      if (elements.machine) {
+        elements.machine.addEventListener("change", () => {
+          state.machineId = elements.machine.value || "";
+          persistGlobalFilters();
+          renderFilterChips();
         });
       }
     }
 
-    function setDefaultDates() {
-      const now = new Date();
-      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    function hydrateFromGlobalFilters() {
+      const pad = (n) => String(n).padStart(2, "0");
       const toLocalInput = (dt) => {
-        const pad = (n) => String(n).padStart(2, "0");
+        if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) return "";
         return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(
           dt.getMinutes()
         )}`;
       };
-      if (elements.start) elements.start.value = toLocalInput(weekAgo);
-      if (elements.end) elements.end.value = toLocalInput(now);
+      const filters = window.FilterState && typeof window.FilterState.getFilters === "function" ? window.FilterState.getFilters() : {};
+      const defaultEnd = new Date();
+      const defaultStart = new Date(defaultEnd.getTime() - 7 * 24 * 60 * 60 * 1000);
+      state.machineId = filters.machine_id ? String(filters.machine_id) : (elements.machine ? elements.machine.value : "");
+      if (elements.machine && state.machineId) {
+        elements.machine.value = state.machineId;
+      }
+      const startValue = filters.start ? filters.start : toLocalInput(defaultStart);
+      const endValue = filters.end ? filters.end : toLocalInput(defaultEnd);
+      state.start = startValue;
+      state.end = endValue;
+      if (elements.start) elements.start.value = startValue;
+      if (elements.end) elements.end.value = endValue;
+      renderFilterChips();
     }
 
     function hydrateSelectors() {
@@ -101,6 +219,9 @@
       state.end = elements.end ? elements.end.value : null;
       state.primary = elements.primary ? elements.primary.value : "";
       state.secondary = elements.secondary ? elements.secondary.value : "";
+      state.machineId = elements.machine ? elements.machine.value : "";
+      persistGlobalFilters();
+      renderFilterChips();
     }
 
     async function fetchFilters() {
@@ -108,6 +229,7 @@
       const params = new URLSearchParams();
       if (elements.start.value) params.append("start", elements.start.value);
       if (elements.end.value) params.append("end", elements.end.value);
+      if (state.machineId) params.append("machine_id", state.machineId);
       try {
         const data = await apiGet(`/api/insights/filters?${params.toString()}`);
         state.options = {
@@ -125,6 +247,7 @@
       const params = {
         start: state.start,
         end: state.end,
+        machine_id: state.machineId,
         mode: "job",
         primary: state.primary,
         secondary: state.secondary,
@@ -154,6 +277,46 @@
       } finally {
         hideLoading();
       }
+    }
+
+    function handleApply() {
+      readState();
+      fetchFilters().then(() => {
+        hydrateSelectors();
+        refresh();
+      });
+    }
+
+    function persistGlobalFilters() {
+      if (!window.FilterState || typeof window.FilterState.update !== "function") return;
+      window.FilterState.update({
+        machine_id: state.machineId || "",
+        start: state.start || "",
+        end: state.end || "",
+      });
+    }
+
+    function renderFilterChips() {
+      if (!elements.chips) return;
+      const chips = [];
+      if (elements.machine && elements.machine.options && elements.machine.selectedIndex >= 0) {
+        const option = elements.machine.options[elements.machine.selectedIndex];
+        const machineLabel = option ? option.textContent.trim() : "Machine";
+        chips.push(`<span class="filter-chip machine"><span>Machine: ${machineLabel}</span></span>`);
+      }
+      if (state.start) {
+        chips.push(`<span class="filter-chip"><span>Start: ${new Date(state.start).toLocaleString()}</span></span>`);
+      }
+      if (state.end) {
+        chips.push(`<span class="filter-chip"><span>End: ${new Date(state.end).toLocaleString()}</span></span>`);
+      }
+      if (!chips.length) {
+        elements.chips.classList.add("hidden");
+        elements.chips.innerHTML = "";
+        return;
+      }
+      elements.chips.classList.remove("hidden");
+      elements.chips.innerHTML = chips.join("");
     }
 
     function renderRangeLabel() {

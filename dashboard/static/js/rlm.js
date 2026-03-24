@@ -38,21 +38,22 @@
 
   function init() {
     cacheDom();
+    hydrateFromFilterState();
     bindEvents();
     hydrateMachineSelect();
+    renderFilterChips();
     fetchJobs();
-    renderJobChips();
     refreshAll();
   }
 
   function cacheDom() {
-    elements.app = document.getElementById("rlmApp");
+    elements.app = document.querySelector("[data-rlm-app]");
     elements.machine = document.getElementById("rlmMachine");
     elements.start = document.getElementById("rlmStart");
     elements.end = document.getElementById("rlmEnd");
     elements.job = document.getElementById("rlmJob");
     elements.minFeet = document.getElementById("rlmMinFeet");
-    elements.jobChips = document.getElementById("rlmJobChips");
+    elements.filterChips = document.getElementById("rlmFilterChips");
     elements.refresh = document.getElementById("rlmRefresh");
     elements.rangeLabel = document.getElementById("rlmRangeLabel");
     elements.summary = document.getElementById("rlmSummary");
@@ -148,8 +149,17 @@
         if (value) {
           addJobFilter(value);
           elements.job.value = "";
+        } else {
+          clearJobFilters();
+          refreshAll();
         }
       });
+    }
+    if (elements.start) {
+      elements.start.addEventListener("change", handleDateRangeChange);
+    }
+    if (elements.end) {
+      elements.end.addEventListener("change", handleDateRangeChange);
     }
     if (elements.deltaToggle) {
       elements.deltaToggle.checked = !!state.deltaShowOobOnly;
@@ -190,6 +200,50 @@
         });
       }
     });
+    if (elements.filterChips) {
+      elements.filterChips.addEventListener("click", handleChipClick);
+    }
+  }
+
+  function handleChipClick(event) {
+    const button = event.target.closest("button");
+    if (!button) return;
+    event.preventDefault();
+    const jobValue = button.dataset.job;
+    if (jobValue) {
+      removeJobFilter(jobValue);
+      return;
+    }
+    const chipType = button.dataset.chip || "";
+    if (chipType === "minFeet") {
+      state.minFeet = null;
+      if (elements.minFeet) elements.minFeet.value = "";
+      readFilters();
+      fetchJobs();
+      refreshAll();
+      return;
+    }
+    if (chipType === "start") {
+      const defaultStart = bootstrap.defaultStartDate || "";
+      if (elements.start) elements.start.value = defaultStart;
+      state.start = defaultStart;
+      readFilters();
+      fetchJobs();
+      refreshAll();
+    } else if (chipType === "end") {
+      const defaultEnd = bootstrap.defaultEndDate || "";
+      if (elements.end) elements.end.value = defaultEnd;
+      state.end = defaultEnd;
+      readFilters();
+      fetchJobs();
+      refreshAll();
+    }
+  }
+
+  function handleDateRangeChange() {
+    readFilters();
+    fetchJobs();
+    refreshAll();
   }
 
   function updateLimitState() {
@@ -240,7 +294,8 @@
     state.minFeet = Number.isFinite(minFeetValue) ? minFeetValue : null;
     updateLimitState();
     updateMachineBadge();
-    renderJobChips();
+    renderFilterChips();
+    persistFilterState();
   }
 
   function updateMachineBadge() {
@@ -279,6 +334,28 @@
     return params.toString();
   }
 
+  function getSelectedMachineLabel() {
+    if (elements.machine && elements.machine.selectedIndex >= 0) {
+      const option = elements.machine.options[elements.machine.selectedIndex];
+      if (option && option.textContent) {
+        return option.textContent.trim();
+      }
+    }
+    if (state.machineId) {
+      return `Press ${state.machineId}`;
+    }
+    return "";
+  }
+
+  function formatDateChip(value) {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return value;
+    }
+    return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+
   async function fetchJobs() {
     if (!elements.job) return;
     const params = new URLSearchParams();
@@ -291,10 +368,46 @@
     try {
       const data = await apiGet(`/rlm/api/jobs?${params.toString()}`);
       const jobs = data.jobs || [];
-      elements.job.innerHTML = ['<option value="">Add job filter…</option>', ...jobs.map((job) => `<option value="${job}">${job}</option>`)].join("");
+      elements.job.innerHTML = ['<option value="">All</option>', ...jobs.map((job) => `<option value="${job}">${job}</option>`)].join("");
       elements.job.value = "";
     } catch (error) {
       console.error("Failed to load jobs", error);
+    }
+  }
+
+  function hydrateFromFilterState() {
+    if (!window.FilterState || typeof window.FilterState.getFilters !== "function") return;
+    const stored = window.FilterState.getFilters() || {};
+    const storedMachine = stored.rlm_machine_id || stored.machine_id;
+    if (storedMachine && elements.machine) {
+      state.machineId = String(storedMachine);
+      elements.machine.value = state.machineId;
+    }
+    if (elements.start && !elements.start.value) {
+      elements.start.value = bootstrap.defaultStartDate || "";
+      state.start = elements.start.value;
+    }
+    if (elements.end && !elements.end.value) {
+      elements.end.value = bootstrap.defaultEndDate || "";
+      state.end = elements.end.value;
+    }
+    let storedJobs = [];
+    if (Array.isArray(stored.rlm_jobs)) {
+      storedJobs = stored.rlm_jobs.filter((job) => typeof job === "string" && job.trim());
+    } else if (stored.job) {
+      storedJobs = [stored.job];
+    }
+    if (storedJobs.length) {
+      state.jobFilters = storedJobs.map((job) => String(job).trim()).filter(Boolean);
+    } else {
+      state.jobFilters = [];
+    }
+    if (stored.rlm_min_feet !== undefined && stored.rlm_min_feet !== null && stored.rlm_min_feet !== "") {
+      const parsedMinFeet = Number(stored.rlm_min_feet);
+      if (!Number.isNaN(parsedMinFeet)) {
+        state.minFeet = parsedMinFeet;
+        if (elements.minFeet) elements.minFeet.value = parsedMinFeet;
+      }
     }
   }
 
@@ -303,64 +416,94 @@
     if (!cleaned) return;
     if (!state.jobFilters.includes(cleaned)) {
       state.jobFilters.push(cleaned);
-      renderJobChips();
+      renderFilterChips();
       refreshAll();
     }
   }
 
   function removeJobFilter(jobName) {
     state.jobFilters = state.jobFilters.filter((job) => job !== jobName);
-    renderJobChips();
+    renderFilterChips();
     refreshAll();
   }
 
-  function renderJobChips() {
-    if (!elements.jobChips) return;
+  function renderFilterChips() {
+    if (!elements.filterChips) return;
     const chips = [];
-    (state.jobFilters || []).forEach((job) => {
-      chips.push(`
-        <span class="job-chip">
-          ${escapeHtml(job)}
-          <button type="button" data-job="${job}" aria-label="Remove ${job}">&times;</button>
-        </span>`);
-    });
+    const machineLabel = getSelectedMachineLabel();
+    if (machineLabel) {
+      chips.push({
+        key: "machine",
+        label: `Machine: ${machineLabel}`,
+        className: "machine",
+        removable: false,
+      });
+    }
+    if (state.jobFilters && state.jobFilters.length) {
+      state.jobFilters.forEach((job) => {
+        if (!job) return;
+        chips.push({
+          key: "job",
+          label: `Job: ${job}`,
+          removable: true,
+          dataset: { job },
+        });
+      });
+    }
     if (Number.isFinite(state.minFeet)) {
-      chips.push(`
-        <span class="job-chip job-chip--min-feet">
-          Min feet: ${formatNumber(state.minFeet, 0)}
-          <button type="button" data-min-feet="clear" aria-label="Clear min feet">&times;</button>
-        </span>`);
+      chips.push({
+        key: "minFeet",
+        label: `Min feet: ${formatNumber(state.minFeet, 0)}`,
+        removable: true,
+      });
     }
     if (!chips.length) {
-      elements.jobChips.innerHTML = "";
-      elements.jobChips.classList.add("hidden");
+      elements.filterChips.innerHTML = "";
+      elements.filterChips.classList.add("hidden");
+      persistFilterState();
       return;
     }
-    elements.jobChips.classList.remove("hidden");
-    elements.jobChips.innerHTML = chips.join("");
-    elements.jobChips.querySelectorAll("button[data-job]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const value = btn.getAttribute("data-job");
-        removeJobFilter(value);
-      });
-    });
-    const minFeetBtn = elements.jobChips.querySelector("button[data-min-feet]");
-    if (minFeetBtn) {
-      minFeetBtn.addEventListener("click", () => {
-        state.minFeet = null;
-        if (elements.minFeet) elements.minFeet.value = "";
-        renderJobChips();
-        refreshAll();
-      });
-    }
+    const html = chips
+      .map((chip) => {
+        const classes = ["filter-chip"];
+        if (chip.className) classes.push(chip.className);
+        const attrs = [];
+        if (chip.dataset) {
+          Object.entries(chip.dataset).forEach(([key, value]) => {
+            attrs.push(`data-${key}="${escapeHtml(String(value))}"`);
+          });
+        }
+        const attrString = attrs.length ? ` ${attrs.join(" ")}` : "";
+        const removeButton = chip.removable
+          ? `<button type="button" data-chip="${chip.key}"${attrString} aria-label="Clear ${escapeHtml(
+              chip.label
+            )}">&times;</button>`
+          : "";
+        return `<span class="${classes.join(" ")}"><span>${escapeHtml(chip.label)}</span>${removeButton}</span>`;
+      })
+      .join("");
+    elements.filterChips.classList.remove("hidden");
+    elements.filterChips.innerHTML = html;
+    persistFilterState();
   }
 
   function clearJobFilters() {
     state.jobFilters = [];
-    renderJobChips();
+    renderFilterChips();
     if (elements.job) {
       elements.job.value = "";
     }
+  }
+
+  function persistFilterState() {
+    if (!window.FilterState || typeof window.FilterState.update !== "function") return;
+    window.FilterState.update({
+      machine_id: state.machineId || "",
+      rlm_machine_id: state.machineId || "",
+      job: (state.jobFilters && state.jobFilters.length) ? state.jobFilters[0] : "",
+      rlm_jobs: Array.isArray(state.jobFilters) ? state.jobFilters.slice() : [],
+      rlm_min_feet: Number.isFinite(state.minFeet) ? state.minFeet : "",
+    });
   }
 
   async function refreshAll() {

@@ -85,6 +85,35 @@ const STATE_LABELS = {
 const ALERT_SEVERITY_ORDER = { critical: 3, warning: 2, info: 1, healthy: 0 };
 const FOCUS_CHUNK_SIZE = 3;
 const CENTRAL_TIMEZONE = "America/Chicago";
+const ALERT_TYPE_LABELS = ALERT_CONFIG_DEFAULTS.reduce((acc, entry) => {
+  acc[entry.alertType] = entry.displayName || entry.alertType.replace(/_/g, " ");
+  return acc;
+}, {});
+
+const filterControls = {
+  root: null,
+  machine: null,
+  start: null,
+  end: null,
+  severity: null,
+  alertType: null,
+  chips: null,
+  applyButtons: [],
+  clearButton: null,
+};
+
+const filters = {
+  machineId: null,
+  start: "",
+  end: "",
+  severity: "",
+  alertType: "",
+  defaults: {
+    machineId: null,
+    start: "",
+    end: "",
+  },
+};
 
 const state = {
   overview: null,
@@ -103,6 +132,11 @@ const state = {
   thresholdSaving: false,
   selectedMachineId: null,
   selectedSeverity: null,
+  selectedAlertType: null,
+  filterStart: null,
+  filterEnd: null,
+  filterStartRaw: "",
+  filterEndRaw: "",
   ackVisibleLoading: false,
   visibleAlertIds: [],
   refreshInProgress: false,
@@ -228,11 +262,17 @@ function renderPlantSummary() {
 function renderMachineGrid() {
   const grid = document.getElementById("machineGrid");
   const cards = state.overview?.machineCards || [];
-  if (!cards.length) {
-    grid.innerHTML = state.isLoading ? '<div class="empty-state">Loading machines…</div>' : '<div class="empty-state">No machines found.</div>';
+  const filteredCards = state.selectedMachineId ? cards.filter(card => card.machineId === state.selectedMachineId) : cards;
+  if (!filteredCards.length) {
+    const message = state.selectedMachineId
+      ? "No machines match the current filters."
+      : state.isLoading
+        ? "Loading machines…"
+        : "No machines found.";
+    grid.innerHTML = `<div class="empty-state">${message}</div>`;
     return;
   }
-  grid.innerHTML = cards.map(card => renderMachineCard(card)).join("");
+  grid.innerHTML = filteredCards.map(card => renderMachineCard(card)).join("");
 }
 
 function renderMachineCard(card) {
@@ -289,20 +329,44 @@ function getAllAlerts() {
   return state.overview?.activeAlerts || [];
 }
 
+function getAlertTimestamp(alert) {
+  if (!alert) return null;
+  if (alert.triggeredAt) {
+    const date = parseDate(alert.triggeredAt);
+    if (date) return date;
+  }
+  if (alert.triggeredAtLocal) {
+    const date = parseDate(alert.triggeredAtLocal);
+    if (date) return date;
+  }
+  return null;
+}
+
+function alertMatchesFilters(alert) {
+  if (!alert) return false;
+  if (state.selectedMachineId && alert.machineId !== state.selectedMachineId) {
+    return false;
+  }
+  if (state.selectedSeverity && alert.severity !== state.selectedSeverity) {
+    return false;
+  }
+  if (state.selectedAlertType && alert.alertType !== state.selectedAlertType) {
+    return false;
+  }
+  const ts = getAlertTimestamp(alert);
+  if (state.filterStart && (!ts || ts < state.filterStart)) {
+    return false;
+  }
+  if (state.filterEnd && (!ts || ts > state.filterEnd)) {
+    return false;
+  }
+  return true;
+}
+
 function getFilteredAlertsList() {
   const alerts = getAllAlerts();
-  if (!state.selectedMachineId && !state.selectedSeverity) {
-    return alerts;
-  }
-  return alerts.filter(alert => {
-    if (state.selectedMachineId && alert.machineId !== state.selectedMachineId) {
-      return false;
-    }
-    if (state.selectedSeverity && alert.severity !== state.selectedSeverity) {
-      return false;
-    }
-    return true;
-  });
+  if (!alerts.length) return [];
+  return alerts.filter(alert => alertMatchesFilters(alert));
 }
 
 function renderActiveAlerts() {
@@ -317,7 +381,8 @@ function renderActiveAlerts() {
   visible.forEach(alert => {
     (alert.alertIds || []).forEach(id => state.visibleAlertIds.push(id));
   });
-  const filterActive = Boolean(state.selectedMachineId || state.selectedSeverity);
+  const filterSummary = getFilterSummaryText();
+  const filterActive = Boolean(filterSummary);
   const total = allAlerts.length;
   const filteredCount = filtered.length;
   const visibleCount = visible.length;
@@ -340,10 +405,8 @@ function renderActiveAlerts() {
   if (countLabel) countLabel.textContent = header;
   const ackBtn = document.getElementById("ackVisibleBtn");
   if (!filteredCount) {
-    const machineName = state.selectedMachineId ? getMachineName(state.selectedMachineId) || `Press ${state.selectedMachineId}` : "";
-    const severityText = state.selectedSeverity ? formatStateLabel(state.selectedSeverity) : "";
-    const suffix = machineName ? `${machineName}${severityText ? ` / ${severityText}` : ""}` : "";
-    container.innerHTML = suffix ? `<div class="empty-state">No active alerts match ${suffix}.</div>` : '<div class="empty-state">No active alerts.</div>';
+    const suffix = filterSummary ? `No active alerts match ${filterSummary}.` : "No active alerts.";
+    container.innerHTML = `<div class="empty-state">${suffix}</div>`;
     if (ackBtn) ackBtn.disabled = true;
     return;
   }
@@ -392,15 +455,14 @@ function renderActiveAlerts() {
 function renderAlertFilterStatus() {
   const el = document.getElementById("alertFilterStatus");
   if (!el) return;
-  if (!state.selectedMachineId) {
+  const summary = getFilterSummaryText();
+  if (!summary) {
     el.innerHTML = "";
     return;
   }
-  const machineName = getMachineName(state.selectedMachineId) || `Press ${state.selectedMachineId}`;
-  const severityText = state.selectedSeverity ? ` (${formatStateLabel(state.selectedSeverity)})` : "";
   el.innerHTML = `
     <span class="alert-filter-chip">
-      Filtered: ${machineName}${severityText}
+      Filtered: ${summary}
       <button type="button" id="clearFilterBtn">×</button>
     </span>
   `;
@@ -408,8 +470,10 @@ function renderAlertFilterStatus() {
 
 function renderWindowSummary() {
   const summary = state.overview?.windowSummary || [];
+  const machineFilter = state.selectedMachineId;
+  const rowsForView = machineFilter ? summary.filter(machine => machine.machineId === machineFilter) : summary;
   const container = document.getElementById("windowSummary");
-  if (!summary.length) {
+  if (!rowsForView.length) {
     container.innerHTML = '<div class="empty-state">No qualifying reels in the last 24 hours.</div>';
     return;
   }
@@ -422,7 +486,7 @@ function renderWindowSummary() {
       </tr>
     </thead>
   `;
-  const rows = summary
+  const rows = rowsForView
     .map(machine => {
       const cells = WINDOW_LABELS.map(label => {
         const win = machine.windows?.[label] || {};
@@ -560,7 +624,8 @@ function trendLabelFromState(state) {
 }
 
 function renderTrendSignals() {
-  const summary = state.overview?.trendSignals || [];
+  const machineFilter = state.selectedMachineId;
+  const summary = (state.overview?.trendSignals || []).filter(row => !machineFilter || row.machineId === machineFilter);
   const container = document.getElementById("trendSignals");
   if (!container) return;
   if (!summary.length) {
@@ -586,18 +651,20 @@ function renderFocusPanel() {
   const panel = document.getElementById("focusPanel");
   const cycleLabel = document.getElementById("cycleStatus");
   const items = state.focusItems || [];
-  const signature = JSON.stringify(items.map(item => `${item.type}-${item.title}-${item.timestamp || ""}-${item.severity || ""}`));
+  const machineFilter = state.selectedMachineId;
+  const filteredItems = machineFilter ? items.filter(item => !item.machineId || item.machineId === machineFilter) : items;
+  const signature = JSON.stringify(filteredItems.map(item => `${item.type}-${item.title}-${item.timestamp || ""}-${item.severity || ""}`));
   if (signature !== state.focusSignature) {
     state.focusIndex = 0;
     state.focusSignature = signature;
   }
   let visibleItems;
-  if (items.length <= FOCUS_CHUNK_SIZE) {
-    visibleItems = items;
+  if (filteredItems.length <= FOCUS_CHUNK_SIZE) {
+    visibleItems = filteredItems;
   } else {
     visibleItems = [];
     for (let i = 0; i < FOCUS_CHUNK_SIZE; i += 1) {
-      visibleItems.push(items[(state.focusIndex + i) % items.length]);
+      visibleItems.push(filteredItems[(state.focusIndex + i) % filteredItems.length]);
     }
   }
   if (!visibleItems.length) {
@@ -627,7 +694,7 @@ function renderFocusPanel() {
     </div>
   `;
   if (cycleLabel) {
-    cycleLabel.textContent = items.length > FOCUS_CHUNK_SIZE ? `Cycling ${state.overview?.focusPanel?.cycleSeconds || 8}s` : "Stable";
+    cycleLabel.textContent = filteredItems.length > FOCUS_CHUNK_SIZE ? `Cycling ${state.overview?.focusPanel?.cycleSeconds || 8}s` : "Stable";
   }
 }
 
@@ -749,11 +816,12 @@ async function loadHistory(machineId = "all") {
 
 function renderHistory() {
   const container = document.getElementById("historyBody");
-  if (!state.history.length) {
-    container.innerHTML = '<div class="empty-state">No alert history yet.</div>';
+  const rows = state.history.filter(alert => alertMatchesFilters(alert));
+  if (!rows.length) {
+    container.innerHTML = '<div class="empty-state">No alert history for this filter set.</div>';
     return;
   }
-  container.innerHTML = state.history
+  container.innerHTML = rows
     .map(row => {
       const ack = row.acknowledgedAt ? ` · Ack ${formatDateTimeCentral(row.acknowledgedAt)}` : "";
       return `
@@ -769,6 +837,263 @@ function renderHistory() {
       `;
     })
     .join("");
+}
+
+function initFilters() {
+  filterControls.root = document.getElementById("rlmFilters");
+  if (!filterControls.root) return;
+  filterControls.machine = document.getElementById("rlmFilterMachine");
+  filterControls.start = document.getElementById("rlmFilterStart");
+  filterControls.end = document.getElementById("rlmFilterEnd");
+  filterControls.severity = document.getElementById("rlmFilterSeverity");
+  filterControls.alertType = document.getElementById("rlmFilterAlertType");
+  filterControls.chips = document.getElementById("rlmFilterChips");
+  filterControls.applyButtons = [document.getElementById("rlmFiltersApply"), document.getElementById("rlmFiltersRun")].filter(Boolean);
+  filterControls.clearButton = document.getElementById("rlmFiltersClear");
+  filters.defaults.machineId = parseMachineId(filterControls.root.dataset.defaultMachine || "");
+  filters.defaults.start = normalizeDateTimeInput(filterControls.root.dataset.defaultStart || "");
+  filters.defaults.end = normalizeDateTimeInput(filterControls.root.dataset.defaultEnd || "", "23:59");
+  hydrateFilterStateFromStore();
+  syncFilterInputs();
+  filterControls.applyButtons.forEach(btn => btn.addEventListener("click", () => applyFilters()));
+  if (filterControls.clearButton) {
+    filterControls.clearButton.addEventListener("click", resetFilters);
+  }
+  if (filterControls.chips) {
+    filterControls.chips.addEventListener("click", handleFilterChipClick);
+  }
+  renderFilterChips();
+  applyFilters({ skipInputRead: true, skipRender: true });
+}
+
+function parseMachineId(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const num = Number(value);
+  return Number.isNaN(num) ? null : num;
+}
+
+function normalizeDateTimeInput(value, fallback = "00:00") {
+  if (!value) return "";
+  const trimmed = String(value).trim();
+  if (!trimmed) return "";
+  if (trimmed.includes("T")) return trimmed.slice(0, 16);
+  return `${trimmed}T${fallback}`;
+}
+
+function hydrateFilterStateFromStore() {
+  const stored = window.FilterState && typeof window.FilterState.getFilters === "function" ? window.FilterState.getFilters() || {} : {};
+  const hasRlmMachine = Object.prototype.hasOwnProperty.call(stored, "rlm_machine_id");
+  let machinePref = hasRlmMachine ? stored.rlm_machine_id : stored.machine_id;
+  if (machinePref === undefined || machinePref === null || machinePref === "") {
+    filters.machineId = hasRlmMachine ? null : filters.defaults.machineId;
+  } else {
+    filters.machineId = parseMachineId(machinePref);
+  }
+  filters.start = stored.rlm_start || normalizeDateTimeInput(stored.start || filters.defaults.start || "");
+  filters.end = stored.rlm_end || normalizeDateTimeInput(stored.end || filters.defaults.end || "", "23:59");
+  filters.severity = stored.rlm_severity || "";
+  filters.alertType = stored.rlm_alert_type || "";
+  const updates = {};
+  if (!stored.rlm_start && filters.start) {
+    updates.rlm_start = filters.start;
+  }
+  if (!stored.rlm_end && filters.end) {
+    updates.rlm_end = filters.end;
+  }
+  if (stored.machine_id === undefined && filters.machineId) {
+    updates.machine_id = String(filters.machineId);
+  }
+  if (!hasRlmMachine && filters.machineId) {
+    updates.rlm_machine_id = String(filters.machineId);
+  }
+  if (!stored.start && filters.start) {
+    updates.start = filters.start.split("T")[0];
+  }
+  if (!stored.end && filters.end) {
+    updates.end = filters.end.split("T")[0];
+  }
+  if (Object.keys(updates).length && window.FilterState && typeof window.FilterState.update === "function") {
+    window.FilterState.update(updates);
+  }
+}
+
+function syncFilterInputs() {
+  if (filterControls.machine) {
+    filterControls.machine.value = filters.machineId !== null && filters.machineId !== undefined ? String(filters.machineId) : "";
+  }
+  if (filterControls.start) {
+    filterControls.start.value = filters.start || "";
+  }
+  if (filterControls.end) {
+    filterControls.end.value = filters.end || "";
+  }
+  if (filterControls.severity) {
+    filterControls.severity.value = filters.severity || "";
+  }
+  if (filterControls.alertType) {
+    filterControls.alertType.value = filters.alertType || "";
+  }
+}
+
+function readFiltersFromInputs() {
+  if (filterControls.machine) {
+    filters.machineId = parseMachineId(filterControls.machine.value || "");
+  }
+  if (filterControls.start) {
+    filters.start = normalizeDateTimeInput(filterControls.start.value || "");
+  }
+  if (filterControls.end) {
+    filters.end = normalizeDateTimeInput(filterControls.end.value || "", "23:59");
+  }
+  if (filterControls.severity) {
+    filters.severity = filterControls.severity.value || "";
+  }
+  if (filterControls.alertType) {
+    filters.alertType = filterControls.alertType.value || "";
+  }
+}
+
+function applyFilters(options = {}) {
+  const { skipInputRead = false, skipRender = false } = options || {};
+  if (!skipInputRead) {
+    readFiltersFromInputs();
+  }
+  state.selectedMachineId = filters.machineId || null;
+  state.selectedSeverity = filters.severity ? filters.severity : null;
+  state.selectedAlertType = filters.alertType ? filters.alertType : null;
+  state.filterStartRaw = filters.start || "";
+  state.filterEndRaw = filters.end || "";
+  state.filterStart = filters.start ? parseDate(filters.start) : null;
+  state.filterEnd = filters.end ? parseDate(filters.end) : null;
+  if (state.historyMachineId === "all" && state.selectedMachineId) {
+    state.historyMachineId = String(state.selectedMachineId);
+  } else if (!state.selectedMachineId) {
+    state.historyMachineId = "all";
+  }
+  persistFilterState();
+  renderFilterChips();
+  if (skipRender) {
+    renderAlertFilterStatus();
+    return;
+  }
+  renderAll();
+}
+
+function persistFilterState() {
+  if (!window.FilterState || typeof window.FilterState.update !== "function") return;
+  const payload = {
+    start: filters.start ? filters.start.split("T")[0] : "",
+    end: filters.end ? filters.end.split("T")[0] : "",
+    rlm_start: filters.start || "",
+    rlm_end: filters.end || "",
+    rlm_severity: filters.severity || "",
+    rlm_alert_type: filters.alertType || "",
+    rlm_machine_id: filters.machineId ? String(filters.machineId) : "",
+  };
+  if (filters.machineId) {
+    payload.machine_id = String(filters.machineId);
+  }
+  window.FilterState.update(payload);
+}
+
+function renderFilterChips() {
+  if (!filterControls.chips) return;
+  const chips = [];
+  if (state.selectedMachineId) {
+    const name = getMachineName(state.selectedMachineId) || `Press ${state.selectedMachineId}`;
+    chips.push({ key: "machine", label: `Machine: ${name}` });
+  }
+  if (state.selectedSeverity) {
+    chips.push({ key: "severity", label: `Severity: ${formatStateLabel(state.selectedSeverity)}` });
+  }
+  if (state.selectedAlertType) {
+    chips.push({
+      key: "alertType",
+      label: `Alert: ${ALERT_TYPE_LABELS[state.selectedAlertType] || state.selectedAlertType.replace(/_/g, " ")}`,
+    });
+  }
+  if (state.filterStartRaw) {
+    chips.push({ key: "start", label: `Start: ${formatFilterDateLabel(state.filterStartRaw)}` });
+  }
+  if (state.filterEndRaw) {
+    chips.push({ key: "end", label: `End: ${formatFilterDateLabel(state.filterEndRaw)}` });
+  }
+  if (!chips.length) {
+    filterControls.chips.innerHTML = "";
+    filterControls.chips.classList.add("hidden");
+    return;
+  }
+  filterControls.chips.innerHTML = chips
+    .map(
+      chip => `
+        <span class="filter-chip">
+          ${chip.label}
+          <button type="button" data-filter-chip="${chip.key}" aria-label="Clear ${chip.label}">×</button>
+        </span>
+      `
+    )
+    .join("");
+  filterControls.chips.classList.remove("hidden");
+}
+
+function formatFilterDateLabel(value) {
+  const date = parseDate(value);
+  if (!date) return value || "";
+  return date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function handleFilterChipClick(event) {
+  const btn = event.target.closest("button[data-filter-chip]");
+  if (!btn) return;
+  const key = btn.dataset.filterChip;
+  if (key === "machine") {
+    filters.machineId = null;
+  } else if (key === "severity") {
+    filters.severity = "";
+  } else if (key === "alertType") {
+    filters.alertType = "";
+  } else if (key === "start") {
+    filters.start = "";
+  } else if (key === "end") {
+    filters.end = "";
+  }
+  syncFilterInputs();
+  applyFilters({ skipInputRead: true });
+}
+
+function resetFilters() {
+  filters.machineId = filters.defaults.machineId;
+  filters.start = filters.defaults.start || "";
+  filters.end = filters.defaults.end || "";
+  filters.severity = "";
+  filters.alertType = "";
+  syncFilterInputs();
+  applyFilters({ skipInputRead: true });
+}
+
+function getFilterSummaryText() {
+  const parts = [];
+  if (state.selectedMachineId) {
+    parts.push(getMachineName(state.selectedMachineId) || `Press ${state.selectedMachineId}`);
+  }
+  if (state.selectedSeverity) {
+    parts.push(formatStateLabel(state.selectedSeverity));
+  }
+  if (state.selectedAlertType) {
+    parts.push(ALERT_TYPE_LABELS[state.selectedAlertType] || state.selectedAlertType.replace(/_/g, " "));
+  }
+  const rangeLabel = (() => {
+    const start = state.filterStartRaw ? formatFilterDateLabel(state.filterStartRaw) : "";
+    const end = state.filterEndRaw ? formatFilterDateLabel(state.filterEndRaw) : "";
+    if (start && end) return `${start} – ${end}`;
+    if (start) return `After ${start}`;
+    if (end) return `Before ${end}`;
+    return "";
+  })();
+  if (rangeLabel) {
+    parts.push(rangeLabel);
+  }
+  return parts.join(" · ");
 }
 
 function populateHistorySelect() {
@@ -1085,19 +1410,27 @@ function handleMachineGridClick(event) {
 }
 
 function applyMachineFilter(machineId, severity) {
-  state.selectedMachineId = machineId;
-  state.selectedSeverity = severity;
-  renderMachineGrid();
-  renderActiveAlerts();
-  renderAlertFilterStatus();
+  filters.machineId = machineId || null;
+  filters.severity = severity || "";
+  if (filterControls.machine) {
+    filterControls.machine.value = filters.machineId ? String(filters.machineId) : "";
+  }
+  if (filterControls.severity) {
+    filterControls.severity.value = filters.severity;
+  }
+  applyFilters({ skipInputRead: true });
 }
 
 function clearMachineFilter() {
-  state.selectedMachineId = null;
-  state.selectedSeverity = null;
-  renderMachineGrid();
-  renderActiveAlerts();
-  renderAlertFilterStatus();
+  filters.machineId = null;
+  filters.severity = "";
+  if (filterControls.machine) {
+    filterControls.machine.value = "";
+  }
+  if (filterControls.severity) {
+    filterControls.severity.value = "";
+  }
+  applyFilters({ skipInputRead: true });
 }
 
 function getMachineName(machineId) {
@@ -1256,6 +1589,7 @@ function wireEvents() {
 }
 
 function init() {
+  initFilters();
   wireEvents();
   loadOverview().catch(() => {});
 }
