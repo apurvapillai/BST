@@ -232,10 +232,10 @@ function renderPlantSummary() {
   const lastUpdated = parseDate(summary.lastUpdatedUtc);
   const tiles = [
     { label: "Total presses", value: summary.totalPresses },
-    { label: "Critical", value: summary.criticalPresses },
-    { label: "Warning", value: summary.warningPresses },
-    { label: "Healthy", value: summary.healthyPresses },
-    { label: "Idle/Stale", value: summary.idleOrStalePresses },
+    { label: "Critical", value: summary.criticalPresses, tone: summary.criticalPresses > 0 ? "critical" : "" },
+    { label: "Warning", value: summary.warningPresses, tone: summary.warningPresses > 0 ? "warning" : "" },
+    { label: "Healthy", value: summary.healthyPresses, tone: summary.healthyPresses > 0 ? "healthy" : "" },
+    { label: "Idle/Stale", value: summary.idleOrStalePresses, tone: summary.idleOrStalePresses > 0 ? "idle" : "" },
     {
       label: "Last refresh",
       value: lastUpdated ? `${lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "—",
@@ -245,8 +245,9 @@ function renderPlantSummary() {
   container.innerHTML = tiles
     .map(tile => {
       const sub = tile.subtext ? `<small>${tile.subtext}</small>` : "";
+      const tone = tile.tone ? ` summary-card--${tile.tone}` : "";
       return `
-        <div class="summary-card">
+        <div class="summary-card${tone}">
           <span>${tile.label}</span>
           <strong>${tile.value ?? 0}</strong>
           ${sub}
@@ -261,7 +262,7 @@ function renderPlantSummary() {
 
 function renderMachineGrid() {
   const grid = document.getElementById("machineGrid");
-  const cards = state.overview?.machineCards || [];
+  const cards = (state.overview?.machineCards || []).slice().sort(sortMachineCards);
   const filteredCards = state.selectedMachineId ? cards.filter(card => card.machineId === state.selectedMachineId) : cards;
   if (!filteredCards.length) {
     const message = state.selectedMachineId
@@ -314,6 +315,29 @@ function renderMachineCard(card) {
       </div>
     </div>
   `;
+}
+
+function sortMachineCards(a = {}, b = {}) {
+  const numA = extractMachineNumber(a);
+  const numB = extractMachineNumber(b);
+  if (numA !== numB) return numA - numB;
+  const nameA = (a.machineName || "").toLowerCase();
+  const nameB = (b.machineName || "").toLowerCase();
+  if (nameA && nameB) return nameA.localeCompare(nameB);
+  if (nameA) return -1;
+  if (nameB) return 1;
+  return (a.machineId || 0) - (b.machineId || 0);
+}
+
+function extractMachineNumber(card = {}) {
+  const name = card.machineName || "";
+  const match = name.match(/(\d+)/);
+  if (match) {
+    const value = Number(match[1]);
+    if (Number.isFinite(value)) return value;
+  }
+  if (Number.isFinite(card.machineId)) return Number(card.machineId);
+  return Number.MAX_SAFE_INTEGER;
 }
 
 function machineMetric(label, value) {
@@ -420,8 +444,10 @@ function renderActiveAlerts() {
       const repeatNote = alert.repeatCount > 1 ? ` (+${alert.repeatCount - 1} related)` : "";
       const isRolling = ROLLING_ALERT_TYPES.has(alert.alertType);
       const alertTitle = `${isRolling ? "Rolling · " : ""}${(alert.alertType || "Alert").replace(/_/g, " ")}${repeatNote}`;
-      const triggeredLabel = alert.triggeredAtLocal || formatTimeCentral(alert.triggeredAt);
-      const triggeredDetail = alert.triggeredAtLocal || formatDateTimeCentral(alert.triggeredAt);
+      const triggeredLabelCentral = formatTimeCentral(alert.triggeredAt);
+      const triggeredDetailCentral = formatDateTimeCentral(alert.triggeredAt);
+      const triggeredLabel = triggeredLabelCentral !== "—" ? triggeredLabelCentral : alert.triggeredAtLocal || "—";
+      const triggeredDetail = triggeredDetailCentral !== "—" ? triggeredDetailCentral : alert.triggeredAtLocal || "—";
       return `
         <div class="alert-card ${alert.severity}">
           <div class="alert-card-head">
@@ -453,19 +479,24 @@ function renderActiveAlerts() {
 }
 
 function renderAlertFilterStatus() {
-  const el = document.getElementById("alertFilterStatus");
-  if (!el) return;
   const summary = getFilterSummaryText();
-  if (!summary) {
-    el.innerHTML = "";
-    return;
+  const machineStatus = document.getElementById("machineFilterStatus");
+  const alertStatus = document.getElementById("alertFilterStatus");
+
+  const chipHtml = summary
+    ? `<span class="alert-filter-chip">
+        Filtered: ${summary}
+        <button type="button" id="clearFilterBtn">×</button>
+      </span>`
+    : "";
+
+  if (machineStatus) {
+    machineStatus.innerHTML = chipHtml;
   }
-  el.innerHTML = `
-    <span class="alert-filter-chip">
-      Filtered: ${summary}
-      <button type="button" id="clearFilterBtn">×</button>
-    </span>
-  `;
+
+  if (alertStatus) {
+    alertStatus.innerHTML = chipHtml;
+  }
 }
 
 function renderWindowSummary() {
@@ -1122,9 +1153,10 @@ async function openThresholdModal() {
 
 function populateThresholdSelect() {
   const select = document.getElementById("thresholdMachineSelect");
-  if (!select || !state.thresholds?.machines) return;
-  if (!state.selectedThresholdMachine && state.thresholds.machines.length) {
-    state.selectedThresholdMachine = String(state.thresholds.machines[0].machineId);
+  const machines = getUniqueThresholdMachines();
+  if (!select || !machines.length) return;
+  if (!state.selectedThresholdMachine) {
+    state.selectedThresholdMachine = String(machines[0].machineId);
   }
   const selectedValue = String(state.selectedThresholdMachine || "");
   const bulkOption = `
@@ -1132,7 +1164,7 @@ function populateThresholdSelect() {
       All machines (bulk update)
     </option>
   `;
-  const machineOptions = state.thresholds.machines
+  const machineOptions = machines
     .map(machine => {
       const value = String(machine.machineId);
       return `
@@ -1152,9 +1184,8 @@ function renderThresholdForm() {
   const selectedValue = select.value || "";
   state.selectedThresholdMachine = selectedValue;
   const isBulk = selectedValue === "all";
-  const machine = isBulk
-    ? state.thresholds?.machines?.[0]
-    : state.thresholds?.machines?.find(m => String(m.machineId) === selectedValue);
+  const machines = getUniqueThresholdMachines();
+  const machine = isBulk ? machines[0] : machines.find(m => String(m.machineId) === selectedValue);
   if (!machine) {
     form.innerHTML = '<div class="empty-state">No machine selected.</div>';
     const note = document.getElementById("thresholdBulkNote");
@@ -1374,6 +1405,35 @@ function setThresholdMessage(message, type = "") {
   if (!el) return;
   el.textContent = message;
   el.style.color = type === "success" ? "#4ade80" : type === "error" ? "#f87171" : "#fbbf24";
+}
+
+function normalizeMachineKey(machine = {}) {
+  const name = (machine.machineName || "").trim().toLowerCase();
+  if (!name) return String(machine.machineId || "");
+  const match = name.match(/press\s*(\d+)/i);
+  if (match) {
+    return `press-${match[1].padStart(3, "0")}`;
+  }
+  return name;
+}
+
+function getUniqueThresholdMachines() {
+  const machines = state.thresholds?.machines || [];
+  const seen = new Set();
+  const unique = [];
+  machines.forEach(machine => {
+    const key = normalizeMachineKey(machine);
+    if (seen.has(key)) return;
+    seen.add(key);
+    unique.push(machine);
+  });
+  unique.sort((a, b) => {
+    const numA = extractMachineNumber({ machineName: a.machineName, machineId: a.machineId });
+    const numB = extractMachineNumber({ machineName: b.machineName, machineId: b.machineId });
+    if (numA !== numB) return numA - numB;
+    return (a.machineName || "").localeCompare(b.machineName || "");
+  });
+  return unique;
 }
 
 function handleAlertRailClick(event) {

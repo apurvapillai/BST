@@ -77,6 +77,9 @@
       const label = toggle.querySelector(".theme-toggle-text");
       if (icon) icon.textContent = darkMode ? "☀️" : "🌙";
       if (label) label.textContent = darkMode ? "Light Mode" : "Dark Mode";
+      window.dispatchEvent(
+        new CustomEvent("bst:themechange", { detail: { mode: darkMode ? "dark" : "light" } })
+      );
     };
 
     const stored = (() => {
@@ -195,10 +198,10 @@
           ) {
             window.RLMHandlers.requestJobSelection(tab);
             syncActiveLink();
-          } else {
-            const targetHref = link.getAttribute("href") || `/dashboard#${tab}`;
-            window.location.href = targetHref;
+            return;
           }
+          const targetHref = link.getAttribute("href") || `/dashboard#${tab}`;
+          window.location.href = targetHref;
         } else if (route === "dashboard" && tab) {
           setPendingDashboardTab("");
         }

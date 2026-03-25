@@ -1,63 +1,68 @@
-<aside class="app-sidebar" role="navigation" aria-label="Main">
-  <div class="sidebar-header">
-    <div class="sidebar-brand">
-      <span class="sidebar-logo">
-        <img
-          src="{{ url_for('static', filename='images/ProcessGuard_Logo.png') }}"
-          alt="ProcessGuard Vision logo"
-        >
-      </span>
-      <div class="sidebar-brand-text">
-        <span class="sidebar-eyebrow">ProcessGuard</span>
-        <span class="sidebar-title">BST Suite</span>
-      </div>
-    </div>
-    <button class="sidebar-collapse-btn" type="button" data-sidebar-toggle aria-label="Toggle sidebar">
-      <span class="sidebar-collapse-icon" aria-hidden="true"></span>
-    </button>
-  </div>
-  <div class="sidebar-body">
-    <div class="sidebar-sections">
-      <div class="sidebar-section">
-        <p class="sidebar-section-title">Defects</p>
-        <a href="/dashboard#overview" class="sidebar-link" data-route="dashboard" data-tab="overview">
-          <span class="sidebar-link-text">Machine Overview</span>
-        </a>
-        <a href="/dashboard#job" class="sidebar-link" data-route="dashboard" data-tab="job">
-          <span class="sidebar-link-text">Job Explorer</span>
-        </a>
-        <a href="/dashboard#defects" class="sidebar-link" data-route="dashboard" data-tab="defects">
-          <span class="sidebar-link-text">Defect Explorer</span>
-        </a>
-        <a href="/dashboard#qc-review" class="sidebar-link" data-route="dashboard" data-tab="qc-review">
-          <span class="sidebar-link-text">QC Review</span>
-        </a>
-        <a href="/dashboard#heatmap" class="sidebar-link" data-route="dashboard" data-tab="heatmap">
-          <span class="sidebar-link-text">Heatmap</span>
-        </a>
-      </div>
-      <div class="sidebar-section">
-        <p class="sidebar-section-title">Repeat Length</p>
-        <a href="/rlm/" class="sidebar-link" data-route="rlm-detail">
-          <span class="sidebar-link-text">Machine Detail</span>
-        </a>
-        <a href="/rlm/live/" class="sidebar-link" data-route="rlm-live">
-          <span class="sidebar-link-text">Live Dashboard</span>
-        </a>
-      </div>
-      <div class="sidebar-section">
-        <p class="sidebar-section-title">Insights &amp; Comparisons</p>
-        <a href="/insights/" class="sidebar-link" data-route="insights">
-          <span class="sidebar-link-text">Insights</span>
-        </a>
-      </div>
-    </div>
-    <div class="sidebar-footer">
-      <button id="themeToggle" class="theme-toggle" type="button" aria-pressed="false" aria-label="Toggle theme">
-        <span class="theme-toggle-icon" aria-hidden="true">🌙</span>
-        <span class="theme-toggle-text">Dark Mode</span>
-      </button>
-    </div>
-  </div>
+<aside aria-label="Main" class="app-sidebar" role="navigation">
+<div class="sidebar-header">
+<div class="sidebar-brand">
+<span class="sidebar-logo">
+<img alt="ProcessGuard Vision logo" src="{{ url_for('static', filename='images/ProcessGuard_Logo.png') }}"/>
+</span>
+<div class="sidebar-brand-text">
+<span class="sidebar-eyebrow">ProcessGuard</span>
+<span class="sidebar-title">BST Suite</span>
+</div>
+</div>
+<button aria-label="Toggle sidebar" class="sidebar-collapse-btn" data-sidebar-toggle="" type="button">
+<span aria-hidden="true" class="sidebar-collapse-icon"></span>
+</button>
+</div>
+<div class="sidebar-body">
+<div class="sidebar-sections">
+<div class="sidebar-section">
+<p class="sidebar-section-title"><span aria-hidden="true" class="sidebar-section-icon">🧪</span><span class="sidebar-section-title-text">Defects</span></p>
+<a class="sidebar-link" data-route="dashboard" data-tab="overview" href="/dashboard#overview" title="Machine Overview">
+<span aria-hidden="true" class="sidebar-link-badge">M</span>
+<span class="sidebar-link-text">Machine Overview</span>
+</a>
+<a class="sidebar-link" data-route="dashboard" data-tab="job" href="/dashboard#job" title="Job Explorer">
+<span aria-hidden="true" class="sidebar-link-badge">J</span>
+<span class="sidebar-link-text">Job Explorer</span>
+</a>
+<a class="sidebar-link" data-route="dashboard" data-tab="defects" href="/dashboard#defects" title="Defect Explorer">
+<span aria-hidden="true" class="sidebar-link-badge">D</span>
+<span class="sidebar-link-text">Defect Explorer</span>
+</a>
+<a class="sidebar-link" data-route="dashboard" data-tab="qc-review" href="/dashboard#qc-review" title="QC Review">
+<span aria-hidden="true" class="sidebar-link-badge">Q</span>
+<span class="sidebar-link-text">QC Review</span>
+</a>
+<a class="sidebar-link" data-route="dashboard" data-tab="heatmap" href="/dashboard#heatmap" title="Heatmap">
+<span aria-hidden="true" class="sidebar-link-badge">H</span>
+<span class="sidebar-link-text">Heatmap</span>
+</a>
+</div>
+<div class="sidebar-section">
+<p class="sidebar-section-title"><span aria-hidden="true" class="sidebar-section-icon">📏</span><span class="sidebar-section-title-text">Repeat Length</span></p>
+<a class="sidebar-link" data-route="rlm-detail" href="/rlm/" title="Machine Detail">
+<span aria-hidden="true" class="sidebar-link-badge">M</span>
+<span class="sidebar-link-text">Machine Detail</span>
+</a>
+<a class="sidebar-link" data-route="rlm-live" href="/rlm/live/" title="Live Dashboard">
+<span aria-hidden="true" class="sidebar-link-badge">L</span>
+<span class="sidebar-link-text">Live Dashboard</span>
+</a>
+</div>
+<div class="sidebar-section">
+<p class="sidebar-section-title"><span aria-hidden="true" class="sidebar-section-icon">📊</span><span class="sidebar-section-title-text">Insights &amp; Comparisons</span></p>
+<a aria-disabled="true" class="sidebar-link" data-route="insights" href="javascript:void(0)" role="presentation" tabindex="-1" title="Insights (coming soon)">
+<span aria-hidden="true" class="sidebar-link-badge">I</span>
+<span class="sidebar-link-text">Insights</span>
+</a>
+</div>
+</div>
+<div class="sidebar-footer">
+<button aria-label="Toggle theme" aria-pressed="false" class="theme-toggle" id="themeToggle" type="button">
+<span aria-hidden="true" class="theme-toggle-icon">🌙</span>
+<span class="theme-toggle-text">Dark Mode</span>
+</button>
+</div>
+</div>
 </aside>
-<div class="sidebar-backdrop" data-sidebar-backdrop></div>
+<div class="sidebar-backdrop" data-sidebar-backdrop=""></div>

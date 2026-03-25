@@ -31,9 +31,10 @@ STATE_LABELS = {
     "warning": "Warning",
     "critical": "Critical",
     "idle": "Idle",
-    "stale": "Stale",
+    "stale": "Recently Inactive",
 }
 ROLLING_WINDOW_REELS = 4
+ALERT_REEL_LOOKBACK = 2
 WINDOWS = {
     "1h": timedelta(hours=1),
     "6h": timedelta(hours=6),
@@ -264,9 +265,16 @@ class RLMLiveService:
     def get_thresholds(self) -> Dict[str, object]:
         with RLMSessionLocal() as session:
             rows = session.query(RLMLiveMachineThreshold).order_by(RLMLiveMachineThreshold.machine_name.asc()).all()
+            machines = []
+            seen_ids = set()
+            for row in rows:
+                if row.machine_id in seen_ids:
+                    continue
+                seen_ids.add(row.machine_id)
+                machines.append(self._serialize_threshold(row))
             config = self._get_system_config(session)
             return {
-                "machines": [self._serialize_threshold(r) for r in rows],
+                "machines": machines,
                 "system": {
                     "refreshSeconds": config.default_refresh_seconds,
                     "cyclePanelSeconds": config.default_cycle_panel_seconds,
@@ -386,7 +394,8 @@ class RLMLiveService:
                 bad_streak = 0
                 qualifying_history: List[ReelHealth] = []
                 auto_closed = False
-                for reel in current_job_reels:
+                process_start_idx = max(0, len(current_job_reels) - ALERT_REEL_LOOKBACK)
+                for idx, reel in enumerate(current_job_reels):
                     health = health_map.get(reel.reel_db_id)
                     if not health:
                         continue
@@ -397,21 +406,24 @@ class RLMLiveService:
                     elif health.is_qualifying_reel:
                         bad_streak = 0
 
+                    should_process = idx >= process_start_idx
+                    if not should_process:
+                        continue
                     events = self._events_for_reel(machine.machine_name, health, threshold, bad_streak)
                     if health.is_qualifying_reel:
                         rolling_window = qualifying_history[-ROLLING_WINDOW_REELS:]
                         events.extend(self._rolling_events(machine.machine_name, rolling_window, threshold))
                     if (
                         not auto_closed
-                    and not health.is_bad_reel
-                    and not health.has_zero_monitoring
-                    and self._auto_close_recovered_alerts(
-                                session,
-                                machine_id=machine.machine_id,
-                                recovery_cutoff=health.production_start,
-                            )
-                        ):
-                            auto_closed = True
+                        and not health.is_bad_reel
+                        and not health.has_zero_monitoring
+                        and self._auto_close_recovered_alerts(
+                            session,
+                            machine_id=machine.machine_id,
+                            recovery_cutoff=health.production_start,
+                        )
+                    ):
+                        auto_closed = True
                     for alert_type, severity, message, hint in events:
                         if not alert_config.get(alert_type, True):
                             continue
@@ -927,7 +939,8 @@ class RLMLiveService:
         active_alerts: List[RLMLiveAlertEvent],
         health_lookup: Dict[int, ReelHealth],
     ) -> Dict[str, object]:
-        stale_cutoff = now - timedelta(minutes=thresholds.stale_after_minutes)
+        stale_window_minutes = max(thresholds.stale_after_minutes or 0, 120)
+        stale_cutoff = now - timedelta(minutes=stale_window_minutes)
         status = "idle"
         latest_start = self._ensure_aware(latest_reel.production_start_dt) if latest_reel else None
         if latest_start:
@@ -935,7 +948,7 @@ class RLMLiveService:
             if latest_start < stale_cutoff:
                 status = "stale"
         counts = {"info": 0, "warning": 0, "critical": 0}
-        recent_cutoff = now - timedelta(minutes=thresholds.stale_after_minutes)
+        recent_cutoff = now - timedelta(minutes=stale_window_minutes)
         recent_alert_severity = "healthy"
         for alert in active_alerts:
             counts[alert.severity] = counts.get(alert.severity, 0) + 1
@@ -993,7 +1006,7 @@ class RLMLiveService:
                 base_state = self._severity_from_bad_reel(latest_health, thresholds)
                 status_message = "1 bad reel"
             elif latest_health.is_qualifying_reel and previous_bad:
-                base_state = "info"
+                base_state = "healthy"
                 is_recovered = True
                 status_message = "Recovered on latest reel"
             else:
@@ -1395,20 +1408,27 @@ class RLMLiveService:
         return aware.isoformat().replace("+00:00", "Z")
 
     def _format_raw_timestamp(self, dt: Optional[datetime]) -> Optional[str]:
-        if not dt:
+        localized = self._ensure_local(dt)
+        if not localized:
             return None
         try:
-            return dt.strftime("%Y-%m-%d %I:%M %p").lstrip("0").replace(" 0", " ")
+            return localized.strftime("%Y-%m-%d %I:%M %p").lstrip("0").replace(" 0", " ")
         except TypeError:
-            return str(dt)
+            return str(localized)
 
-    def _ensure_aware(self, dt: Optional[datetime]) -> Optional[datetime]:
+    def _ensure_local(self, dt: Optional[datetime]) -> Optional[datetime]:
         if not dt:
             return None
         if dt.tzinfo is None:
             localized = dt.replace(tzinfo=LOCAL_TIMEZONE)
         else:
             localized = dt.astimezone(LOCAL_TIMEZONE)
+        return localized
+
+    def _ensure_aware(self, dt: Optional[datetime]) -> Optional[datetime]:
+        localized = self._ensure_local(dt)
+        if not localized:
+            return None
         return localized.astimezone(timezone.utc)
 
     def _clean_id_list(self, values: Optional[List[int]]) -> List[int]:

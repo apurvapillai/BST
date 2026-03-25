@@ -36,6 +36,109 @@
 
   const elements = {};
 
+  function readCssVar(name, fallback = "") {
+    const value = getComputedStyle(document.body).getPropertyValue(name).trim();
+    return value || fallback;
+  }
+
+  function getPlotlyTheme() {
+    return {
+      paper: readCssVar("--chart-paper-bg", "#ffffff"),
+      plot: readCssVar("--chart-plot-bg", "#f8fafc"),
+      font: readCssVar("--text-primary", "#0f172a"),
+      grid: readCssVar("--chart-grid-color", "rgba(148,163,184,0.4)"),
+      axis: readCssVar("--chart-axis-color", "#94a3b8"),
+    };
+  }
+
+  function applyPlotlyTheme(layout = {}) {
+    const theme = getPlotlyTheme();
+    const themed = {
+      ...layout,
+      paper_bgcolor: theme.paper,
+      plot_bgcolor: theme.plot,
+      font: { ...(layout.font || {}), color: theme.font },
+      hoverlabel: {
+        ...(layout.hoverlabel || {}),
+        bgcolor: theme.plot,
+        font: { ...(layout.hoverlabel?.font || {}), color: theme.font },
+      },
+      legend: {
+        ...(layout.legend || {}),
+        font: { ...(layout.legend?.font || {}), color: theme.font },
+      },
+    };
+    Object.keys(themed).forEach((key) => {
+      if (/^[xy]axis\d*/.test(key)) {
+        themed[key] = {
+          ...themed[key],
+          gridcolor: themed[key].gridcolor || theme.grid,
+          zerolinecolor: themed[key].zerolinecolor || theme.grid,
+          linecolor: themed[key].linecolor || theme.axis,
+          tickfont: { ...(themed[key].tickfont || {}), color: theme.font },
+        };
+        if (themed[key].title) {
+          themed[key] = {
+            ...themed[key],
+            title: {
+              ...themed[key].title,
+              font: { ...(themed[key].title.font || {}), color: theme.font },
+            },
+          };
+        }
+      }
+    });
+    return themed;
+  }
+
+  function refreshPlotlyTheme() {
+    if (!window.Plotly) return;
+    const theme = getPlotlyTheme();
+    document.querySelectorAll(".js-plotly-plot").forEach((node) => {
+      const layout = node.layout || {};
+      const update = {
+        paper_bgcolor: theme.paper,
+        plot_bgcolor: theme.plot,
+        "legend.font.color": theme.font,
+        "hoverlabel.bgcolor": theme.plot,
+        "hoverlabel.font.color": theme.font,
+      };
+      Object.keys(layout).forEach((key) => {
+        if (/^[xy]axis\d*/.test(key)) {
+          update[`${key}.gridcolor`] = theme.grid;
+          update[`${key}.zerolinecolor`] = theme.grid;
+          update[`${key}.linecolor`] = theme.axis;
+          update[`${key}.tickfont.color`] = theme.font;
+          if (layout[key]?.title) {
+            update[`${key}.title.font.color`] = theme.font;
+          }
+        }
+      });
+      window.Plotly.relayout(node, update);
+    });
+  }
+
+  window.addEventListener("bst:themechange", refreshPlotlyTheme);
+
+  function ensurePlotlyPatched() {
+    if (!window.Plotly || window.Plotly.__rlmThemed) return;
+    const originalReact = window.Plotly.react;
+    const originalNewPlot = window.Plotly.newPlot;
+    window.Plotly.react = function patchedReact(gd, data, layout, config) {
+      return originalReact.call(this, gd, data, layout ? applyPlotlyTheme(layout) : layout, config);
+    };
+    window.Plotly.newPlot = function patchedNewPlot(gd, data, layout, config) {
+      return originalNewPlot.call(this, gd, data, layout ? applyPlotlyTheme(layout) : layout, config);
+    };
+    window.Plotly.__rlmThemed = true;
+  }
+
+  if (window.Plotly) {
+    ensurePlotlyPatched();
+  } else {
+    window.addEventListener("load", ensurePlotlyPatched, { once: true });
+  }
+
   function init() {
     cacheDom();
     hydrateFromFilterState();
@@ -145,13 +248,16 @@
     }
     if (elements.job) {
       elements.job.addEventListener("change", () => {
-        const value = elements.job.value;
-        if (value) {
-          addJobFilter(value);
-          elements.job.value = "";
+    const value = elements.job.value;
+    if (value) {
+      setJobFilter(value);
+      elements.job.value = "";
         } else {
           clearJobFilters();
           refreshAll();
+        }
+        if (window.dashboardFilters && typeof window.dashboardFilters.set === "function") {
+          window.dashboardFilters.set("reel", "", { emit: true, updateUrl: true });
         }
       });
     }
@@ -392,10 +498,10 @@
       state.end = elements.end.value;
     }
     let storedJobs = [];
-    if (Array.isArray(stored.rlm_jobs)) {
+    if (stored.job) {
+      storedJobs = [String(stored.job)];
+    } else if (Array.isArray(stored.rlm_jobs)) {
       storedJobs = stored.rlm_jobs.filter((job) => typeof job === "string" && job.trim());
-    } else if (stored.job) {
-      storedJobs = [stored.job];
     }
     if (storedJobs.length) {
       state.jobFilters = storedJobs.map((job) => String(job).trim()).filter(Boolean);
@@ -411,14 +517,13 @@
     }
   }
 
-  function addJobFilter(jobName) {
+  function setJobFilter(jobName) {
     const cleaned = (jobName || "").trim();
     if (!cleaned) return;
-    if (!state.jobFilters.includes(cleaned)) {
-      state.jobFilters.push(cleaned);
-      renderFilterChips();
-      refreshAll();
-    }
+    state.jobFilters = [cleaned];
+    renderFilterChips();
+    clearPersistedReels();
+    refreshAll();
   }
 
   function removeJobFilter(jobName) {
@@ -492,6 +597,30 @@
     renderFilterChips();
     if (elements.job) {
       elements.job.value = "";
+    }
+    try {
+      if (window.Filters && typeof window.Filters.set === "function") {
+        window.Filters.set("reel", "", { emit: true, updateUrl: true });
+        window.Filters.set("reel_code", "", { emit: true, updateUrl: true });
+        window.Filters.set("reel_id", "", { emit: true, updateUrl: true });
+      } else if (window.dashboardFilters && typeof window.dashboardFilters.set === "function") {
+        window.dashboardFilters.clearReels && window.dashboardFilters.clearReels();
+      }
+      document.querySelectorAll('.filter-chip[data-key="reel_id"]').forEach((chip) => {
+        chip.remove();
+      });
+    } catch (err) {
+      console.warn("Failed to clear dashboard reel filters", err);
+    }
+    clearPersistedReels();
+  }
+
+  function clearPersistedReels() {
+    if (window.FilterState && typeof window.FilterState.update === "function") {
+      window.FilterState.update({
+        reel_ids: [],
+        reel_code: [],
+      });
     }
   }
 
@@ -1154,6 +1283,13 @@
     return map;
   }
 
+  function parseProductionStart(value) {
+    if (!value) return null;
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return date;
+  }
+
   function renderChangeMixChart(mix) {
     if (!elements.changeMixChart) return;
     if (!mix) {
@@ -1594,18 +1730,31 @@
     const reelAggregates = {};
     state.deltaRows.forEach((row) => {
       if (!row.reelDbId) return;
+      const meta = state.reelMeta[row.reelDbId] || {};
+      const startDate = parseProductionStart(row.productionStart || meta.start);
       if (!reelAggregates[row.reelDbId]) {
-        const meta = state.reelMeta[row.reelDbId] || {};
-        const startDate = meta.start || null;
         reelAggregates[row.reelDbId] = {
           total: 0,
           oob: 0,
           feet: Number.isFinite(meta.feet) ? meta.feet : null,
-          startDate,
-          startTs: null,
+          startTs: startDate ? startDate.getTime() : null,
+          label: row.displayReel || row.reelId || meta.reelId || row.reelDbId,
+          jobName: row.jobName || meta.jobName || "Job",
         };
       }
       const aggregate = reelAggregates[row.reelDbId];
+      if (!aggregate.label && (row.reelId || meta.reelId)) {
+        aggregate.label = row.reelId || meta.reelId;
+      }
+      if (!aggregate.jobName && (row.jobName || meta.jobName)) {
+        aggregate.jobName = row.jobName || meta.jobName;
+      }
+      if (!Number.isFinite(aggregate.feet) && Number.isFinite(meta.feet)) {
+        aggregate.feet = meta.feet;
+      }
+      if (startDate && (!aggregate.startTs || startDate.getTime() < aggregate.startTs)) {
+        aggregate.startTs = startDate.getTime();
+      }
       aggregate.total += 1;
       if (row.outOfRange) aggregate.oob += 1;
       if (Number.isFinite(row.timestamp) && row.timestamp > 0) {
@@ -1840,15 +1989,20 @@
     if (!target) return;
     const entries = Object.entries(reelAggregates)
       .map(([reelDbId, data]) => {
-        if (!Number.isFinite(data.feet) || data.total <= 0 || data.oob <= 0) return null;
-        const good = Math.max(((data.total - data.oob) / data.total) * data.feet, 0);
-        const bad = Math.max((data.oob / data.total) * data.feet, 0);
         const meta = state.reelMeta[Number(reelDbId)] || {};
+        const totalFeet = Number.isFinite(data.feet)
+          ? data.feet
+          : Number.isFinite(meta.feet)
+            ? meta.feet
+            : null;
+        if (!Number.isFinite(totalFeet) || data.total <= 0 || data.oob <= 0) return null;
+        const good = Math.max(((data.total - data.oob) / data.total) * totalFeet, 0);
+        const bad = Math.max((data.oob / data.total) * totalFeet, 0);
         const startDate = determineStartDate(data, meta);
         return {
-          label: meta.reelId || reelDbId,
-          jobName: meta.jobName || "Job",
-          totalFeet: data.feet,
+          label: data.label || meta.reelId || reelDbId,
+          jobName: data.jobName || meta.jobName || "Job",
+          totalFeet,
           good,
           bad,
           start: startDate,
@@ -1944,11 +2098,15 @@
         const meta = state.reelMeta[Number(reelDbId)] || {};
         const startDate = determineStartDate(data, meta);
         return {
-          label: meta.reelId || reelDbId,
-          jobName: meta.jobName || "Job",
+          label: data.label || meta.reelId || reelDbId,
+          jobName: data.jobName || meta.jobName || "Job",
           start: startDate,
           startValue: startDate ? startDate.getTime() : Number.POSITIVE_INFINITY,
-          totalFeet: data.feet,
+          totalFeet: Number.isFinite(data.feet)
+            ? data.feet
+            : Number.isFinite(meta.feet)
+              ? meta.feet
+              : null,
           good: Math.max(data.total - data.oob, 0),
           bad: Math.max(data.oob, 0),
         };
