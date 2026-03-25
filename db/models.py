@@ -252,3 +252,59 @@ class HeatmapRegion(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     machine = relationship("Machine")
+
+
+# -----------------------
+# BSTLiveAlertEvent
+# -----------------------
+class BSTLiveAlertEvent(Base):
+    __tablename__ = "bst_live_alert_events"
+
+    alert_event_id = Column(Integer, primary_key=True, autoincrement=True)
+    alert_key = Column(String(255), unique=True, nullable=False, index=True)
+    alert_type = Column(String(64), nullable=False, index=True)
+    severity = Column(String(32), nullable=False, index=True)
+    status = Column(String(32), nullable=False, index=True, default="active")
+
+    machine_id = Column(Integer, ForeignKey("machines.machine_id"), nullable=True, index=True)
+    reel_id = Column(Integer, ForeignKey("reels.reel_id"), nullable=True, index=True)
+    defect_id = Column(Integer, ForeignKey("defects.defect_id"), nullable=True, index=True)
+
+    machine_name = Column(String(100))
+    reel_code = Column(String(64))
+    job_name = Column(String(100))
+    order_number = Column(String(64))
+
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=False)
+    detail_json = Column(JSON)
+
+    first_seen_at = Column(DateTime, nullable=False, index=True)
+    last_seen_at = Column(DateTime, nullable=False, index=True)
+    acknowledged_at = Column(DateTime, nullable=True, index=True)
+    acknowledged_by = Column(String(100))
+    resolved_at = Column(DateTime, nullable=True, index=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+# -----------------------
+# BSTLiveAlertThreshold
+# -----------------------
+class BSTLiveAlertThreshold(Base):
+    __tablename__ = "bst_live_alert_thresholds"
+
+    threshold_id = Column(Integer, primary_key=True, autoincrement=True)
+    machine_id = Column(Integer, ForeignKey("machines.machine_id"), nullable=True, unique=True)
+    is_enabled = Column(Boolean, default=True, nullable=False)
+
+    no_recent_data_minutes = Column(Integer)
+    inspection_off_running_minutes = Column(Integer)
+    defect_spike_15_min_threshold = Column(Integer)
+    defect_spike_60_min_threshold = Column(Integer)
+    high_learn_minutes = Column(Integer)
+    review_backlog_reels_threshold = Column(Integer)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

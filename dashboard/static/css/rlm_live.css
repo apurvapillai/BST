@@ -217,9 +217,15 @@ button:hover:not(:disabled) {
   color: var(--text-primary);
 }
 
-.badge.info { background: rgba(253, 230, 138, 0.45); color: #92400e; }
-.badge.warning { background: rgba(254, 215, 170, 0.45); color: #9a3412; }
-.badge.critical { background: rgba(254, 202, 202, 0.4); color: #b91c1c; }
+.badge.info { background: rgba(255, 225, 120, 0.85); color: var(--text-primary); }
+.badge.warning { background: rgba(255, 183, 77, 0.85); color: var(--text-primary); }
+.badge.critical { background: rgba(255, 109, 109, 0.85); color: var(--text-primary); }
+
+body.dark-mode .badge.info,
+body.dark-mode .badge.warning,
+body.dark-mode .badge.critical {
+  color: var(--text-inverse);
+}
 
 .state-chip {
   display: inline-flex;

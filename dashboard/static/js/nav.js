@@ -39,7 +39,10 @@
     const path = window.location.pathname;
     const hash = window.location.hash.replace("#", "") || "overview";
     const pending = getPendingDashboardTab();
-    const activeTab = path.startsWith("/dashboard") ? hash : pending;
+    let activeTab = pending;
+    if (path.startsWith("/dashboard") && !path.startsWith("/dashboard/live")) {
+      activeTab = hash || "overview";
+    }
     const links = document.querySelectorAll(".sidebar-link");
     links.forEach((link) => {
       const route = link.dataset.route;
@@ -57,6 +60,8 @@
         isActive = path.startsWith("/rlm") && !path.startsWith("/rlm/live");
       } else if (route === "rlm-live") {
         isActive = path.startsWith("/rlm/live");
+      } else if (route === "dashboard-live") {
+        isActive = path.startsWith("/dashboard/live");
       } else if (route === "insights") {
         isActive = path.startsWith("/insights");
       }
