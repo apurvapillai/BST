@@ -138,38 +138,31 @@
                 <small>Total footage tracked across the selected window.</small>
               </div>
             </div>
-            <div class="kpi-grid">
-              <div class="kpi-card" data-kpi="total_jobs">
+            <div class="kpi-grid kpi-grid--rows">
+              <div class="kpi-card kpi-card--wide" data-kpi="total_jobs">
                 <h3>Total Jobs</h3>
                 <p>--</p>
               </div>
-              <div class="kpi-card" data-kpi="active_length">
-                <h3>Active Length</h3>
-                <p>--</p>
-              </div>
-              <div class="kpi-card" data-kpi="inactive_length">
-                <h3>Inactive Length</h3>
-                <p>--</p>
-              </div>
-              <div class="kpi-card" data-kpi="learn_length">
-                <h3>Learn Length</h3>
-                <p>--</p>
-              </div>
-              <div class="kpi-card" data-kpi="total_length">
+              <div class="kpi-card kpi-card--wide" data-kpi="total_length">
                 <h3>Total Length</h3>
                 <p>--</p>
               </div>
-              <div class="kpi-card" data-kpi="active_pct">
-                <h3>Active %</h3>
-                <p>--</p>
+            </div>
+            <div class="kpi-grid kpi-grid--rows">
+              <div class="kpi-card kpi-card--dual" data-kpi-group="active">
+                <h3>Active Length</h3>
+                <p data-kpi="active_length">--</p>
+                <small data-kpi="active_pct">--</small>
               </div>
-              <div class="kpi-card" data-kpi="inactive_pct">
-                <h3>Inactive %</h3>
-                <p>--</p>
+              <div class="kpi-card kpi-card--dual" data-kpi-group="inactive">
+                <h3>Inactive Length</h3>
+                <p data-kpi="inactive_length">--</p>
+                <small data-kpi="inactive_pct">--</small>
               </div>
-              <div class="kpi-card" data-kpi="learn_pct">
-                <h3>Learn %</h3>
-                <p>--</p>
+              <div class="kpi-card kpi-card--dual" data-kpi-group="learn">
+                <h3>Learn Length</h3>
+                <p data-kpi="learn_length">--</p>
+                <small data-kpi="learn_pct">--</small>
               </div>
             </div>
           </div>
@@ -180,7 +173,7 @@
                 <small>Total, active, inactive, and learn footage grouped by job.</small>
               </div>
               <div class="job-lengths-toggle" role="group" aria-label="Toggle inspection mix units">
-                <button type="button" data-length-mode="raw" class="job-lengths-toggle__btn job-lengths-toggle__btn--active">Meters</button>
+                <button type="button" data-length-mode="raw" class="job-lengths-toggle__btn job-lengths-toggle__btn--active">Feet</button>
                 <button type="button" data-length-mode="pct" class="job-lengths-toggle__btn">Percent</button>
               </div>
             </div>
@@ -193,10 +186,15 @@
               <p class="kpi-section__title">Defect Breakdown</p>
               <small id="defectTypeSummary">Waiting for defect data…</small>
             </div>
-            <div class="kpi-badge">
-              <span>Unique Types</span>
-              <strong data-kpi-highlight="defect_classes">--</strong>
+            <div class="defect-length-filter">
+              <label for="defectMinReelLengthInput">Min Reel Length (ft)</label>
+              <input type="number" id="defectMinReelLengthInput" min="0" step="10" placeholder="4000">
+              <button type="button" id="defectMinReelLengthApply">Apply</button>
             </div>
+          </div>
+          <div class="defect-length-chip hidden" id="defectMinLengthChip">
+            <span></span>
+            <button type="button" id="defectMinLengthClear" aria-label="Clear min reel length filter">&times;</button>
           </div>
           <div class="kpi-grid kpi-grid--defects kpi-grid--summary" id="defectTypeBreakdown" aria-live="polite">
             <div class="kpi-card kpi-card--highlight" data-kpi="total_defects">
@@ -212,19 +210,33 @@
               </div>
               <div id="overviewDefectsByType" class="defect-kpi-trend__plot"></div>
             </div>
-            <div class="defect-kpi-trend defect-kpi-trend--jobs">
-              <div class="defect-kpi-trend__header">
-                <p class="kpi-section__title">Defects by Job</p>
-                <small>Top jobs ranked by total defect counts and classes.</small>
-              </div>
-              <div id="overviewDefectsByJob" class="defect-kpi-trend__plot"></div>
-            </div>
-          </div>
-          <div class="defect-kpi-trend defect-kpi-trend--trend">
+          <div class="defect-kpi-trend defect-kpi-trend--jobs">
             <div class="defect-kpi-trend__header">
-              <p class="kpi-section__title">Defects Trend</p>
-              <small>Track daily defect totals across the filtered time window.</small>
+              <p class="kpi-section__title">Defects by Job</p>
+              <small>Top jobs ranked by total defect counts and classes.</small>
             </div>
+            <div id="overviewDefectsByJob" class="defect-kpi-trend__plot"></div>
+          </div>
+        </div>
+        <div class="defect-kpi-trend defect-kpi-trend--table">
+          <div class="defect-kpi-trend__header">
+            <p class="kpi-section__title">Defects per 1k ft by Job</p>
+            <small>Rates calculated from total footage inspected per job.</small>
+          </div>
+          <div id="overviewDefectRates" class="defect-rates-table-wrapper"></div>
+        </div>
+        <div class="defect-kpi-trend defect-kpi-trend--table">
+          <div class="defect-kpi-trend__header">
+            <p class="kpi-section__title">Sensitivity Thresholds by Job</p>
+            <small>Unique threshold values captured for each defect class.</small>
+          </div>
+          <div id="overviewSensitivityTable" class="defect-rates-table-wrapper"></div>
+        </div>
+        <div class="defect-kpi-trend defect-kpi-trend--trend">
+          <div class="defect-kpi-trend__header">
+            <p class="kpi-section__title">Defects Trend</p>
+            <small>Track daily defect totals across the filtered time window.</small>
+          </div>
             <div id="overviewDefectsTrend" class="defect-kpi-trend__plot"></div>
           </div>
         </div>
@@ -233,41 +245,25 @@
       <div class="charts">
         <div class="chart-row chart-row--four">
         </div>
-        <div class="chart chart-span-full" id="overviewJobsDefectsCard">
-          <div class="chart-header">
-            <div class="chart-header__copy">
-              <p class="kpi-section__title">Defects per Job Leaders</p>
-              <small>Best and worst reels grouped by job for this window.</small>
+        <div class="chart-row chart-row--two">
+          <div class="chart chart-medium" id="overviewMaskLeadersCard">
+            <div class="chart-header">
+              <div class="chart-header__copy">
+                <p class="kpi-section__title">Mask Activity Leaders</p>
+                <small>Jobs with reels adding the most masks.</small>
+              </div>
             </div>
+            <div id="overviewMaskLeaders" class="defect-leaders"></div>
           </div>
-          <div id="overviewJobsDefects" class="defect-leaders"></div>
-        </div>
-        <div class="chart chart-span-full" id="overviewMaskLeadersCard">
-          <div class="chart-header">
-            <div class="chart-header__copy">
-              <p class="kpi-section__title">Mask Activity Leaders</p>
-              <small>Jobs with reels adding the most masks.</small>
+          <div class="chart chart-medium" id="overviewReferenceLeadersCard">
+            <div class="chart-header">
+              <div class="chart-header__copy">
+                <p class="kpi-section__title">Reference Image Overview</p>
+                <small>Total changes plus reels with single vs. multiple references.</small>
+              </div>
             </div>
+            <div id="overviewReferenceLeaders" class="defect-leaders"></div>
           </div>
-          <div id="overviewMaskLeaders" class="defect-leaders"></div>
-        </div>
-        <div class="chart chart-span-full" id="overviewReferenceLeadersCard">
-          <div class="chart-header">
-            <div class="chart-header__copy">
-              <p class="kpi-section__title">Reference Change Leaders</p>
-              <small>Reels with the most reference image updates.</small>
-            </div>
-          </div>
-          <div id="overviewReferenceLeaders" class="defect-leaders"></div>
-        </div>
-        <div class="chart chart-span-full">
-          <div class="chart-header">
-            <div class="chart-header__copy">
-              <p class="kpi-section__title">Operational Changes Timeline</p>
-              <small>Sequence of key run, pause, and learn events in the window.</small>
-            </div>
-          </div>
-          <div id="overviewOperationsTimeline" class="chart-plot"></div>
         </div>
       </div>
     </section>
@@ -928,10 +924,6 @@
   <script src="{{ url_for('static', filename='js/dashboard_filters.js') }}"></script>
   <script src="{{ url_for('static', filename='js/dashboard_router.js') }}"></script>
   <script src="{{ url_for('static', filename='js/tabs/machine_overview.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/tabs/job_explorer.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/tabs/defect_explorer.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/tabs/qc_review.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/tabs/heatmap.js') }}"></script>
   <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 </body>
 </html>

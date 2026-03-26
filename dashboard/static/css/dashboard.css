@@ -1139,6 +1139,18 @@ body.dark-mode {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.kpi-grid--rows {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.kpi-grid--rows + .kpi-grid--rows {
+  margin-top: 12px;
+}
+
+.kpi-card--wide {
+  grid-column: span 1;
+}
+
 .defect-kpi-trends {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
@@ -1166,13 +1178,70 @@ body.dark-mode {
   min-height: 280px;
   width: 100%;
   position: relative;
-  display: block;
   overflow: visible;
 }
 
 .defect-kpi-trend__plot > div {
   width: 100% !important;
   height: 100% !important;
+}
+
+.defect-length-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.defect-length-filter label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--text-secondary);
+}
+
+.defect-length-filter input {
+  width: 110px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+.defect-length-filter button {
+  border: none;
+  background: var(--accent);
+  color: var(--text-inverse);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.defect-length-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--accent-muted);
+  color: var(--text-strong);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  margin-bottom: 10px;
+}
+
+.defect-length-chip.hidden {
+  display: none;
+}
+
+.defect-length-chip button {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
 }
 
 @media (max-width: 1024px) {
@@ -1208,6 +1277,21 @@ body.dark-mode {
   font-size: 22px;
   font-weight: bold;
   color: var(--text-strong);
+}
+
+.kpi-card--dual {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kpi-card--dual p {
+  margin: 6px 0 0;
+}
+
+.kpi-card--dual small {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
 }
 
 .kpi-card--inline h3 {
@@ -4616,4 +4700,55 @@ body.requires-job-tab .filter-chip[data-key="job"] .chip-remove {
 
 .job-lengths-table tbody tr:last-child td {
   border-bottom: none;
+}
+
+.job-lengths-table tbody tr[data-job-value] {
+  cursor: pointer;
+}
+
+.job-lengths-link {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.defect-rates-table-wrapper {
+  width: 100%;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.defect-rates-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.defect-rates-table th,
+.defect-rates-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.defect-rates-table thead th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--text-secondary);
+}
+
+.defect-rates-table tbody tr:nth-child(even) {
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.defect-rates-table tbody tr[data-job-value] {
+  cursor: pointer;
+}
+.chart-row.chart-row--two {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
 }

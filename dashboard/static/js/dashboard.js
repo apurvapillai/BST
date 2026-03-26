@@ -4,6 +4,13 @@
   let jobModalClose = null;
   let requestedJobTab = "";
   const guardedTabs = new Set(["job", "defects", "qc-review", "heatmap"]);
+  const TAB_SCRIPT_CONFIG = {
+    job: { path: "/static/js/tabs/job_explorer.js", exportName: "JobExplorerTab" },
+    defects: { path: "/static/js/tabs/defect_explorer.js", exportName: "DefectExplorerTab" },
+    "qc-review": { path: "/static/js/tabs/qc_review.js", exportName: "QcReviewTab" },
+    heatmap: { path: "/static/js/tabs/heatmap.js", exportName: "HeatmapTab" },
+  };
+  const tabModuleCache = {};
 
   function updateSidebarHighlight(tabName) {
     if (!tabName) return;
@@ -126,17 +133,15 @@
     bindTabNav();
     setupJobModal();
     Filters.init();
-    OverviewTab.init();
-    JobExplorerTab.init();
-    DefectExplorerTab.init();
-    QcReviewTab.init();
-    HeatmapTab.init();
+    if (typeof OverviewTab !== "undefined" && OverviewTab && typeof OverviewTab.init === "function") {
+      OverviewTab.init();
+    }
 
     Router.register("overview", OverviewTab);
-    Router.register("job", JobExplorerTab);
-    Router.register("defects", DefectExplorerTab);
-    Router.register("qc-review", QcReviewTab);
-    Router.register("heatmap", HeatmapTab);
+    Router.register("job", createLazyTab("job"));
+    Router.register("defects", createLazyTab("defects"));
+    Router.register("qc-review", createLazyTab("qc-review"));
+    Router.register("heatmap", createLazyTab("heatmap"));
     Router.init();
     resolveDeferredTab();
     const initialTab = typeof Router.current === "function" ? Router.current() : "overview";
@@ -171,6 +176,138 @@
       lastFiltersKey = nextKey;
       Router.reloadActive();
     });
+  }
+
+  function createLazyTab(tabName) {
+    if (!TAB_SCRIPT_CONFIG[tabName]) {
+      return {
+        activate() {},
+        onFiltersUpdated() {},
+        deactivate() {},
+      };
+    }
+    let moduleRef = null;
+    let loadPromise = null;
+    let initialized = false;
+
+    function ensureModule() {
+      if (moduleRef) return Promise.resolve(moduleRef);
+      if (!loadPromise) {
+        showTabLoadingIndicator(tabName);
+        loadPromise = loadTabModuleScript(tabName)
+          .then((mod) => {
+            moduleRef = mod;
+            hideTabLoadingIndicator(tabName);
+            loadPromise = null;
+            return mod;
+          })
+          .catch((err) => {
+            showTabLoadingIndicator(tabName, "Failed to load tab. Please try again.");
+            loadPromise = null;
+            return Promise.reject(err);
+          });
+      }
+      return loadPromise;
+    }
+
+    function ensureInitialized(mod) {
+      if (!initialized && mod && typeof mod.init === "function") {
+        mod.init();
+        initialized = true;
+      }
+    }
+
+    function invoke(mod, method) {
+      if (mod && typeof mod[method] === "function") {
+        mod[method]();
+      }
+    }
+
+    return {
+      activate() {
+        ensureModule()
+          .then((mod) => {
+            ensureInitialized(mod);
+            invoke(mod, "activate");
+          })
+          .catch(() => {});
+      },
+      onFiltersUpdated() {
+        ensureModule()
+          .then((mod) => {
+            ensureInitialized(mod);
+            invoke(mod, "onFiltersUpdated");
+          })
+          .catch(() => {});
+      },
+      deactivate() {
+        if (!moduleRef) return;
+        invoke(moduleRef, "deactivate");
+      },
+    };
+  }
+
+  function loadTabModuleScript(tabName) {
+    const config = TAB_SCRIPT_CONFIG[tabName];
+    if (!config) {
+      return Promise.reject(new Error(`No loader defined for tab "${tabName}"`));
+    }
+    if (!tabModuleCache[tabName]) {
+      tabModuleCache[tabName] = fetch(config.path, { credentials: "same-origin" })
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`Failed to load ${tabName} tab (${response.status})`);
+          }
+          return response.text();
+        })
+        .then((source) => {
+          const moduleSource = `${source}\nexport default ${config.exportName};`;
+          const blob = new Blob([moduleSource], { type: "text/javascript" });
+          const blobUrl = URL.createObjectURL(blob);
+          return import(/* webpackIgnore: true */ blobUrl)
+            .then((module) => {
+              URL.revokeObjectURL(blobUrl);
+              return module && module.default ? module.default : null;
+            })
+            .catch((err) => {
+              URL.revokeObjectURL(blobUrl);
+              throw err;
+            });
+        })
+        .catch((err) => {
+          console.error(`Failed to load ${tabName} tab`, err);
+          throw err;
+        });
+      tabModuleCache[tabName] = tabModuleCache[tabName].catch((err) => {
+        delete tabModuleCache[tabName];
+        return Promise.reject(err);
+      });
+    }
+    return tabModuleCache[tabName];
+  }
+
+  function showTabLoadingIndicator(tabName, message) {
+    const section = document.getElementById(`tab-${tabName}`);
+    if (!section) return;
+    let indicator = section.querySelector("[data-tab-loading]");
+    if (!indicator) {
+      indicator = document.createElement("div");
+      indicator.dataset.tabLoading = "true";
+      indicator.className = "tab-loading-indicator placeholder";
+      indicator.setAttribute("role", "status");
+      indicator.setAttribute("aria-live", "polite");
+      section.prepend(indicator);
+    }
+    indicator.textContent = message || "Loading…";
+  }
+
+  function hideTabLoadingIndicator(tabName) {
+    const section = document.getElementById(`tab-${tabName}`);
+    if (!section) return;
+    const indicator = section.querySelector("[data-tab-loading]");
+    if (indicator) {
+      indicator.remove();
+    }
   }
 
   function initializeApp() {

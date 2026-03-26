@@ -1,6 +1,7 @@
   const FETCH_DEBOUNCE_MS = 400;
 
   const MM_TO_IN = 25.4;
+  const METERS_TO_FEET = 3.28084;
 
   const Utils = {
     qs(selector, scope = document) {
@@ -30,7 +31,8 @@
     },
     formatMeters(value) {
       if (value === null || value === undefined) return "--";
-      return `${Utils.formatNumber(value, 2)} m`;
+      const feet = Number(value) * METERS_TO_FEET;
+      return `${Utils.formatNumber(feet, 2)} ft`;
     },
     buildFilterRequestKey(state = {}) {
       const normalizeValue = (value) => (value === undefined || value === null ? "" : String(value));

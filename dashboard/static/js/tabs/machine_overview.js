@@ -7,6 +7,13 @@
     let hasRenderedOverview = false;
 
     const pendingReelHydration = new Set();
+    const MIN_LENGTH_STORAGE_KEY = "overview.minReelLength";
+    const FEET_TO_METERS = 0.3048;
+    const METERS_TO_FEET = 3.28084;
+    const DEFAULT_MIN_REEL_LENGTH_FEET = 4000;
+    let minReelLengthFilter = loadStoredMinLength();
+    let jobLengthsToggleBound = false;
+    let latestJobLengthsData = [];
     const DEFECT_CLASS_ROWS = [
       { key: "__total__", label: "Total Defects" },
       { key: "flaw", label: "Flaws", aliases: ["flas"] },
@@ -15,6 +22,14 @@
       { key: "sporadicstreak", label: "Sporadic Streak" },
       { key: "colour", label: "Colour", aliases: ["color", "colur"] },
       { key: "register", label: "Register" },
+    ];
+    const SENSITIVITY_COLUMNS = [
+      { key: "flaw", label: "Flaw (reels)" },
+      { key: "sporadicflaw", label: "Sporadic Flaw (reels)" },
+      { key: "streak", label: "Streak (reels)" },
+      { key: "sporadicstreak", label: "Sporadic Streak (reels)" },
+      { key: "colour", label: "Colour (reels)" },
+      { key: "register", label: "Register (reels)" },
     ];
 
     function readThemeVar(name, fallback = "") {
@@ -173,33 +188,6 @@
         console.log("[MachineOverview] ensureReelMetadata complete", id);
       }
     }
-    const EVENT_ORDER = [
-      "defect",
-      "reference_change",
-      "mask_applied",
-      "sensitivity_change",
-      "rlm_config_change",
-    ];
-    const EVENT_META = {
-      defect: { label: "Defects", color: "#ef4444" },
-      reference_change: { label: "Reference Changes", color: "#2563eb" },
-      mask_applied: { label: "Masks Applied", color: "#f97316" },
-      sensitivity_change: { label: "Sensitivity Changes", color: "#0ea5e9" },
-      rlm_config_change: { label: "RLM Config Changes", color: "#14b8a6" },
-    };
-    const TIMELINE_TYPES = [
-      "sensitivity_change",
-      "mask_applied",
-      "rlm_config_change",
-      "reference_change",
-    ];
-    const TIMELINE_SYMBOL = {
-      sensitivity_change: "circle",
-      mask_applied: "square",
-      rlm_config_change: "diamond",
-      reference_change: "triangle-up",
-    };
-
     let latestRequestToken = 0;
 
     function buildOverviewRequestKey(filtersState) {
@@ -215,8 +203,9 @@
 
     const load = Utils.debounce(async () => {
       const requestToken = ++latestRequestToken;
-      const filtersState = Filters && typeof Filters.getState === "function" ? Filters.getState() : {};
-      const requestKey = buildOverviewRequestKey(filtersState);
+      const filtersState =
+        Filters && typeof Filters.getState === "function" ? Filters.getState() : {};
+      const requestKey = `${buildOverviewRequestKey(filtersState)}|min=${minReelLengthFilter || 0}`;
       const reuseInFlight = inflightOverviewKey === requestKey && inflightOverview;
       const shouldBlock = !hasRenderedOverview || requestKey !== lastRenderedOverviewKey;
       const showOverlay = shouldBlock && !reuseInFlight;
@@ -224,7 +213,9 @@
         LoadingOverlay.show();
       }
       try {
-        const fetchPromise = reuseInFlight || Api.get("overview", {}, filtersState);
+        const extraParams =
+          minReelLengthFilter > 0 ? { min_reel_length: minReelLengthFilter } : {};
+        const fetchPromise = reuseInFlight || Api.get("overview", extraParams, filtersState);
         if (!reuseInFlight) {
           inflightOverviewKey = requestKey;
           inflightOverview = fetchPromise;
@@ -254,10 +245,14 @@
 
     function init() {
       kpiMap = {};
-      Utils.qsa(".kpi-card[data-kpi]").forEach((card) => {
-        const key = card.dataset.kpi;
-        const target = card.querySelector("p");
-        if (!key || !target) return;
+      Utils.qsa("[data-kpi]").forEach((node) => {
+        const key = node.dataset.kpi;
+        if (!key) return;
+        let target = node;
+        if (node.matches(".kpi-card")) {
+          target = node.querySelector("p");
+        }
+        if (!target) return;
         if (!kpiMap[key]) kpiMap[key] = [];
         kpiMap[key].push(target);
       });
@@ -267,6 +262,7 @@
         if (!kpiMap[key]) kpiMap[key] = [];
         kpiMap[key].push(node);
       });
+      setupMinReelLengthControls();
       initialized = true;
     }
 
@@ -311,8 +307,8 @@
       const jobsMeters = data.jobs_meters || [];
       const jobsTime = data.jobs_time || [];
       const jobEvents = data.job_events || [];
-      const defectRankings = data.job_reel_defect_rankings || [];
       const jobMetrics = data.job_metrics || [];
+      const jobSensitivity = data.job_sensitivity_summary || [];
 
       const jobsTimePct = jobsTime.map((job) => {
         const lengthActive = Number.isFinite(job.length_active) ? job.length_active : 0;
@@ -352,7 +348,6 @@
             insidetextorientation: "auto",
             textfont: { size: 13, color: pieLabelColor },
             hoverinfo: "label+percent+value",
-            automargin: true,
             domain: { x: [0.05, 0.95], y: [0.05, 0.95] },
           },
         ],
@@ -364,33 +359,15 @@
         plotlyConfig()
       ).then(updateDefectPieTextColor).catch(() => {});
 
-      Plotly.react(
-        "overviewDefectsTrend",
-        [
-          {
-            type: "scatter",
-            mode: "lines+markers",
-            x: defectsTrend.map((d) => d.time),
-            y: defectsTrend.map((d) => d.count),
-            line: { color: "#0f172a" },
-          },
-        ],
-        withResponsiveLayout({
-          title: "Defects Trend",
-          xaxis: { type: "date" },
-          margin: { t: 40, l: 40, r: 20, b: 60 },
-        }),
-        plotlyConfig()
-      );
+      renderDefectsTrend(defectsTrend);
 
       renderJobLengthsByJob(jobsTime);
+      renderDefectRatesTable(jobMetrics, jobsTime);
+      renderSensitivityTable(jobSensitivity);
 
-      renderJobsDefectRankings(defectRankings);
-      renderMaskLeaders(data.job_mask_rankings || []);
-      renderReferenceLeaders(data.job_reference_rankings || []);
+      renderMaskLeaders(data.job_mask_summary || []);
+      renderReferenceLeaders(data.job_reference_summary || []);
       renderJobMetricCards(jobMetrics);
-      const reelOpsTimeline = data.job_reel_operations_timeline || [];
-      renderOperationsTimeline(jobEvents, reelOpsTimeline);
     }
 
     function renderDefectBreakdown(defectsByType) {
@@ -431,29 +408,6 @@
         })
         .join("");
       container.insertAdjacentHTML("beforeend", cards);
-    }
-
-    function renderJobsDefectRankings(rankings = []) {
-      const container = document.getElementById("overviewJobsDefects");
-      if (!container) return;
-      if (!Array.isArray(rankings) || !rankings.length) {
-        container.innerHTML = "<div class=\"placeholder\">No defect data for this window.</div>";
-        return;
-      }
-      container.innerHTML = rankings.map(renderLeaderJob).join("");
-      if (!container.dataset.leaderbound) {
-        container.addEventListener("click", (event) => {
-          const target = event.target.closest("[data-defect-leader]");
-          if (!target) return;
-          const jobValue = target.dataset.jobValue || "";
-          const jobLabel = target.dataset.jobDisplay || jobValue || "Unassigned";
-          const reelCode = target.dataset.reelCode || "";
-          const reelId = target.dataset.reelId ? Number(target.dataset.reelId) : null;
-          const orderNumber = target.dataset.orderNumber || "";
-          focusReelFromLeaderboard(jobValue, jobLabel, { reelCode, reelId, orderNumber });
-        });
-        container.dataset.leaderbound = "true";
-      }
     }
 
     function renderLeaderJob(job) {
@@ -552,34 +506,42 @@
       const container = document.getElementById("overviewMaskLeaders");
       if (!container) return;
       if (!Array.isArray(rankings) || !rankings.length) {
-        container.innerHTML = "<div class=\"placeholder\">No mask changes in this window.</div>";
+        container.innerHTML =
+          "<div class=\"placeholder\">No mask activity in this window.</div>";
         return;
       }
       container.innerHTML = rankings
         .map((group) => {
-          const items = (group.items || []).slice(0, 5);
-          if (!items.length) return "";
           const jobValue = group.job_value || "";
-          const list = items
-            .map((entry) => {
-              const orderLabel = entry.order || "All orders";
-              const value = Utils.formatNumber(entry.mask_count || 0);
-              return `
-                <button type="button" class="defect-leader" data-defect-leader="true"
-                  data-kind="mask" data-job-display="${Utils.escapeHtml(entry.job || group.job)}"
-                  data-job-value="${Utils.escapeHtml(jobValue)}" data-reel-code=""
-                  data-reel-id="" data-order-number="${Utils.escapeHtml(orderLabel)}">
-                  <div class="defect-leader__meta">
-                    <strong>${Utils.escapeHtml(orderLabel)}</strong>
-                    <small>${Utils.escapeHtml(entry.label || orderLabel)}</small>
+          const withMasks = Number(group.with_masks) || 0;
+          const withoutMasks = Number(group.without_masks) || 0;
+          const totalChanges = Number(group.mask_changes) || 0;
+          return `
+            <section class="defect-leaders__job">
+              <header class="defect-leaders__header">
+                <h4>${Utils.escapeHtml(group.job || "Unassigned")}</h4>
+                <small>${jobValue ? `Job filter: ${Utils.escapeHtml(jobValue)}` : "Unassigned job"}</small>
+              </header>
+              <div class="defect-leaders__column">
+                <div class="defect-leaders__column-title">Mask Summary</div>
+                <div class="defect-leader-list">
+                  <div class="defect-leader__value-row">
+                    <span>Mask changes</span>
+                    <strong>${Utils.formatNumber(totalChanges)}</strong>
                   </div>
-                  <div class="defect-leader__value">${value}<span>masks</span></div>
-                </button>
-              `;
-            })
-            .join("");
-          return renderAggregateSection(group.job, jobValue, list, "Mask Activity");
-        })
+                  <div class="defect-leader__value-row">
+                    <span>Reels with masks</span>
+                    <strong>${Utils.formatNumber(withMasks)}</strong>
+                  </div>
+          <div class="defect-leader__value-row">
+            <span>Reels without masks</span>
+            <strong>${Utils.formatNumber(withoutMasks)}</strong>
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+})
         .join("");
     }
 
@@ -587,33 +549,30 @@
       const container = document.getElementById("overviewReferenceLeaders");
       if (!container) return;
       if (!Array.isArray(rankings) || !rankings.length) {
-        container.innerHTML = "<div class=\"placeholder\">No reference changes in this window.</div>";
+        container.innerHTML = "<div class=\"placeholder\">No reference image data in this window.</div>";
         return;
       }
       container.innerHTML = rankings
         .map((group) => {
-          const items = (group.items || []).slice(0, 5);
-          if (!items.length) return "";
           const jobValue = group.job_value || "";
-          const list = items
-            .map((entry) => {
-              const orderLabel = entry.order || "All orders";
-              const value = Utils.formatNumber(entry.reference_changes || 0);
-              return `
-                <button type="button" class="defect-leader" data-defect-leader="true"
-                  data-kind="reference" data-job-display="${Utils.escapeHtml(entry.job || group.job)}"
-                  data-job-value="${Utils.escapeHtml(jobValue)}" data-reel-code=""
-                  data-reel-id="" data-order-number="${Utils.escapeHtml(orderLabel)}">
-                  <div class="defect-leader__meta">
-                    <strong>${Utils.escapeHtml(orderLabel)}</strong>
-                    <small>${Utils.escapeHtml(entry.label || orderLabel)}</small>
-                  </div>
-                  <div class="defect-leader__value">${value}<span>ref changes</span></div>
-                </button>
-              `;
-            })
-            .join("");
-          return renderAggregateSection(group.job, jobValue, list, "Reference Changes");
+          const totalChanges = Utils.formatNumber(Number(group.reference_changes) || 0);
+          const singleReels = Utils.formatNumber(Number(group.single_reference_reels) || 0);
+          const multiReels = Utils.formatNumber(Number(group.multi_reference_reels) || 0);
+          const rows = `
+            <div class="defect-leader__value-row">
+              <span>Total reference changes</span>
+              <strong>${totalChanges}</strong>
+            </div>
+            <div class="defect-leader__value-row">
+              <span>Reels with 1 reference image</span>
+              <strong>${singleReels}</strong>
+            </div>
+            <div class="defect-leader__value-row">
+              <span>Reels with multiple images</span>
+              <strong>${multiReels}</strong>
+            </div>
+          `;
+          return renderAggregateSection(group.job, jobValue, rows, "Reference Images");
         })
         .join("");
     }
@@ -1616,40 +1575,115 @@
       return lines.join("<br>");
     }
 
-    return { init, activate, onFiltersUpdated };
-  })();
     function renderJobLengthsByJob(jobsTime = []) {
       const containerId = "overviewJobLengths";
       const container = document.getElementById(containerId);
       if (!container) return;
-      if (!Array.isArray(jobsTime) || !jobsTime.length) {
+      latestJobLengthsData = Array.isArray(jobsTime) ? jobsTime.slice() : [];
+      if (!latestJobLengthsData.length) {
         container.innerHTML =
           '<div class="placeholder">No inspection mix data for this window.</div>';
         return;
       }
-      const toggle = document.querySelectorAll(".job-lengths-toggle__btn");
-      toggle.forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const mode = btn.dataset.lengthMode === "pct" ? "pct" : "raw";
-          toggle.forEach((node) =>
-            node.classList.toggle("job-lengths-toggle__btn--active", node === btn)
-          );
-          container.dataset.mode = mode;
-          renderJobLengthsTable(container, jobsTime, mode);
+      if (!container.dataset.mode) {
+        container.dataset.mode = "raw";
+      }
+      const buttons = Array.from(document.querySelectorAll(".job-lengths-toggle__btn"));
+      if (!jobLengthsToggleBound && buttons.length) {
+        buttons.forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const mode = btn.dataset.lengthMode === "pct" ? "pct" : "raw";
+            if (container.dataset.mode === mode) return;
+            container.dataset.mode = mode;
+            buttons.forEach((node) =>
+              node.classList.toggle(
+                "job-lengths-toggle__btn--active",
+                node.dataset.lengthMode === mode
+              )
+            );
+            renderJobLengthsTable(container, latestJobLengthsData, mode);
+          });
         });
+        jobLengthsToggleBound = true;
+      }
+      buttons.forEach((btn) => {
+        const mode = container.dataset.mode || "raw";
+        btn.classList.toggle(
+          "job-lengths-toggle__btn--active",
+          btn.dataset.lengthMode === mode
+        );
       });
-      const mode =
-        container.dataset.mode === "pct" ||
-        document.querySelector('.job-lengths-toggle__btn[data-length-mode="pct"]')?.classList.contains("job-lengths-toggle__btn--active")
-          ? "pct"
-          : "raw";
-      renderJobLengthsTable(container, jobsTime, mode);
+      const mode = container.dataset.mode === "pct" ? "pct" : "raw";
+      renderJobLengthsTable(container, latestJobLengthsData, mode);
+    }
+
+    function renderDefectsTrend(defectsTrend = []) {
+      const containerId = "overviewDefectsTrend";
+      if (!document.getElementById(containerId)) return;
+      const map = new Map();
+      (defectsTrend || []).forEach((entry) => {
+        const job = entry && entry.job ? entry.job : "Unassigned";
+        if (!map.has(job)) map.set(job, []);
+        map.get(job).push(entry);
+      });
+      const traces = Array.from(map.entries()).map(([job, points]) => {
+        const sorted = points
+          .slice()
+          .filter((point) => point && point.time)
+          .sort((a, b) => new Date(a.time) - new Date(b.time));
+        return {
+          type: "scatter",
+          mode: "lines+markers",
+          name: job,
+          x: sorted.map((point) => point.time),
+          y: sorted.map((point) => point.count),
+        };
+      });
+      if (!traces.length) {
+        Plotly.react(
+          containerId,
+          [],
+          withResponsiveLayout({
+            annotations: [
+              {
+                text: "No defect trend data for this window",
+                showarrow: false,
+                x: 0.5,
+                y: 0.5,
+                xref: "paper",
+                yref: "paper",
+                font: { color: "#94a3b8" },
+              },
+            ],
+            margin: { t: 20, l: 40, r: 20, b: 40 },
+          }),
+          plotlyConfig({ displayModeBar: false })
+        );
+        return;
+      }
+      Plotly.react(
+        containerId,
+        traces,
+        withResponsiveLayout({
+          xaxis: {
+            type: "date",
+            title: { text: "Time" },
+            tickformat: "%b %d %H:%M",
+            ticklabelmode: "period",
+          },
+          yaxis: { title: { text: "Defect Count" }, rangemode: "tozero" },
+          margin: { t: 20, l: 50, r: 20, b: 60 },
+          legend: { orientation: "h", x: 0, y: 1.15 },
+        }),
+        plotlyConfig()
+      );
     }
 
     function renderJobLengthsTable(container, jobsTime = [], mode = "raw") {
       const jobs = jobsTime
         .map((job) => ({
           label: job.job || "Unassigned",
+          value: job.job || "",
           active: Number.isFinite(job.length_active) ? job.length_active : 0,
           inactive: Number.isFinite(job.length_inactive) ? job.length_inactive : 0,
           learn: Number.isFinite(job.length_learn) ? job.length_learn : 0,
@@ -1665,8 +1699,10 @@
           const total = job.active + job.inactive + job.learn;
           if (mode === "pct" && total > 0) {
             return `
-              <tr>
-                <td>${Utils.escapeHtml(job.label)}</td>
+              <tr data-job-value="${Utils.escapeHtml(job.value)}">
+                <td><button type="button" class="job-lengths-link">${Utils.escapeHtml(
+                  job.label
+                )}</button></td>
                 <td>${Utils.formatNumber(100, 1)}%</td>
                 <td>${Utils.formatNumber((job.active / total) * 100, 1)}%</td>
                 <td>${Utils.formatNumber((job.inactive / total) * 100, 1)}%</td>
@@ -1675,8 +1711,10 @@
             `;
           }
           return `
-            <tr>
-              <td>${Utils.escapeHtml(job.label)}</td>
+            <tr data-job-value="${Utils.escapeHtml(job.value)}">
+              <td><button type="button" class="job-lengths-link">${Utils.escapeHtml(
+                job.label
+              )}</button></td>
               <td>${Utils.formatMeters(total)}</td>
               <td>${Utils.formatMeters(job.active)}</td>
               <td>${Utils.formatMeters(job.inactive)}</td>
@@ -1691,10 +1729,10 @@
             <thead>
               <tr>
                 <th>Job</th>
-                <th>${mode === "pct" ? "Total %" : "Total Length"}</th>
-                <th>${mode === "pct" ? "Active %" : "Active"}</th>
-                <th>${mode === "pct" ? "Inactive %" : "Inactive"}</th>
-                <th>${mode === "pct" ? "Learn %" : "Learn"}</th>
+                <th>${mode === "pct" ? "Total %" : "Total Length (ft)"}</th>
+                <th>${mode === "pct" ? "Active %" : "Active (ft)"}</th>
+                <th>${mode === "pct" ? "Inactive %" : "Inactive (ft)"}</th>
+                <th>${mode === "pct" ? "Learn %" : "Learn (ft)"}</th>
               </tr>
             </thead>
             <tbody>
@@ -1703,4 +1741,268 @@
           </table>
         </div>
       `;
+
+      container.querySelectorAll("tr[data-job-value]").forEach((row) => {
+        row.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const value = row.dataset.jobValue || "";
+          if (!Filters || typeof Filters.set !== "function") return;
+          Filters.set("job", value, { emit: true, updateUrl: true });
+        });
+      });
     }
+
+    function setupMinReelLengthControls() {
+      const input = document.getElementById("defectMinReelLengthInput");
+      const applyBtn = document.getElementById("defectMinReelLengthApply");
+      const clearBtn = document.getElementById("defectMinLengthClear");
+      if (input) {
+        const feetValue = minReelLengthFilter ? minReelLengthFilter / FEET_TO_METERS : 0;
+        input.value = feetValue ? Math.round(feetValue) : "";
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            applyMinReelLength(input.value);
+          }
+        });
+      }
+      if (applyBtn) {
+        applyBtn.addEventListener("click", () =>
+          applyMinReelLength(input ? input.value : "")
+        );
+      }
+      if (clearBtn) {
+        clearBtn.addEventListener("click", () => applyMinReelLength(""));
+      }
+      updateMinLengthChip();
+    }
+
+    function applyMinReelLength(rawValue) {
+      const parsed = Number(rawValue);
+      const nextValue = Number.isFinite(parsed) && parsed > 0 ? parsed * FEET_TO_METERS : 0;
+      if (nextValue === minReelLengthFilter) {
+        updateMinLengthChip();
+        return;
+      }
+      minReelLengthFilter = nextValue;
+      persistMinReelLength(minReelLengthFilter);
+      const input = document.getElementById("defectMinReelLengthInput");
+      if (input) {
+        const feetValue = minReelLengthFilter ? minReelLengthFilter / FEET_TO_METERS : 0;
+        input.value = feetValue ? Math.round(feetValue) : "";
+      }
+      updateMinLengthChip();
+      load.flush();
+    }
+
+    function updateMinLengthChip() {
+      const chip = document.getElementById("defectMinLengthChip");
+      const text = chip ? chip.querySelector("span") : null;
+      if (!chip) return;
+      if (minReelLengthFilter > 0) {
+        chip.classList.remove("hidden");
+        if (text) {
+          text.textContent = `Min reel length ≥ ${Utils.formatMeters(minReelLengthFilter)}`;
+        }
+      } else {
+        chip.classList.add("hidden");
+        if (text) text.textContent = "";
+      }
+    }
+
+    function loadStoredMinLength() {
+      const defaultMeters = DEFAULT_MIN_REEL_LENGTH_FEET * FEET_TO_METERS;
+      if (typeof sessionStorage === "undefined") return defaultMeters;
+      try {
+        const raw = sessionStorage.getItem(MIN_LENGTH_STORAGE_KEY);
+        if (raw === null || raw === undefined) {
+          return defaultMeters;
+        }
+        const parsed = Number(raw);
+        return Number.isFinite(parsed) && parsed >= 0 ? parsed : defaultMeters;
+      } catch (err) {
+        return defaultMeters;
+      }
+    }
+
+    function persistMinReelLength(value) {
+      if (typeof sessionStorage === "undefined") return;
+      try {
+        if (!Number.isFinite(value) || value <= 0) {
+          sessionStorage.setItem(MIN_LENGTH_STORAGE_KEY, "0");
+        } else {
+          sessionStorage.setItem(MIN_LENGTH_STORAGE_KEY, String(value));
+        }
+      } catch (err) {
+        // ignore storage failures
+      }
+    }
+
+    function renderDefectRatesTable(jobMetrics = [], jobsTime = []) {
+      const container = document.getElementById("overviewDefectRates");
+      if (!container) return;
+      if (!Array.isArray(jobMetrics) || !jobMetrics.length) {
+        container.innerHTML = '<div class="placeholder">No defect rate data for this window.</div>';
+        return;
+      }
+      const lengthMap = new Map();
+      (jobsTime || []).forEach((entry) => {
+        const label = entry && entry.job ? entry.job : "Unassigned";
+        const activeMeters = Number(entry.length_active) || 0;
+        lengthMap.set(label, activeMeters * METERS_TO_FEET);
+      });
+      const rows = [];
+      jobMetrics.forEach((job) => {
+        const label = job && job.job_display ? job.job_display : job && job.job ? job.job : "Unassigned";
+        const lengthFt = lengthMap.get(job.job || job.job_display) || 0;
+        const totalDefects = Number(job.defect_count) || 0;
+        const breakdownList = Array.isArray(job.defect_breakdown) ? job.defect_breakdown : [];
+        const rates = new Map();
+        breakdownList.forEach((entry) => {
+          const key = normalizeDefectClassName(entry && entry.name);
+          if (!key) return;
+          rates.set(key, (rates.get(key) || 0) + (entry.count || 0));
+        });
+        const row = {
+          label,
+          value: job.job || "",
+          total: lengthFt > 0 ? (totalDefects / lengthFt) * 1000 : 0,
+          counts: rates,
+          length: lengthFt,
+        };
+        rows.push(row);
+      });
+      if (!rows.length) {
+        container.innerHTML = '<div class="placeholder">No defect rate data for this window.</div>';
+        return;
+      }
+      rows.sort((a, b) => b.total - a.total);
+      const topRows = rows.slice(0, 10);
+      const columns = [
+        { key: "__total__", label: "Total" },
+        { key: "flaw", label: "Flaw" },
+        { key: "sporadicflaw", label: "Sporadic Flaw" },
+        { key: "streak", label: "Streak" },
+        { key: "sporadicstreak", label: "Sporadic Streak" },
+        { key: "colour", label: "Colour" },
+        { key: "register", label: "Register" },
+      ];
+      const body = topRows
+        .map((row) => {
+          const totalRate = row.total;
+          const classCells = columns
+            .map((col) => {
+              if (col.key === "__total__") {
+                return `<td>${Utils.formatNumber(totalRate, 2)}</td>`;
+              }
+              const count = row.counts.get(col.key) || row.counts.get(normalizeDefectClassName(col.label)) || 0;
+              const rate = row.length > 0 ? (count / row.length) * 1000 : 0;
+              return `<td>${Utils.formatNumber(rate, 2)}</td>`;
+            })
+            .join("");
+          return `
+            <tr data-job-value="${Utils.escapeHtml(row.value)}">
+              <td><button type="button" class="job-lengths-link">${Utils.escapeHtml(row.label)}</button></td>
+              <td>${Utils.formatNumber(row.length, 0)}</td>
+              ${classCells}
+            </tr>
+          `;
+        })
+        .join("");
+      const header = [
+        "<th>Active ft</th>",
+        ...columns.map((col) => `<th>${Utils.escapeHtml(col.label)}</th>`),
+      ].join("");
+      container.innerHTML = `
+        <div class="defect-rates-table-wrapper">
+          <table class="defect-rates-table">
+            <thead>
+              <tr>
+                <th>Job</th>
+                ${header}
+              </tr>
+            </thead>
+            <tbody>
+              ${body}
+            </tbody>
+          </table>
+        </div>
+      `;
+      container.querySelectorAll("tr[data-job-value]").forEach((row) => {
+        row.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const value = row.dataset.jobValue || "";
+          if (!Filters || typeof Filters.set !== "function") return;
+          Filters.set("job", value, { emit: true, updateUrl: true });
+        });
+      });
+    }
+
+    function renderSensitivityTable(summary = []) {
+      const container = document.getElementById("overviewSensitivityTable");
+      if (!container) return;
+      if (!Array.isArray(summary) || !summary.length) {
+        container.innerHTML =
+          '<div class="placeholder">No sensitivity data for this window.</div>';
+        return;
+      }
+      const rows = summary
+        .slice(0, 10)
+        .map((entry) => {
+          const label = entry && entry.job ? entry.job : "Unassigned";
+          const jobValue = entry && entry.job_value ? entry.job_value : "";
+          const classes = entry && entry.classes ? entry.classes : {};
+          const cells = SENSITIVITY_COLUMNS.map((col) => {
+            const list = Array.isArray(classes[col.key]) ? classes[col.key] : [];
+            if (!list.length) return "<td>—</td>";
+            const text = list
+              .slice(0, 3)
+              .map(
+                (item) =>
+                  `${Utils.formatNumber(item.value, 3)} (${Utils.formatNumber(item.count, 0)})`
+              )
+              .join("<br>");
+            const remainder = list.length - 3;
+            const extra = remainder > 0 ? `<br>+${remainder} more` : "";
+            return `<td>${text}${extra}</td>`;
+          }).join("");
+          return `
+            <tr data-job-value="${Utils.escapeHtml(jobValue)}">
+              <td><button type="button" class="job-lengths-link">${Utils.escapeHtml(
+                label
+              )}</button></td>
+              ${cells}
+            </tr>
+          `;
+        })
+        .join("");
+      const header = SENSITIVITY_COLUMNS.map(
+        (col) => `<th>${Utils.escapeHtml(col.label)}</th>`
+      );
+      container.innerHTML = `
+        <div class="defect-rates-table-wrapper">
+          <table class="defect-rates-table">
+            <thead>
+              <tr>
+                <th>Job</th>
+                ${header.join("")}
+              </tr>
+            </thead>
+            <tbody>
+              ${rows}
+            </tbody>
+          </table>
+        </div>
+      `;
+      container.querySelectorAll("tr[data-job-value]").forEach((row) => {
+        row.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const value = row.dataset.jobValue || "";
+          if (!Filters || typeof Filters.set !== "function") return;
+          Filters.set("job", value, { emit: true, updateUrl: true });
+        });
+      });
+    }
+
+    return { init, activate, onFiltersUpdated };
+  })();

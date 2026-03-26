@@ -139,6 +139,8 @@ def _normalize_decision(value: Optional[str]) -> Optional[str]:
     return None
 
 
+
+
 SEVERITY_LABELS = {
     0: "0 · Perfect",
     1: "1 · Tiny cosmetic, ship",
@@ -146,6 +148,16 @@ SEVERITY_LABELS = {
     3: "3 · Borderline / spec dependent",
     4: "4 · Reject",
     5: "5 · Severe reject",
+}
+
+SENSITIVITY_CLASS_CANONICAL = {
+    "flaw": "flaw",
+    "sporadicflaw": "sporadicflaw",
+    "streak": "streak",
+    "sporadicstreak": "sporadicstreak",
+    "colour": "colour",
+    "color": "colour",
+    "register": "register",
 }
 
 
@@ -389,6 +401,10 @@ def _validate_filters(session: Session) -> Dict[str, Any]:
         if value not in reel_ids:
             reel_ids.append(value)
     filters["reel_ids"] = reel_ids
+    min_reel_length = args.get("min_reel_length", type=float)
+    if min_reel_length is not None:
+        min_reel_length = max(float(min_reel_length), 0.0)
+    filters["min_reel_length"] = min_reel_length if min_reel_length else None
 
     return filters
 
@@ -421,6 +437,11 @@ def _apply_reel_filters(query, filters: Dict[str, Any], include_reel_code: bool 
             query = query.filter(or_(Reel.order_number.is_(None), Reel.order_number == ""))
         else:
             query = query.filter(Reel.order_number == order_filter)
+    min_length = filters.get("min_reel_length")
+    if min_length:
+        start_expr = func.coalesce(Reel.reel_start, 0.0)
+        end_expr = func.coalesce(Reel.reel_end, 0.0)
+        query = query.filter((end_expr - start_expr) >= min_length)
     return query
 
 
@@ -635,7 +656,8 @@ def _defect_buckets(
     window_end: datetime,
 ) -> Tuple[List[Dict[str, object]], List[Dict[str, object]], int, int]:
     by_type = defaultdict(int)
-    trend = defaultdict(int)
+    trend_by_job: Dict[str, Dict[datetime, int]] = defaultdict(lambda: defaultdict(int))
+    trend_totals = defaultdict(int)
     unique_classes = set()
     total = 0
 
@@ -648,16 +670,21 @@ def _defect_buckets(
             unique_classes.add(defect.class_name)
         if defect.defect_time:
             bucket = defect.defect_time.replace(minute=0, second=0, microsecond=0)
-            trend[bucket] += 1
+            job_display = (defect.job_name or "Unassigned") if hasattr(defect, "job_name") else "Unassigned"
+            trend_totals[bucket] += 1
+            trend_by_job[job_display][bucket] += 1
 
     defects_by_type = [
         {"class": cls, "count": count}
         for cls, count in sorted(by_type.items(), key=lambda item: item[1], reverse=True)
     ]
-    defects_trend = [
-        {"time": _iso(ts), "count": count}
-        for ts, count in sorted(trend.items())
-    ]
+    defects_trend = []
+    for job_name, bucket_map in trend_by_job.items():
+        for ts, count in sorted(bucket_map.items()):
+            defects_trend.append({"time": _iso(ts), "count": count, "job": job_name})
+    if not defects_trend and trend_totals:
+        for ts, count in sorted(trend_totals.items()):
+            defects_trend.append({"time": _iso(ts), "count": count, "job": "Unassigned"})
     return defects_by_type, defects_trend, len(unique_classes), total
 
 
@@ -2024,8 +2051,14 @@ def api_overview():
         job_reel_counts_map: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
         job_reel_meta_map: Dict[str, Dict[str, Dict[str, object]]] = defaultdict(dict)
         job_mask_counts_map: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
-        job_reference_counts_map: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        job_mask_presence: Dict[str, Dict[str, set]] = defaultdict(lambda: {"with": set(), "without": set()})
+        job_mask_change_counts: Dict[str, int] = defaultdict(int)
+        job_mask_reel_changes: Dict[str, Dict[int, int]] = defaultdict(lambda: defaultdict(int))
+        job_reference_summary_map: Dict[str, Dict[str, int]] = defaultdict(
+            lambda: {"reference_changes": 0, "single_reference_reels": 0, "multi_reference_reels": 0}
+        )
         job_value_map: Dict[str, str] = {}
+        job_sensitivity_values: Dict[str, Dict[str, Counter]] = defaultdict(lambda: defaultdict(Counter))
 
         def job_label(name: Optional[str]) -> str:
             return name or "Unassigned"
@@ -2194,6 +2227,15 @@ def api_overview():
                 },
             )
 
+            for sens in reel.sensitivity_sets or []:
+                canonical_class = _canonical_sensitivity_class(getattr(sens, "defect_class", None))
+                if not canonical_class:
+                    continue
+                threshold_value = _to_float(getattr(sens, "threshold_value", None))
+                if threshold_value is None:
+                    continue
+                job_sensitivity_values[job_display][canonical_class][threshold_value] += 1
+
             meters = 0.0
             if reel.reel_start is not None and reel.reel_end is not None:
                 meters = max(
@@ -2251,6 +2293,14 @@ def api_overview():
 
             # Reference image changes
             ordered_refs = _ordered_reference_images(reel.reference_images)
+            reference_summary_entry = None
+            if ordered_refs:
+                reference_summary_entry = job_reference_summary_map[job_display]
+                ref_image_count = len(ordered_refs)
+                if ref_image_count == 1:
+                    reference_summary_entry["single_reference_reels"] += 1
+                elif ref_image_count > 1:
+                    reference_summary_entry["multi_reference_reels"] += 1
             ref_change_pairs = _reference_change_pairs(ordered_refs)
             reel_operation_counter: Counter = Counter()
             if ref_change_pairs:
@@ -2258,7 +2308,9 @@ def api_overview():
                 change_count = len(ref_change_pairs)
                 job_order_entry["reference_changes"] += change_count
                 job_summary_entry["reference_changes"] += change_count
-                job_reference_counts_map[job_display][reel_key] += change_count
+                if reference_summary_entry is None:
+                    reference_summary_entry = job_reference_summary_map[job_display]
+                reference_summary_entry["reference_changes"] += change_count
                 reel_operation_counter[EVENT_REFERENCE] += change_count
                 for previous_ref, new_ref in ref_change_pairs:
                     detail = _reference_change_detail(previous_ref, new_ref)
@@ -2287,10 +2339,11 @@ def api_overview():
                 )
                 job_order_entry["mask_count"] += 1
                 job_summary_entry["mask_count"] += 1
+                job_mask_counts_map[job_display][reel_key] += 1
+                job_mask_presence[job_display]["with"].add(reel.reel_id)
                 if mask_label:
                     job_order_entry["mask_counter"][mask_label] += 1
                     job_summary_entry["mask_counter"][mask_label] += 1
-                job_mask_counts_map[job_display][reel_key] += 1
                 record_event(
                     job_name,
                     mask.timestamp,
@@ -2298,6 +2351,8 @@ def api_overview():
                     detail=detail,
                     reel_code=reel.reel_code,
                 )
+            if not masks_in_window:
+                job_mask_presence[job_display]["without"].add(reel.reel_id)
 
             current_mask_sig = mask_signature(masks_in_window)
             previous_mask_sig = tracker.get("mask_signature")
@@ -2312,6 +2367,9 @@ def api_overview():
                     }
                     reel_operation_counter[EVENT_MASK] += 1
                     job_mask_counts_map[job_display][reel_key] += 1
+                    job_mask_change_counts[job_display] += 1
+                    if reel.reel_id is not None:
+                        job_mask_reel_changes[job_display][reel.reel_id] += 1
                     record_event(
                         job_name,
                         change_time,
@@ -2520,8 +2578,6 @@ def api_overview():
             return _counter_to_list(counter, limit)
 
         job_order_metrics_payload: List[Dict[str, object]] = []
-        job_mask_leaders: Dict[str, List[Dict[str, object]]] = defaultdict(list)
-        job_reference_leaders: Dict[str, List[Dict[str, object]]] = defaultdict(list)
         for (_, _), metrics in job_order_metrics.items():
             defect_class_counter: Counter = metrics["defect_classes"]
             mask_counter: Counter = metrics.get("mask_counter", Counter())
@@ -2547,30 +2603,6 @@ def api_overview():
                     "mask_breakdown": _prepare_breakdown(mask_counter, limit=8),
                 }
             )
-
-            job_name_display = metrics["job_display"]
-            job_value = (metrics.get("job_key") or SENTINEL_NONE) if isinstance(metrics, dict) else SENTINEL_NONE
-            job_order = metrics.get("order_display") if isinstance(metrics, dict) else None
-            if metrics.get("mask_count", 0):
-                job_mask_leaders[job_name_display].append(
-                    {
-                        "job": job_name_display,
-                        "job_value": job_value,
-                        "order": job_order,
-                        "mask_count": int(metrics.get("mask_count", 0)),
-                        "label": job_order or job_name_display or "Reel",
-                    }
-                )
-            if metrics.get("reference_changes", 0):
-                job_reference_leaders[job_name_display].append(
-                    {
-                        "job": job_name_display,
-                        "job_value": job_value,
-                        "order": job_order,
-                        "reference_changes": int(metrics.get("reference_changes", 0)),
-                        "label": job_order or job_name_display or "Reel",
-                    }
-                )
 
         for job_key, total in job_monitor_counts.items():
             normalized_key = job_key if job_key else SENTINEL_NONE
@@ -2603,63 +2635,60 @@ def api_overview():
                 }
             )
 
-        job_reel_defect_rankings: List[Dict[str, object]] = []
-        for job_display in sorted(job_reel_counts_map.keys()):
-            counts_map = job_reel_counts_map[job_display]
-            meta_map = job_reel_meta_map[job_display]
-            entries: List[Dict[str, object]] = []
-            for key, count in counts_map.items():
-                meta = meta_map.get(key, {})
-                reel_code = meta.get("reel_code", "")
-                reel_id = meta.get("reel_id")
-                label = reel_code or (f"Reel {reel_id}" if reel_id is not None else "Reel")
-                entries.append(
-                    {
-                        "job": job_display,
-                        "job_value": job_value_map.get(job_display, ""),
-                        "reel_id": reel_id,
-                        "reel_code": reel_code,
-                        "order_number": meta.get("order_number", ""),
-                        "label": label,
-                        "defects": int(count),
-                    }
-                )
-            if not entries:
-                continue
-            best = sorted(entries, key=lambda item: (item["defects"], item["label"]))[:5]
-            worst = sorted(entries, key=lambda item: (-item["defects"], item["label"]))[:5]
-            job_reel_defect_rankings.append(
+        job_sensitivity_summary: List[Dict[str, object]] = []
+        for job_display in sorted(job_sensitivity_values.keys()):
+            classes_map = job_sensitivity_values[job_display]
+            payload_classes: Dict[str, List[Dict[str, float]]] = {}
+            for class_key, counter in classes_map.items():
+                entries = [
+                    {"value": _to_float(value), "count": int(count)}
+                    for value, count in sorted(counter.items(), key=lambda item: (-item[1], item[0]))
+                ]
+                payload_classes[class_key] = entries
+            job_sensitivity_summary.append(
                 {
                     "job": job_display,
                     "job_value": job_value_map.get(job_display, ""),
-                    "best": best,
-                    "worst": worst,
+                    "classes": payload_classes,
                 }
             )
-        job_mask_rankings: List[Dict[str, object]] = []
-        for job_display in sorted(job_mask_leaders.keys()):
-            entries = job_mask_leaders[job_display]
-            if not entries:
-                continue
-            sorted_entries = sorted(entries, key=lambda item: (-item["mask_count"], item["label"]))
-            job_mask_rankings.append(
+        job_mask_summary: List[Dict[str, object]] = []
+        for job_display in sorted(job_mask_presence.keys()):
+            presence = job_mask_presence[job_display]
+            with_count = len(presence["with"])
+            without_count = len(presence["without"])
+            multi_reels = sum(
+                1
+                for count in job_mask_reel_changes[job_display].values()
+                if count > 1
+            )
+            job_mask_summary.append(
                 {
                     "job": job_display,
                     "job_value": job_value_map.get(job_display, ""),
-                    "items": sorted_entries[:5],
+                    "mask_changes": int(job_mask_change_counts.get(job_display, 0)),
+                    "with_masks": with_count,
+                    "without_masks": without_count,
+                    "multi_reel_changes": multi_reels,
                 }
             )
-        job_reference_rankings: List[Dict[str, object]] = []
-        for job_display in sorted(job_reference_leaders.keys()):
-            entries = job_reference_leaders[job_display]
-            if not entries:
+        job_reference_summary: List[Dict[str, object]] = []
+        for job_display in sorted(job_reference_summary_map.keys()):
+            summary = job_reference_summary_map[job_display]
+            if not summary:
                 continue
-            sorted_entries = sorted(entries, key=lambda item: (-item["reference_changes"], item["label"]))
-            job_reference_rankings.append(
+            total_changes = int(summary.get("reference_changes", 0))
+            single_reels = int(summary.get("single_reference_reels", 0))
+            multi_reels = int(summary.get("multi_reference_reels", 0))
+            if total_changes == 0 and single_reels == 0 and multi_reels == 0:
+                continue
+            job_reference_summary.append(
                 {
                     "job": job_display,
                     "job_value": job_value_map.get(job_display, ""),
-                    "items": sorted_entries[:5],
+                    "reference_changes": total_changes,
+                    "single_reference_reels": single_reels,
+                    "multi_reference_reels": multi_reels,
                 }
             )
 
@@ -2705,9 +2734,9 @@ def api_overview():
             "job_reel_operations_timeline": job_reel_operations_timeline,
             "job_order_metrics": job_order_metrics_payload,
             "job_metrics": job_metrics_payload,
-            "job_reel_defect_rankings": job_reel_defect_rankings,
-            "job_mask_rankings": job_mask_rankings,
-            "job_reference_rankings": job_reference_rankings,
+            "job_sensitivity_summary": job_sensitivity_summary,
+            "job_mask_summary": job_mask_summary,
+            "job_reference_summary": job_reference_summary,
         }
         processing_duration = time.perf_counter() - processing_start
         serialize_start = time.perf_counter()
@@ -4120,3 +4149,14 @@ def api_defect_decision(defect_id: int):
                 "uncertain": uncertain_flag,
             }
         )
+def _normalize_defect_label(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    return str(value).strip().lower()
+
+
+def _canonical_sensitivity_class(value: Optional[str]) -> Optional[str]:
+    normalized = _normalize_defect_label(value)
+    if not normalized:
+        return None
+    return SENSITIVITY_CLASS_CANONICAL.get(normalized)
