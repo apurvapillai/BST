@@ -32,6 +32,31 @@
       if (value === null || value === undefined) return "--";
       return `${Utils.formatNumber(value, 2)} m`;
     },
+    buildFilterRequestKey(state = {}) {
+      const normalizeValue = (value) => (value === undefined || value === null ? "" : String(value));
+      const normalizeList = (value) => {
+        if (!value) return [];
+        const list = Array.isArray(value) ? value.slice() : [value];
+        return list
+          .map((entry) => normalizeValue(entry))
+          .filter((entry) => entry !== "")
+          .sort();
+      };
+      const normalized = {
+        machine_id: normalizeValue(state.machine_id),
+        start: normalizeValue(state.start),
+        end: normalizeValue(state.end),
+        job: normalizeValue(state.job),
+        order: normalizeValue(state.order),
+        reel_id: normalizeList(state.reel_id || state.reel_ids),
+        reel_code: normalizeList(state.reel_code || state.reel_codes),
+      };
+      try {
+        return JSON.stringify(normalized);
+      } catch (err) {
+        return "";
+      }
+    },
     toInches(value) {
       const num = Number(value);
       return Number.isFinite(num) ? num / MM_TO_IN : null;

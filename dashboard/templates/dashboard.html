@@ -143,10 +143,6 @@
                 <h3>Total Jobs</h3>
                 <p>--</p>
               </div>
-              <div class="kpi-card" data-kpi="total_length">
-                <h3>Total Length</h3>
-                <p>--</p>
-              </div>
               <div class="kpi-card" data-kpi="active_length">
                 <h3>Active Length</h3>
                 <p>--</p>
@@ -159,16 +155,10 @@
                 <h3>Learn Length</h3>
                 <p>--</p>
               </div>
-            </div>
-          </div>
-          <div class="kpi-section kpi-section--compact">
-            <div class="kpi-section__header">
-              <div>
-                <p class="kpi-section__title">Inspection Mix</p>
-                <small>Percent of time spent in each inspection state.</small>
+              <div class="kpi-card" data-kpi="total_length">
+                <h3>Total Length</h3>
+                <p>--</p>
               </div>
-            </div>
-            <div class="kpi-grid">
               <div class="kpi-card" data-kpi="active_pct">
                 <h3>Active %</h3>
                 <p>--</p>
@@ -182,6 +172,19 @@
                 <p>--</p>
               </div>
             </div>
+          </div>
+          <div class="kpi-section kpi-section--compact">
+            <div class="kpi-section__header">
+              <div>
+                <p class="kpi-section__title">Inspection Mix by Job</p>
+                <small>Total, active, inactive, and learn footage grouped by job.</small>
+              </div>
+              <div class="job-lengths-toggle" role="group" aria-label="Toggle inspection mix units">
+                <button type="button" data-length-mode="raw" class="job-lengths-toggle__btn job-lengths-toggle__btn--active">Meters</button>
+                <button type="button" data-length-mode="pct" class="job-lengths-toggle__btn">Percent</button>
+              </div>
+            </div>
+            <div id="overviewJobLengths" class="chart-plot chart-plot--compact"></div>
           </div>
         </div>
         <div class="kpi-section kpi-section--defects">
@@ -201,100 +204,61 @@
               <p>--</p>
             </div>
           </div>
+          <div class="defect-kpi-trends">
+            <div class="defect-kpi-trend defect-kpi-trend--types">
+              <div class="defect-kpi-trend__header">
+                <p class="kpi-section__title">Defects by Type</p>
+                <small>Share of total defects by classification for the selected window.</small>
+              </div>
+              <div id="overviewDefectsByType" class="defect-kpi-trend__plot"></div>
+            </div>
+            <div class="defect-kpi-trend defect-kpi-trend--jobs">
+              <div class="defect-kpi-trend__header">
+                <p class="kpi-section__title">Defects by Job</p>
+                <small>Top jobs ranked by total defect counts and classes.</small>
+              </div>
+              <div id="overviewDefectsByJob" class="defect-kpi-trend__plot"></div>
+            </div>
+          </div>
+          <div class="defect-kpi-trend defect-kpi-trend--trend">
+            <div class="defect-kpi-trend__header">
+              <p class="kpi-section__title">Defects Trend</p>
+              <small>Track daily defect totals across the filtered time window.</small>
+            </div>
+            <div id="overviewDefectsTrend" class="defect-kpi-trend__plot"></div>
+          </div>
         </div>
       </div>
 
       <div class="charts">
         <div class="chart-row chart-row--four">
-          <div class="chart chart-medium">
-            <div class="chart-header">
-              <div class="chart-header__copy">
-                <p class="kpi-section__title">Defects by Type</p>
-                <small>Share of total defects by classification for the selected window.</small>
-              </div>
-            </div>
-            <div id="overviewDefectsByType" class="chart-plot"></div>
-          </div>
-          <div class="chart chart-medium">
-            <div class="chart-header">
-              <div class="chart-header__copy">
-                <p class="kpi-section__title">Defects Trend</p>
-                <small>Track daily defect totals across the filtered time window.</small>
-              </div>
-            </div>
-            <div id="overviewDefectsTrend" class="chart-plot"></div>
-          </div>
-          <div class="chart chart-medium">
-            <div class="chart-header">
-              <div class="chart-header__copy">
-                <p class="kpi-section__title">Meters Run by Job</p>
-                <small>Total inspected footage attributed to each job.</small>
-              </div>
-            </div>
-            <div id="overviewJobsMeters" class="chart-plot"></div>
-          </div>
-          <div class="chart chart-medium">
-            <div class="chart-header">
-              <div class="chart-header__copy">
-                <p class="kpi-section__title">Inspection Mix by Job</p>
-                <small>Percent of active, inactive, and learn time for each job.</small>
-              </div>
-            </div>
-            <div id="overviewJobsTime" class="chart-plot"></div>
-          </div>
         </div>
-        <div class="chart-row chart-row--four">
-          <div class="chart chart-medium">
-            <div class="chart-header">
-              <div class="chart-header__copy">
-                <p class="kpi-section__title">Reference Changes by Job</p>
-                <small>Jobs ranked by the number of reference image changes.</small>
-              </div>
-            </div>
-            <div id="overviewRefChangesByJob" class="chart-plot"></div>
-          </div>
-          <div class="chart chart-medium">
-            <div class="chart-header">
-              <div class="chart-header__copy">
-                <p class="kpi-section__title">RLM Monitor Points by Job</p>
-                <small>Volume of RLM monitor events detected for each job.</small>
-              </div>
-            </div>
-            <div id="overviewRlmMonitorsByJob" class="chart-plot"></div>
-          </div>
-          <div class="chart chart-medium">
-            <div class="chart-header">
-              <div class="chart-header__copy">
-                <p class="kpi-section__title">Defects by Job</p>
-                <small>Top jobs ranked by total defect counts and classes.</small>
-              </div>
-            </div>
-            <div id="overviewDefectsByJob" class="chart-plot"></div>
-          </div>
-          <div class="chart chart-medium">
-            <div class="chart-header">
-              <div class="chart-header__copy">
-                <p class="kpi-section__title">Masks Applied by Job</p>
-                <small>Total masks applied per job grouped by mask type.</small>
-              </div>
-            </div>
-            <div id="overviewMasksByJob" class="chart-plot"></div>
-          </div>
-        </div>
-        <div class="chart chart-span-full">
+        <div class="chart chart-span-full" id="overviewJobsDefectsCard">
           <div class="chart-header">
             <div class="chart-header__copy">
-              <p class="kpi-section__title">Defects per Job (Trend)</p>
-              <small>Timeline of reel or job-level defect counts for this range.</small>
+              <p class="kpi-section__title">Defects per Job Leaders</p>
+              <small>Best and worst reels grouped by job for this window.</small>
             </div>
           </div>
-          <div class="chart-body chart-body--split">
-            <div id="overviewJobsDefects" class="chart-plot"></div>
-            <div class="chart-side-panel chart-side-panel--summary" id="overviewJobsDefectsTop">
-              <h4>Top Reels</h4>
-              <div class="placeholder">Waiting for defect data…</div>
+          <div id="overviewJobsDefects" class="defect-leaders"></div>
+        </div>
+        <div class="chart chart-span-full" id="overviewMaskLeadersCard">
+          <div class="chart-header">
+            <div class="chart-header__copy">
+              <p class="kpi-section__title">Mask Activity Leaders</p>
+              <small>Jobs with reels adding the most masks.</small>
             </div>
           </div>
+          <div id="overviewMaskLeaders" class="defect-leaders"></div>
+        </div>
+        <div class="chart chart-span-full" id="overviewReferenceLeadersCard">
+          <div class="chart-header">
+            <div class="chart-header__copy">
+              <p class="kpi-section__title">Reference Change Leaders</p>
+              <small>Reels with the most reference image updates.</small>
+            </div>
+          </div>
+          <div id="overviewReferenceLeaders" class="defect-leaders"></div>
         </div>
         <div class="chart chart-span-full">
           <div class="chart-header">
@@ -304,40 +268,6 @@
             </div>
           </div>
           <div id="overviewOperationsTimeline" class="chart-plot"></div>
-        </div>
-        <div id="overviewRlmTrend" class="chart chart-span-full">
-          <div class="chart-header">
-            <div class="chart-header__copy">
-              <p class="kpi-section__title">RLM Performance Trend</p>
-              <small>Compare reel monitor readings to averages for the active filters.</small>
-            </div>
-          </div>
-          <div class="chart-body">
-            <div id="overviewRlmTrendChart" class="chart-inner"></div>
-          </div>
-          <div class="chart-body">
-            <div id="overviewRlmAvgTrend" class="chart-inner chart-inner--compact"></div>
-          </div>
-          <div class="chart-side-panel chart-side-panel--wide" id="overviewRlmMissing">
-            <h4>Reel Monitoring Summary</h4>
-            <div class="placeholder">Loading…</div>
-          </div>
-        </div>
-        <div class="chart chart-span-full" id="overviewHeatmapBlock">
-          <div class="chart-header">
-            <h3>Job Defect Footprints</h3>
-          </div>
-          <div id="overviewHeatmapCanvas" class="overview-heatmap-center">
-            <div class="heatmap-flex">
-              <div class="heatmap-gallery heatmap-reference-empty">No reference images for this job.</div>
-              <div class="heatmap-stack">
-                <div class="heatmap-wrapper heatmap-empty">
-                  <span class="badge">No data yet for the selected window.</span>
-                </div>
-                <div class="heatmap-legend heatmap-legend-overview"></div>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </section>

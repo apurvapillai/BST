@@ -73,14 +73,6 @@
         setDrawMode(drawMode);
       }
       applyZoom();
-      maybePrefetchHeatmap();
-      if (Filters && typeof Filters.onChange === "function") {
-        Filters.onChange(() => {
-          if (!active) {
-            maybePrefetchHeatmap();
-          }
-        });
-      }
     }
 
     function activate() {

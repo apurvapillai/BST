@@ -152,10 +152,25 @@
       }
     });
 
-    Filters.onChange(() => {
+    const serializeFilters = (value) => {
+      if (!value || typeof Utils !== "object" || typeof Utils.buildFilterRequestKey !== "function") {
+        try {
+          return JSON.stringify(value || {});
+        } catch (err) {
+          return "";
+        }
+      }
+      return Utils.buildFilterRequestKey(value);
+    };
+    let lastFiltersKey = serializeFilters(Filters.getState ? Filters.getState() : {});
+    Filters.onChange((payload) => {
+      const nextKey = serializeFilters(payload);
+      if (lastFiltersKey && nextKey === lastFiltersKey) {
+        return;
+      }
+      lastFiltersKey = nextKey;
       Router.reloadActive();
     });
-    Router.reloadActive();
   }
 
   function initializeApp() {

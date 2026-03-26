@@ -423,10 +423,6 @@
       initialized = true;
       setDefectCategoryValue("");
       resetSeverityControls();
-      renderReviewSummaryHistoryPlaceholder("Loading historical summary…");
-      renderJobTablePlaceholder("Loading job summary…");
-      fetchJobOverview(true).catch(() => {});
-      fetchReviewSummaryHistory(true).catch(() => {});
     }
 
     function updateHeaderInfo(reel, defect) {
@@ -1999,9 +1995,11 @@
         fetchNext(true);
       }
       if (shouldRefreshJobOverview) {
+        renderJobTablePlaceholder("Loading job summary…");
         fetchJobOverview(true).catch(() => {});
       }
       if (shouldRefreshReviewSummaryHistory) {
+        renderReviewSummaryHistoryPlaceholder("Loading historical summary…");
         fetchReviewSummaryHistory(true).catch(() => {});
       }
     }
