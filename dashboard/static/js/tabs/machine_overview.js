@@ -88,6 +88,15 @@
       return color;
     }
 
+    function toggleJobFilter(value) {
+      if (!Filters || typeof Filters.set !== "function") return;
+      const targetValue = value || "";
+      const currentState = Filters && typeof Filters.getState === "function" ? Filters.getState() : null;
+      const currentValue = currentState && currentState.job ? currentState.job : "";
+      const nextValue = currentValue === targetValue ? "" : targetValue;
+      Filters.set("job", nextValue, { emit: true, updateUrl: true });
+    }
+
     function buildDefectColorMap(defectsByType = []) {
       const colorMap = new Map();
       (defectsByType || []).forEach((entry) => {
@@ -516,6 +525,7 @@
           const withMasks = Number(group.with_masks) || 0;
           const withoutMasks = Number(group.without_masks) || 0;
           const totalChanges = Number(group.mask_changes) || 0;
+          const totalReels = Number(group.total_reels) || 0;
           return `
             <section class="defect-leaders__job">
               <header class="defect-leaders__header">
@@ -525,6 +535,10 @@
               <div class="defect-leaders__column">
                 <div class="defect-leaders__column-title">Mask Summary</div>
                 <div class="defect-leader-list">
+                  <div class="defect-leader__value-row">
+                    <span>Total reels</span>
+                    <strong>${Utils.formatNumber(totalReels)}</strong>
+                  </div>
                   <div class="defect-leader__value-row">
                     <span>Mask changes</span>
                     <strong>${Utils.formatNumber(totalChanges)}</strong>
@@ -555,10 +569,15 @@
       container.innerHTML = rankings
         .map((group) => {
           const jobValue = group.job_value || "";
+          const totalReels = Utils.formatNumber(Number(group.total_reels) || 0);
           const totalChanges = Utils.formatNumber(Number(group.reference_changes) || 0);
           const singleReels = Utils.formatNumber(Number(group.single_reference_reels) || 0);
           const multiReels = Utils.formatNumber(Number(group.multi_reference_reels) || 0);
           const rows = `
+            <div class="defect-leader__value-row">
+              <span>Total reels</span>
+              <strong>${totalReels}</strong>
+            </div>
             <div class="defect-leader__value-row">
               <span>Total reference changes</span>
               <strong>${totalChanges}</strong>
@@ -1620,6 +1639,23 @@
     function renderDefectsTrend(defectsTrend = []) {
       const containerId = "overviewDefectsTrend";
       if (!document.getElementById(containerId)) return;
+      const ONE_HOUR_MS = 60 * 60 * 1000;
+      const formatLastHourLabel = (timeValue) => {
+        if (!timeValue) return "Last 1 hr";
+        const end = new Date(timeValue);
+        if (Number.isNaN(end.getTime())) {
+          return "Last 1 hr";
+        }
+        const start = new Date(end.getTime() - ONE_HOUR_MS);
+        const format = (date) =>
+          date.toLocaleString(undefined, {
+            month: "short",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+        return `Time window: ${format(start)} → ${format(end)} (last 1 hr)`;
+      };
       const map = new Map();
       (defectsTrend || []).forEach((entry) => {
         const job = entry && entry.job ? entry.job : "Unassigned";
@@ -1631,12 +1667,19 @@
           .slice()
           .filter((point) => point && point.time)
           .sort((a, b) => new Date(a.time) - new Date(b.time));
+        const customdata = sorted.map((point) => [
+          job,
+          formatLastHourLabel(point.time),
+        ]);
         return {
           type: "scatter",
           mode: "lines+markers",
           name: job,
           x: sorted.map((point) => point.time),
           y: sorted.map((point) => point.count),
+          customdata,
+          hovertemplate:
+            "<b>%{customdata[0]}</b><br>%{customdata[1]}<br>%{y} defects<extra></extra>",
         };
       });
       if (!traces.length) {
@@ -1665,6 +1708,7 @@
         containerId,
         traces,
         withResponsiveLayout({
+          hovermode: "closest",
           xaxis: {
             type: "date",
             title: { text: "Time" },
@@ -1746,8 +1790,7 @@
         row.addEventListener("click", (event) => {
           event.stopPropagation();
           const value = row.dataset.jobValue || "";
-          if (!Filters || typeof Filters.set !== "function") return;
-          Filters.set("job", value, { emit: true, updateUrl: true });
+          toggleJobFilter(value);
         });
       });
     }
@@ -1819,7 +1862,13 @@
           return defaultMeters;
         }
         const parsed = Number(raw);
-        return Number.isFinite(parsed) && parsed >= 0 ? parsed : defaultMeters;
+        if (!Number.isFinite(parsed)) {
+          return defaultMeters;
+        }
+        if (parsed <= 0) {
+          return defaultMeters;
+        }
+        return parsed;
       } catch (err) {
         return defaultMeters;
       }
@@ -1879,13 +1928,13 @@
       rows.sort((a, b) => b.total - a.total);
       const topRows = rows.slice(0, 10);
       const columns = [
-        { key: "__total__", label: "Total" },
-        { key: "flaw", label: "Flaw" },
-        { key: "sporadicflaw", label: "Sporadic Flaw" },
-        { key: "streak", label: "Streak" },
-        { key: "sporadicstreak", label: "Sporadic Streak" },
-        { key: "colour", label: "Colour" },
-        { key: "register", label: "Register" },
+        { key: "__total__", label: "Total defects per 1k" },
+        { key: "flaw", label: "Flaw defects per 1k" },
+        { key: "sporadicflaw", label: "Sporadic flaw defects per 1k" },
+        { key: "streak", label: "Streak defects per 1k" },
+        { key: "sporadicstreak", label: "Sporadic streak defects per 1k" },
+        { key: "colour", label: "Colour defects per 1k" },
+        { key: "register", label: "Register defects per 1k" },
       ];
       const body = topRows
         .map((row) => {
@@ -1932,8 +1981,7 @@
         row.addEventListener("click", (event) => {
           event.stopPropagation();
           const value = row.dataset.jobValue || "";
-          if (!Filters || typeof Filters.set !== "function") return;
-          Filters.set("job", value, { emit: true, updateUrl: true });
+          toggleJobFilter(value);
         });
       });
     }
@@ -1998,8 +2046,7 @@
         row.addEventListener("click", (event) => {
           event.stopPropagation();
           const value = row.dataset.jobValue || "";
-          if (!Filters || typeof Filters.set !== "function") return;
-          Filters.set("job", value, { emit: true, updateUrl: true });
+          toggleJobFilter(value);
         });
       });
     }

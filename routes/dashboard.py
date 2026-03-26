@@ -2055,7 +2055,12 @@ def api_overview():
         job_mask_change_counts: Dict[str, int] = defaultdict(int)
         job_mask_reel_changes: Dict[str, Dict[int, int]] = defaultdict(lambda: defaultdict(int))
         job_reference_summary_map: Dict[str, Dict[str, int]] = defaultdict(
-            lambda: {"reference_changes": 0, "single_reference_reels": 0, "multi_reference_reels": 0}
+            lambda: {
+                "reference_changes": 0,
+                "single_reference_reels": 0,
+                "multi_reference_reels": 0,
+                "total_reels": 0,
+            }
         )
         job_value_map: Dict[str, str] = {}
         job_sensitivity_values: Dict[str, Dict[str, Counter]] = defaultdict(lambda: defaultdict(Counter))
@@ -2293,9 +2298,9 @@ def api_overview():
 
             # Reference image changes
             ordered_refs = _ordered_reference_images(reel.reference_images)
-            reference_summary_entry = None
+            reference_summary_entry = job_reference_summary_map[job_display]
+            reference_summary_entry["total_reels"] += 1
             if ordered_refs:
-                reference_summary_entry = job_reference_summary_map[job_display]
                 ref_image_count = len(ordered_refs)
                 if ref_image_count == 1:
                     reference_summary_entry["single_reference_reels"] += 1
@@ -2308,8 +2313,6 @@ def api_overview():
                 change_count = len(ref_change_pairs)
                 job_order_entry["reference_changes"] += change_count
                 job_summary_entry["reference_changes"] += change_count
-                if reference_summary_entry is None:
-                    reference_summary_entry = job_reference_summary_map[job_display]
                 reference_summary_entry["reference_changes"] += change_count
                 reel_operation_counter[EVENT_REFERENCE] += change_count
                 for previous_ref, new_ref in ref_change_pairs:
@@ -2657,6 +2660,7 @@ def api_overview():
             presence = job_mask_presence[job_display]
             with_count = len(presence["with"])
             without_count = len(presence["without"])
+            total_reels = len(presence["with"] | presence["without"])
             multi_reels = sum(
                 1
                 for count in job_mask_reel_changes[job_display].values()
@@ -2670,6 +2674,7 @@ def api_overview():
                     "with_masks": with_count,
                     "without_masks": without_count,
                     "multi_reel_changes": multi_reels,
+                    "total_reels": total_reels,
                 }
             )
         job_reference_summary: List[Dict[str, object]] = []
@@ -2680,6 +2685,7 @@ def api_overview():
             total_changes = int(summary.get("reference_changes", 0))
             single_reels = int(summary.get("single_reference_reels", 0))
             multi_reels = int(summary.get("multi_reference_reels", 0))
+            total_reels = int(summary.get("total_reels", 0))
             if total_changes == 0 and single_reels == 0 and multi_reels == 0:
                 continue
             job_reference_summary.append(
@@ -2689,6 +2695,7 @@ def api_overview():
                     "reference_changes": total_changes,
                     "single_reference_reels": single_reels,
                     "multi_reference_reels": multi_reels,
+                    "total_reels": total_reels,
                 }
             )
 
