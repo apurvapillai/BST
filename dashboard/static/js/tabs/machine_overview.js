@@ -126,6 +126,7 @@
       rlm_config_change: "diamond",
       reference_change: "triangle-up",
     };
+    const DEFECT_TREND_PALETTE = ["#2563eb", "#c026d3", "#0ea5e9", "#f97316", "#22c55e", "#8b5cf6"];
 
     let latestRequestToken = 0;
 
@@ -502,6 +503,7 @@
       const containerId = "overviewJobsDefects";
       if (!document.getElementById(containerId)) return;
 
+      const jobTotals = Array.isArray(totals) ? totals.slice() : [];
       const range = getTimeRange();
       const rangeLabel =
         range && range.length === 2
@@ -509,7 +511,7 @@
           : "";
 
       if (!trend.length) {
-        if (!totals.length) {
+        if (!jobTotals.length) {
           Plotly.react(
             containerId,
             [],
@@ -532,14 +534,15 @@
             },
             plotlyConfig({ displayModeBar: false })
           );
+          renderJobsDefectsSummary([], [], rangeLabel);
         } else {
           Plotly.react(
             containerId,
             [
               {
                 type: "bar",
-                x: totals.map((item) => item.job),
-                y: totals.map((item) => item.count),
+                x: jobTotals.map((item) => item.job),
+                y: jobTotals.map((item) => item.count),
                 marker: { color: "#8b5cf6" },
               },
             ],
@@ -549,6 +552,7 @@
             },
             plotlyConfig()
           );
+          renderJobsDefectsSummary([], jobTotals, rangeLabel);
         }
         return;
       }
@@ -571,33 +575,81 @@
         grouped.get(seriesLabel).push(entry);
       });
 
-      const traces = Array.from(grouped.entries()).map(([job, points]) => {
+      const seriesData = Array.from(grouped.entries()).map(([label, points]) => {
         const sortedPoints = points
           .slice()
           .sort((a, b) => new Date(a.time || 0).getTime() - new Date(b.time || 0).getTime());
-        const xs = sortedPoints.map((item) => item.time);
-        const ys = sortedPoints.map((item) => item.count || 0);
-        const texts = sortedPoints.map((item) => {
-          const base = buildDefectsTrendHover(item.reel || job, item);
+        const total = sortedPoints.reduce((sum, item) => sum + (item.count || 0), 0);
+        const firstPoint = sortedPoints[0] || {};
+        return {
+          label,
+          points: sortedPoints,
+          total,
+          job: firstPoint.job || "Unassigned",
+          reel: firstPoint.reel || "",
+          order_number: firstPoint.order_number || "",
+        };
+      });
+
+      if (!seriesData.length) {
+        renderJobsDefectsSummary([], jobTotals, rangeLabel);
+        Plotly.react(
+          containerId,
+          [],
+          {
+            title: "Defects per Job (Trend)",
+            annotations: [
+              {
+                text: "No defect activity in this window",
+                showarrow: false,
+                xref: "paper",
+                yref: "paper",
+                x: 0.5,
+                y: 0.5,
+                font: { color: "#94a3b8" },
+              },
+            ],
+            xaxis: { visible: false },
+            yaxis: { visible: false },
+            margin: { t: 60, l: 40, r: 20, b: 40 },
+          },
+          plotlyConfig({ displayModeBar: false })
+        );
+        return;
+      }
+
+      const sortedSeries = seriesData
+        .slice()
+        .sort((a, b) => (b.total || 0) - (a.total || 0));
+      const topSeries = sortedSeries.slice(0, 5);
+      const hiddenCount = Math.max(sortedSeries.length - topSeries.length, 0);
+
+      const traces = topSeries.map((series, idx) => {
+        const xs = series.points.map((item) => item.time);
+        const ys = series.points.map((item) => item.count || 0);
+        const texts = series.points.map((item) => {
+          const base = buildDefectsTrendHover(series.reel || series.label, item);
           const timeLabel = item.time ? new Date(item.time).toLocaleString() : "";
           return timeLabel ? `${base}<br>${timeLabel}` : base;
         });
         const sizes = ys.map((value) => Math.min(6 + value * 2, 20));
+        const color = DEFECT_TREND_PALETTE[idx % DEFECT_TREND_PALETTE.length];
         return {
           type: "scatter",
           mode: "lines+markers",
-          name: job,
+          name: series.reel || series.label,
           x: xs,
           y: ys,
           text: texts,
           hoverinfo: "text",
-          line: { shape: "linear" },
+          line: { shape: "linear", color },
           marker: {
             size: sizes,
             sizemode: "diameter",
+            color,
             line: { color: "#0f172a", width: 1 },
           },
-          customdata: sortedPoints.map((item) => ({
+          customdata: series.points.map((item) => ({
             reel: item.reel,
             reel_id: item.reel_id,
             job: item.job,
@@ -606,6 +658,32 @@
           })),
         };
       });
+
+      const annotations = [];
+      if (rangeLabel) {
+        annotations.push({
+          text: rangeLabel,
+          showarrow: false,
+          xref: "paper",
+          yref: "paper",
+          x: 0,
+          y: 1.14,
+          align: "left",
+          font: { size: 11, color: "#475569" },
+        });
+      }
+      if (hiddenCount > 0) {
+        annotations.push({
+          text: `Showing top ${topSeries.length} of ${sortedSeries.length} reels`,
+          showarrow: false,
+          xref: "paper",
+          yref: "paper",
+          x: 1,
+          y: 1.14,
+          align: "right",
+          font: { size: 11, color: "#475569" },
+        });
+      }
 
       const layout = withResponsiveLayout({
         title: "Defects per Job (Trend)",
@@ -616,40 +694,100 @@
           autorange: range ? false : true,
         },
         yaxis: { title: "Defects" },
-        showlegend: false,
-        margin: { t: 70, l: 60, r: 20, b: 90 },
-        annotations: rangeLabel
-          ? [
-              {
-                text: rangeLabel,
-                showarrow: false,
-                xref: "paper",
-                yref: "paper",
-                x: 0,
-                y: 1.12,
-                align: "left",
-                font: { size: 11, color: "#475569" },
-              },
-            ]
-          : [],
+        showlegend: true,
+        legend: { orientation: "h", x: 0, y: 1.2 },
+        margin: { t: 90, l: 60, r: 20, b: 90 },
+        hovermode: "closest",
+        annotations,
       });
 
       Plotly.react(containerId, traces, layout, plotlyConfig());
+      renderJobsDefectsSummary(topSeries, null, rangeLabel, hiddenCount);
 
       const plotEl = document.getElementById(containerId);
       if (plotEl) {
         plotEl.on("plotly_click", (eventData) => {
           if (!eventData || !eventData.points || !eventData.points.length) return;
           const point = eventData.points[0];
-        const payload = point && point.customdata ? point.customdata : null;
-        const reelCode = payload ? (payload.reel || payload.reel_code || payload.code || "") : "";
-        const reelId = payload ? (payload.reel_id || payload.id || "") : "";
-        if (!reelCode && !reelId) return;
-        addReelFromPayload(reelCode, reelId, payload || {});
+          const payload = point && point.customdata ? point.customdata : null;
+          const reelCode = payload ? (payload.reel || payload.reel_code || payload.code || "") : "";
+          const reelId = payload ? (payload.reel_id || payload.id || "") : "";
+          if (!reelCode && !reelId) return;
+          addReelFromPayload(reelCode, reelId, payload || {});
           Router.setActive("job");
           scrollToTopSoon();
         });
         plotEl.style.cursor = "pointer";
+      }
+    }
+
+    function renderJobsDefectsSummary(series, totals, rangeLabel = "", hiddenCount = 0) {
+      const container = document.getElementById("overviewJobsDefectsTop");
+      if (!container) return;
+
+      let extraHidden = hiddenCount;
+      let rows = [];
+      if (Array.isArray(series) && series.length) {
+        rows = series.map((entry, idx) => buildSummaryRow(entry, idx));
+      } else if (Array.isArray(totals) && totals.length) {
+        const normalizedTotals = totals
+          .slice()
+          .sort((a, b) => (b.count || 0) - (a.count || 0))
+          .slice(0, 5)
+          .map((item) => ({
+            label: item.job || "Unassigned",
+            job: item.job || "Unassigned",
+            total: item.count || 0,
+            reel: item.reel || item.reel_code || "",
+            order_number: item.order_number || item.order || "",
+          }));
+        rows = normalizedTotals.map((entry, idx) => buildSummaryRow(entry, idx));
+        if (!extraHidden) {
+          extraHidden = Math.max(totals.length - normalizedTotals.length, 0);
+        }
+      } else {
+        container.innerHTML =
+          "<div class=\"placeholder\">No defect activity to rank for this window.</div>";
+        return;
+      }
+
+      const footerParts = [];
+      if (rangeLabel) {
+        footerParts.push(`<span class="chart-summary-range">${Utils.escapeHtml(rangeLabel)}</span>`);
+      }
+      if (extraHidden > 0) {
+        footerParts.push(`<small class="chart-summary-note">+${extraHidden} more</small>`);
+      }
+
+      container.innerHTML = `
+        <h4>Top Reels</h4>
+        <div class="chart-summary-list">
+          ${rows.join("")}
+        </div>
+        ${
+          footerParts.length
+            ? `<div class="chart-summary-footer">${footerParts.join("")}</div>`
+            : ""
+        }
+      `;
+
+      function buildSummaryRow(entry, index) {
+        const name = entry.reel || entry.label || entry.job || "Unassigned";
+        const metaParts = [];
+        if (entry.job && entry.job !== name) metaParts.push(entry.job);
+        if (entry.order_number) metaParts.push(entry.order_number);
+        const meta = metaParts.join(" · ") || entry.job || "—";
+        const value = Utils.formatNumber(entry.total || entry.count || 0);
+        return `
+          <div class="chart-summary-item">
+            <span class="chart-summary-rank">${index + 1}</span>
+            <div class="chart-summary-text">
+              <strong>${Utils.escapeHtml(name)}</strong>
+              <small>${Utils.escapeHtml(meta)}</small>
+            </div>
+            <span class="chart-summary-value">${value}<small>defects</small></span>
+          </div>
+        `;
       }
     }
 
