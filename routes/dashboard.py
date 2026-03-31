@@ -2789,6 +2789,2783 @@ def api_overview():
         return resp
 
 
+DRIVER_DEFECT_CLASSES = (
+    "flaw",
+    "sporadicflaw",
+    "streak",
+    "sporadicstreak",
+    "colour",
+    "register",
+)
+DRIVER_EVENT_LABELS = {
+    "sensitivity_change": "Sensitivity change",
+    "mask_change": "Mask change",
+    "reference_change": "Reference change",
+    "speed_shift": "Speed shift",
+    "bst_coverage": "BST coverage",
+    "defect_spike": "Defect spike",
+}
+# BST coverage thresholds are intentionally explicit:
+# <= 1% active means inspection was effectively off.
+# > 1% and < 75% active means coverage was only partial.
+BST_OFF_ACTIVE_PCT_THRESHOLD = 1.0
+BST_PARTIAL_ACTIVE_PCT_THRESHOLD = 75.0
+SPEED_SHIFT_MIN_DELTA = 0.5
+
+
+def _driver_class_label(name: Optional[str]) -> str:
+    canonical = _canonical_sensitivity_class(name) or _normalize_defect_label(name) or ""
+    labels = {
+        "flaw": "Flaw",
+        "sporadicflaw": "Sporadic Flaw",
+        "streak": "Streak",
+        "sporadicstreak": "Sporadic Streak",
+        "colour": "Colour",
+        "register": "Register",
+    }
+    return labels.get(canonical, canonical.title() if canonical else "Unknown")
+
+
+def _driver_class_breakdown(counter: Counter) -> List[Dict[str, object]]:
+    rows: List[Dict[str, object]] = []
+    ordered_keys = list(DRIVER_DEFECT_CLASSES) + [
+        key for key, _ in counter.most_common() if key not in DRIVER_DEFECT_CLASSES
+    ]
+    seen: Set[str] = set()
+    for key in ordered_keys:
+        if key in seen:
+            continue
+        seen.add(key)
+        count = int(counter.get(key, 0))
+        if count <= 0:
+            continue
+        rows.append({"name": key, "label": _driver_class_label(key), "count": count})
+    return rows
+
+
+def _reel_length_feet(reel: Reel) -> float:
+    start_value = _to_float(reel.reel_start) or 0.0
+    end_value = _to_float(reel.reel_end) or 0.0
+    meters = max(end_value - start_value, 0.0)
+    return round(meters * 3.28084, 2)
+
+
+def _rate_per_1000ft(defect_count: int, length_ft: Optional[float]) -> Optional[float]:
+    length_value = _to_float(length_ft)
+    if length_value is None or length_value <= 0:
+        return None
+    return round((defect_count / length_value) * 1000.0, 3)
+
+
+def _safe_delta(current: Optional[float], previous: Optional[float], digits: int = 3) -> Optional[float]:
+    current_value = _to_float(current)
+    previous_value = _to_float(previous)
+    if current_value is None or previous_value is None:
+        return None
+    return round(current_value - previous_value, digits)
+
+
+def _relative_change(current: Optional[float], previous: Optional[float]) -> Optional[float]:
+    current_value = _to_float(current)
+    previous_value = _to_float(previous)
+    if current_value is None or previous_value is None:
+        return None
+    baseline = abs(previous_value)
+    if baseline < 1e-9:
+        if abs(current_value) < 1e-9:
+            return 0.0
+        return None
+    return (current_value - previous_value) / baseline
+
+
+def _material_rate_change(
+    previous_rate: Optional[float],
+    current_rate: Optional[float],
+) -> Optional[Dict[str, object]]:
+    previous_value = _to_float(previous_rate)
+    current_value = _to_float(current_rate)
+    if previous_value is None or current_value is None:
+        return None
+    delta = current_value - previous_value
+    if previous_value <= 0 and current_value >= 1.0:
+        return {"direction": "up", "delta": round(delta, 3), "relative": None}
+    if current_value <= 0 and previous_value >= 1.0:
+        return {"direction": "down", "delta": round(delta, 3), "relative": None}
+    relative = _relative_change(current_value, previous_value)
+    if abs(delta) < 0.5:
+        return None
+    if relative is not None and abs(relative) < 0.4:
+        return None
+    return {
+        "direction": "up" if delta > 0 else "down",
+        "delta": round(delta, 3),
+        "relative": round(relative, 3) if relative is not None else None,
+    }
+
+
+def _driver_percentile(values: List[float], pct: float) -> Optional[float]:
+    finite = sorted(value for value in values if value is not None)
+    if not finite:
+        return None
+    if len(finite) == 1:
+        return finite[0]
+    position = max(0.0, min(1.0, pct)) * (len(finite) - 1)
+    lower = int(math.floor(position))
+    upper = int(math.ceil(position))
+    if lower == upper:
+        return finite[lower]
+    weight = position - lower
+    return finite[lower] + (finite[upper] - finite[lower]) * weight
+
+
+def _bucket_thresholds(values: List[float]) -> Tuple[Optional[float], Optional[float]]:
+    low_cut = _driver_percentile(values, 1 / 3)
+    high_cut = _driver_percentile(values, 2 / 3)
+    if low_cut is None or high_cut is None:
+        return (None, None)
+    if low_cut > high_cut:
+        low_cut, high_cut = high_cut, low_cut
+    return (low_cut, high_cut)
+
+
+def _bucket_label(
+    value: Optional[float],
+    thresholds: Tuple[Optional[float], Optional[float]],
+    noun: str,
+    digits: int = 1,
+    suffix: str = "",
+) -> str:
+    numeric = _to_float(value)
+    if numeric is None:
+        return f"No {noun} data"
+    low_cut, high_cut = thresholds
+    if low_cut is None or high_cut is None:
+        return f"All {noun}"
+    if low_cut == high_cut:
+        return f"{noun.title()} near {round(low_cut, digits):.{digits}f}{suffix}"
+    if numeric <= low_cut:
+        return f"Low {noun} (≤ {round(low_cut, digits):.{digits}f}{suffix})"
+    if numeric <= high_cut:
+        return (
+            f"Mid {noun} ({round(low_cut, digits):.{digits}f}"
+            f"–{round(high_cut, digits):.{digits}f}{suffix})"
+        )
+    return f"High {noun} (> {round(high_cut, digits):.{digits}f}{suffix})"
+
+
+def _driver_adjusted_rate(
+    total_defects: Optional[int],
+    total_feet: Optional[float],
+    avg_bst_active_pct: Optional[float],
+) -> Optional[float]:
+    feet_value = _to_float(total_feet) or 0.0
+    bst_value = _to_float(avg_bst_active_pct)
+    if feet_value <= 0 or bst_value is None:
+        return None
+    adjusted_feet = feet_value * (bst_value / 100.0)
+    if adjusted_feet < 1.0:
+        return None
+    return _rate_per_1000ft(int(total_defects or 0), adjusted_feet)
+
+
+def _driver_speed_range_definition(values: List[float]) -> Optional[Dict[str, object]]:
+    numeric = sorted(_to_float(value) for value in values if _to_float(value) is not None)
+    if not numeric:
+        return None
+    low = math.floor(min(numeric))
+    high = math.ceil(max(numeric))
+    if high <= low:
+        high = low + 5
+    span = high - low
+    step = span / 5.0
+    return {"min": float(low), "max": float(high), "step": step}
+
+
+def _driver_speed_bucket_index(
+    value: Optional[float],
+    definition: Optional[Dict[str, object]],
+) -> Optional[int]:
+    numeric = _to_float(value)
+    if numeric is None or not definition:
+        return None
+    step = _to_float(definition.get("step")) or 0.0
+    low = _to_float(definition.get("min")) or 0.0
+    if step <= 0:
+        return 0
+    return max(0, min(4, int((numeric - low) / step)))
+
+
+def _driver_speed_bucket_label(index: int, definition: Dict[str, object]) -> str:
+    low = _to_float(definition.get("min")) or 0.0
+    step = _to_float(definition.get("step")) or 0.0
+    start = low + (step * index)
+    end = low + (step * (index + 1))
+    if index == 4:
+        return f"{start:.1f} - {end:.1f}"
+    return f"{start:.1f} - {end:.1f}"
+
+
+def _driver_length_bucket_label(length_ft: Optional[float]) -> str:
+    numeric = _to_float(length_ft) or 0.0
+    if numeric < 5000:
+        return "< 5,000 ft"
+    if numeric < 8000:
+        return "5,000 - 8,000 ft"
+    if numeric < 11000:
+        return "8,000 - 11,000 ft"
+    if numeric < 14000:
+        return "11,000 - 14,000 ft"
+    return "> 14,000 ft"
+
+
+def _mask_noinspection_enabled(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return False
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    return bool(normalized)
+
+
+def _mask_signature_entries(masks: Iterable[Mask]) -> List[Tuple[str, str, str, str]]:
+    entries: List[Tuple[str, str, str, str]] = []
+    for mask in masks or []:
+        entries.append(
+            (
+                (mask.xml_id or "").strip(),
+                (mask.sensitivitysetid or "").strip(),
+                (mask.coords or "").strip() if mask.coords else "",
+                "1" if _mask_noinspection_enabled(getattr(mask, "noinspection", False)) else "0",
+            )
+        )
+    entries.sort()
+    return entries
+
+
+def _reference_signature(images: Iterable[ReferenceImage]) -> Tuple[str, ...]:
+    ordered = _ordered_reference_images(images)
+    result: List[str] = []
+    for image in ordered:
+        label = None
+        if image.ref_image_id is not None:
+            label = str(image.ref_image_id)
+        elif image.filename:
+            label = image.filename.strip()
+        elif image.image_src:
+            label = image.image_src.strip()
+        if label:
+            result.append(label)
+    return tuple(result)
+
+
+def _active_mask_count(masks: Iterable[Dict[str, object]]) -> int:
+    count = 0
+    for mask in masks or []:
+        has_definition = bool(
+            (mask.get("coords") or "").strip()
+            or (mask.get("xml_id") or "").strip()
+            or (mask.get("sensitivitysetid") or "").strip()
+        )
+        # In this codebase, persisted mask rows often represent real applied mask regions
+        # through the noinspection path. Treat any defined mask as active unless there is
+        # some separate explicit disabled/off field, which we do not currently store.
+        if has_definition:
+            count += 1
+    return count
+
+
+def _mask_segment_validity_label(active_pct: Optional[float]) -> str:
+    numeric = _to_float(active_pct) or 0.0
+    if numeric <= BST_OFF_ACTIVE_PCT_THRESHOLD:
+        return "BST mostly off"
+    if numeric < BST_PARTIAL_ACTIVE_PCT_THRESHOLD:
+        return "Low BST coverage"
+    return "Valid comparison"
+
+
+def _mask_state_label(active_mask_count: int) -> str:
+    if active_mask_count > 0:
+        return "Mask On"
+    return "No Mask"
+
+
+def _active_mask_signature(masks: Iterable[Dict[str, object]]) -> Set[Tuple[str, str, str]]:
+    signature: Set[Tuple[str, str, str]] = set()
+    for mask in masks or []:
+        xml_id = (mask.get("xml_id") or "").strip()
+        sensitivitysetid = (mask.get("sensitivitysetid") or "").strip()
+        coords = (mask.get("coords") or "").strip()
+        has_definition = bool(coords or xml_id or sensitivitysetid)
+        if not has_definition:
+            continue
+        signature.add((xml_id, sensitivitysetid, coords))
+    return signature
+
+
+def _active_mask_details(masks: Iterable[Dict[str, object]]) -> List[Dict[str, object]]:
+    return [
+        mask
+        for mask in (masks or [])
+        if bool(
+            (mask.get("coords") or "").strip()
+            or (mask.get("xml_id") or "").strip()
+            or (mask.get("sensitivitysetid") or "").strip()
+        )
+    ]
+
+
+def _mask_detail_signature(mask: Dict[str, object]) -> Tuple[str, str, str]:
+    return (
+        (mask.get("xml_id") or "").strip(),
+        (mask.get("sensitivitysetid") or "").strip(),
+        (mask.get("coords") or "").strip(),
+    )
+
+
+def _mask_type_hint(mask: Dict[str, object]) -> Optional[str]:
+    probe = " ".join(
+        str(value or "").strip().lower()
+        for value in (
+            mask.get("xml_id"),
+            mask.get("sensitivitysetid"),
+            mask.get("coords"),
+        )
+    )
+    if not probe:
+        return None
+    if any(token in probe for token in ("ellipse", "circle", "oval")):
+        return "ellipse"
+    if any(token in probe for token in ("rect", "rectangle", "border", "box")):
+        return "rectangle"
+    if "poly" in probe:
+        return "polygon"
+    return None
+
+
+def _mask_display_label(mask: Dict[str, object], fallback_index: int) -> str:
+    name = (
+        (mask.get("xml_id") or "").strip()
+        or (mask.get("sensitivitysetid") or "").strip()
+        or f"Mask {fallback_index}"
+    )
+    mask_type = _mask_type_hint(mask)
+    if mask_type:
+        return f"{name} ({mask_type})"
+    return name
+
+
+def _mask_display_labels(masks: Iterable[Dict[str, object]]) -> List[str]:
+    labels: List[str] = []
+    seen: Set[str] = set()
+    for index, mask in enumerate(masks or [], start=1):
+        label = _mask_display_label(mask, index)
+        if label in seen:
+            continue
+        seen.add(label)
+        labels.append(label)
+    return labels
+
+
+def _sensitivity_change_detail(
+    previous_snapshot: Dict[str, Tuple[Optional[float], Optional[float]]],
+    current_snapshot: Dict[str, Tuple[Optional[float], Optional[float]]],
+) -> List[Dict[str, object]]:
+    changes: List[Dict[str, object]] = []
+    for cls in DRIVER_DEFECT_CLASSES:
+        delta = _sensitivity_tuple_delta(previous_snapshot.get(cls), current_snapshot.get(cls))
+        if not delta:
+            continue
+        changes.append(
+            {
+                "name": cls,
+                "label": _driver_class_label(cls),
+                "previous": delta["previous"],
+                "current": delta["current"],
+            }
+        )
+    return changes
+
+
+def _serialize_reel_metrics(record: Dict[str, object]) -> Dict[str, object]:
+    return {
+        "defect_count": int(record.get("total_defects") or 0),
+        "rate_per_1000ft": _to_float(record.get("defects_per_1000ft")),
+        "avg_defect_size": _to_float(record.get("avg_defect_size")),
+        "class_counts": _driver_class_breakdown(record.get("class_counter") or Counter()),
+    }
+
+
+def _driver_impact_row(
+    current_record: Dict[str, object],
+    previous_record: Dict[str, object],
+    *,
+    extra: Optional[Dict[str, object]] = None,
+) -> Dict[str, object]:
+    before_metrics = _serialize_reel_metrics(previous_record)
+    after_metrics = _serialize_reel_metrics(current_record)
+    payload = {
+        "reel_id": current_record.get("reel_id"),
+        "reel_code": current_record.get("reel_code"),
+        "job": current_record.get("job"),
+        "order": current_record.get("order"),
+        "time": current_record.get("time"),
+        "before_defect_count": before_metrics["defect_count"],
+        "after_defect_count": after_metrics["defect_count"],
+        "before_rate_per_1000ft": before_metrics["rate_per_1000ft"],
+        "after_rate_per_1000ft": after_metrics["rate_per_1000ft"],
+        "rate_delta_per_1000ft": _safe_delta(
+            after_metrics["rate_per_1000ft"], before_metrics["rate_per_1000ft"]
+        ),
+        "before_avg_size": before_metrics["avg_defect_size"],
+        "after_avg_size": after_metrics["avg_defect_size"],
+        "avg_size_delta": _safe_delta(
+            after_metrics["avg_defect_size"], before_metrics["avg_defect_size"]
+        ),
+        "before_class_counts": before_metrics["class_counts"],
+        "after_class_counts": after_metrics["class_counts"],
+    }
+    if extra:
+        payload.update(extra)
+    return payload
+
+
+def _weighted_average(pairs: Iterable[Tuple[Optional[float], int]]) -> Optional[float]:
+    total_weight = 0
+    total_value = 0.0
+    for value, weight in pairs:
+        numeric = _to_float(value)
+        qty = int(weight or 0)
+        if numeric is None or qty <= 0:
+            continue
+        total_value += numeric * qty
+        total_weight += qty
+    if total_weight <= 0:
+        return None
+    return round(total_value / total_weight, 3)
+
+
+def _average(values: Iterable[Optional[float]]) -> Optional[float]:
+    numeric = [_to_float(value) for value in values]
+    filtered = [value for value in numeric if value is not None]
+    if not filtered:
+        return None
+    return round(sum(filtered) / len(filtered), 3)
+
+
+def _drivers_window_metrics(records: Iterable[Dict[str, object]]) -> Dict[str, object]:
+    rows = list(records or [])
+    if not rows:
+        return {
+            "reel_start": None,
+            "reel_end": None,
+            "time_start": None,
+            "time_end": None,
+            "reel_count": 0,
+            "total_feet": 0.0,
+            "total_defects": 0,
+            "defects_per_1000ft": None,
+            "avg_defect_size": None,
+            "bst_active_pct": None,
+            "bst_validity": _mask_segment_validity_label(None),
+        }
+    total_feet = sum(_to_float(row.get("length_ft")) or 0.0 for row in rows)
+    total_defects = sum(int(row.get("total_defects") or 0) for row in rows)
+    avg_defect_size = _weighted_average(
+        (row.get("avg_defect_size"), int(row.get("total_defects") or 0)) for row in rows
+    )
+    bst_active_pct = _average((row.get("bst_coverage") or {}).get("active_pct") for row in rows)
+    return {
+        "reel_start": rows[0].get("reel_code"),
+        "reel_end": rows[-1].get("reel_code"),
+        "time_start": rows[0].get("time"),
+        "time_end": rows[-1].get("time"),
+        "reel_count": len(rows),
+        "total_feet": round(total_feet, 2),
+        "total_defects": total_defects,
+        "defects_per_1000ft": _rate_per_1000ft(total_defects, total_feet),
+        "avg_defect_size": avg_defect_size,
+        "bst_active_pct": bst_active_pct,
+        "bst_validity": _mask_segment_validity_label(bst_active_pct),
+    }
+
+
+def _reference_impact_interpretation(
+    before_rate: Optional[float],
+    after_rate: Optional[float],
+    validity_notes: Iterable[Optional[str]],
+) -> str:
+    notes = [note for note in (validity_notes or []) if note]
+    if any(note != "Valid comparison" for note in notes):
+        return "Inconclusive"
+    delta = _safe_delta(after_rate, before_rate)
+    if delta is None:
+        return "Inconclusive"
+    if delta > 0.1:
+        return "Worsened"
+    if delta < -0.1:
+        return "Improved"
+    return "Stable"
+
+
+def _resolve_size_metric(
+    severity_value: Optional[float],
+    magnitude_value: Optional[float],
+) -> Tuple[Optional[float], Optional[str]]:
+    severity_num = _to_float(severity_value)
+    if severity_num is not None:
+        return severity_num, "severity_value"
+    magnitude_num = _to_float(magnitude_value)
+    if magnitude_num is not None:
+        return magnitude_num, "magnitude_value_fallback"
+    return None, None
+
+
+def _serialize_mask_detail(mask: Mask) -> Dict[str, object]:
+    return {
+        "xml_id": (mask.xml_id or "").strip() or None,
+        "sensitivitysetid": (mask.sensitivitysetid or "").strip() or None,
+        "coords": (mask.coords or "").strip() if mask.coords else "",
+        "timestamp": _iso(mask.timestamp),
+        "format_value": _to_float(mask.format_value),
+        "noinspection": _mask_noinspection_enabled(getattr(mask, "noinspection", False)),
+    }
+
+
+def _serialize_reference_detail(
+    image: ReferenceImage,
+    *,
+    order_index: int,
+    reel_time: Optional[str],
+) -> Dict[str, object]:
+    return {
+        "ref_image_id": image.ref_image_id,
+        "filename": image.filename,
+        "image_src": (image.image_src or "").replace("\\", "/"),
+        "order_index": order_index,
+        "captured_at": reel_time,
+    }
+
+
+@dashboard_bp.route("/api/defect-drivers")
+def api_defect_drivers():
+    with SessionLocal() as session:
+        try:
+            filters = _validate_filters(session)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        window_start = filters["start"]
+        window_end = filters["end"]
+        if window_start is None or window_end is None:
+            window_start, window_end = _default_window()
+
+        reels = (
+            _apply_reel_filters(session.query(Reel), filters, include_reel_code=False)
+            .options(
+                selectinload(Reel.inspection_phases),
+                selectinload(Reel.sensitivity_sets),
+                selectinload(Reel.masks),
+                selectinload(Reel.reference_images),
+            )
+            .order_by(Reel.time_start.asc(), Reel.reel_id.asc())
+            .all()
+        )
+        if not reels:
+            return jsonify(
+                {
+                    "kpis": {
+                        "reels_analyzed": 0,
+                        "total_footage": 0.0,
+                        "defects_per_1000ft": None,
+                        "average_defect_size": None,
+                        "avg_size_basis": "magnitude",
+                        "top_defect_type": None,
+                        "top_defect_type_label": None,
+                        "top_defect_type_count": 0,
+                        "total_defects": 0,
+                    },
+                    "event_counts": {},
+                    "timeline": [],
+                    "sensitivity_impacts": [],
+                    "sensitivity_summary": [],
+                    "mask_impacts": [],
+                    "mask_segments": [],
+                    "mask_overview": {
+                        "summary": {
+                            "total_reels": 0,
+                            "reels_with_masks": 0,
+                            "reels_without_masks": 0,
+                            "total_feet_with_masks": 0.0,
+                        },
+                        "buckets": [],
+                        "time_of_day": [],
+                    },
+                    "reference_stability": {
+                        "summary": {
+                            "reels_with_changes": 0,
+                            "reels_with_repeated_updates": 0,
+                            "total_reference_events": 0,
+                        },
+                        "events": [],
+                        "frequent_updates": [],
+                    },
+                    "speed_impact": {
+                        "summary": {
+                            "total_reels_with_speed": 0,
+                            "reels_without_speed": 0,
+                        },
+                        "buckets": [],
+                        "stability": [],
+                        "time_of_day": [],
+                        "best_range": None,
+                    },
+                    "length_impact": {"buckets": [], "time_of_day": []},
+                }
+            )
+
+        reel_ids = [reel.reel_id for reel in reels if reel.reel_id is not None]
+
+        defect_rows = (
+            session.query(
+                Defect.reel_id,
+                Defect.class_name,
+                func.count(Defect.defect_id).label("defect_count"),
+                func.avg(Defect.severity_value).label("avg_severity"),
+                func.avg(Defect.magnitude_value).label("avg_magnitude"),
+            )
+            .filter(Defect.reel_id.in_(reel_ids))
+            .filter(Defect.defect_time >= window_start)
+            .filter(Defect.defect_time <= window_end)
+            .group_by(Defect.reel_id, Defect.class_name)
+            .all()
+        )
+        defect_summary_rows = (
+            session.query(
+                Defect.reel_id,
+                func.count(Defect.defect_id).label("defect_count"),
+                func.avg(Defect.severity_value).label("avg_severity"),
+                func.avg(Defect.magnitude_value).label("avg_magnitude"),
+            )
+            .filter(Defect.reel_id.in_(reel_ids))
+            .filter(Defect.defect_time >= window_start)
+            .filter(Defect.defect_time <= window_end)
+            .group_by(Defect.reel_id)
+            .all()
+        )
+        speed_rows = (
+            session.query(
+                RLMMonitoring.reel_id,
+                func.count(RLMMonitoring.monitor_id).label("sample_count"),
+                func.avg(RLMMonitoring.webspeed).label("avg_speed"),
+                func.min(RLMMonitoring.webspeed).label("min_speed"),
+                func.max(RLMMonitoring.webspeed).label("max_speed"),
+            )
+            .filter(RLMMonitoring.reel_id.in_(reel_ids))
+            .filter(RLMMonitoring.timestamp >= window_start)
+            .filter(RLMMonitoring.timestamp <= window_end)
+            .group_by(RLMMonitoring.reel_id)
+            .all()
+        )
+
+        class_counts_by_reel: Dict[int, Counter] = defaultdict(Counter)
+        class_avg_size_by_reel: Dict[int, Dict[str, Optional[float]]] = defaultdict(dict)
+        class_avg_size_basis_by_reel: Dict[int, Dict[str, Optional[str]]] = defaultdict(dict)
+        for row in defect_rows:
+            reel_id = getattr(row, "reel_id", None)
+            canonical = _canonical_sensitivity_class(getattr(row, "class_name", None))
+            if reel_id is None or canonical not in DRIVER_DEFECT_CLASSES:
+                continue
+            class_counts_by_reel[reel_id][canonical] += int(getattr(row, "defect_count", 0) or 0)
+            avg_size, avg_size_basis = _resolve_size_metric(
+                getattr(row, "avg_severity", None),
+                getattr(row, "avg_magnitude", None),
+            )
+            class_avg_size_by_reel[reel_id][canonical] = avg_size
+            class_avg_size_basis_by_reel[reel_id][canonical] = avg_size_basis
+
+        defect_stats_by_reel: Dict[int, Dict[str, object]] = defaultdict(
+            lambda: {"count": 0, "avg_size": None, "avg_size_basis": None}
+        )
+        for row in defect_summary_rows:
+            reel_id = getattr(row, "reel_id", None)
+            if reel_id is None:
+                continue
+            avg_size, avg_size_basis = _resolve_size_metric(
+                getattr(row, "avg_severity", None),
+                getattr(row, "avg_magnitude", None),
+            )
+            defect_stats_by_reel[reel_id] = {
+                "count": int(getattr(row, "defect_count", 0) or 0),
+                "avg_size": avg_size,
+                "avg_size_basis": avg_size_basis,
+            }
+
+        speed_by_reel: Dict[int, Dict[str, object]] = {}
+        for row in speed_rows:
+            reel_id = getattr(row, "reel_id", None)
+            if reel_id is None:
+                continue
+            avg_speed = _to_float(getattr(row, "avg_speed", None))
+            min_speed = _to_float(getattr(row, "min_speed", None))
+            max_speed = _to_float(getattr(row, "max_speed", None))
+            speed_by_reel[reel_id] = {
+                "sample_count": int(getattr(row, "sample_count", 0) or 0),
+                "avg_speed": avg_speed,
+                "min_speed": min_speed,
+                "max_speed": max_speed,
+                "speed_range": round(max_speed - min_speed, 3)
+                if min_speed is not None and max_speed is not None
+                else None,
+            }
+
+        reel_records: List[Dict[str, object]] = []
+        grouped_records: Dict[Tuple[str, str], List[Dict[str, object]]] = defaultdict(list)
+        overall_class_counter: Counter = Counter()
+        total_footage = 0.0
+        total_defects = 0
+        sized_reels = 0
+        avg_size_sum = 0.0
+        severity_basis_count = 0
+        fallback_basis_count = 0
+
+        for reel in reels:
+            reel_id = reel.reel_id
+            if reel_id is None:
+                continue
+            length_ft = _reel_length_feet(reel)
+            defect_entry = defect_stats_by_reel.get(reel_id, {})
+            class_counter = class_counts_by_reel.get(reel_id, Counter())
+            total_defects_reel = int(defect_entry.get("count", 0) or 0)
+            avg_size = _to_float(defect_entry.get("avg_size"))
+            avg_size_basis = defect_entry.get("avg_size_basis")
+            speed_entry = speed_by_reel.get(reel_id, {})
+            total_footage += length_ft
+            total_defects += total_defects_reel
+            overall_class_counter.update(class_counter)
+            if avg_size is not None:
+                avg_size_sum += avg_size
+                sized_reels += 1
+                if avg_size_basis == "severity_value":
+                    severity_basis_count += 1
+                elif avg_size_basis == "magnitude_value_fallback":
+                    fallback_basis_count += 1
+            standard_map = _standard_map(reel.sensitivity_sets)
+            sensitivity_snapshot = {cls: standard_map.get(cls) for cls in DRIVER_DEFECT_CLASSES}
+            phase_mix = _phase_mix_for_reel(reel, window_start, window_end)
+            active_seconds = _to_float((phase_mix.get("active") or {}).get("seconds")) or 0.0
+            inactive_seconds = _to_float((phase_mix.get("inactive") or {}).get("seconds")) or 0.0
+            learn_seconds = _to_float((phase_mix.get("learn") or {}).get("seconds")) or 0.0
+            total_phase_seconds = sum(
+                _to_float(values.get("seconds")) or 0.0 for values in phase_mix.values()
+            )
+            unknown_seconds = max(total_phase_seconds - active_seconds - inactive_seconds - learn_seconds, 0.0)
+            active_pct = round((active_seconds / total_phase_seconds) * 100.0, 1) if total_phase_seconds else 0.0
+            inactive_pct = round((inactive_seconds / total_phase_seconds) * 100.0, 1) if total_phase_seconds else 0.0
+            learn_pct = round((learn_seconds / total_phase_seconds) * 100.0, 1) if total_phase_seconds else 0.0
+            unknown_pct = round((unknown_seconds / total_phase_seconds) * 100.0, 1) if total_phase_seconds else 0.0
+            bst_status = "active"
+            bst_label = "BST Mostly Active"
+            if active_pct <= BST_OFF_ACTIVE_PCT_THRESHOLD:
+                bst_status = "off"
+                bst_label = "BST Off"
+            elif active_pct < BST_PARTIAL_ACTIVE_PCT_THRESHOLD:
+                bst_status = "partial"
+                bst_label = "Partial BST Coverage"
+            masks_in_window = [
+                mask
+                for mask in (reel.masks or [])
+                if mask.timestamp is None or (window_start <= mask.timestamp <= window_end)
+            ]
+            masks_for_state = list(reel.masks or [])
+            serialized_masks_in_window = [_serialize_mask_detail(mask) for mask in masks_in_window]
+            serialized_masks_for_state = [_serialize_mask_detail(mask) for mask in masks_for_state]
+            effective_mask_signature = tuple(sorted(_active_mask_signature(serialized_masks_for_state)))
+            ordered_refs = _ordered_reference_images(reel.reference_images)
+            record = {
+                "reel_id": reel_id,
+                "reel_code": reel.reel_code or f"Reel {reel_id}",
+                "job": reel.job_name or "Unassigned",
+                "job_value": reel.job_name or "",
+                "order": reel.order_number or "No order",
+                "time": _iso(reel.time_end or reel.time_start),
+                "time_sort": reel.time_end or reel.time_start or window_end,
+                "length_ft": length_ft,
+                "total_defects": total_defects_reel,
+                "defects_per_1000ft": _rate_per_1000ft(total_defects_reel, length_ft),
+                "avg_defect_size": avg_size,
+                "avg_defect_size_basis": avg_size_basis,
+                "class_counter": class_counter,
+                "class_avg_size_map": class_avg_size_by_reel.get(reel_id, {}),
+                "class_avg_size_basis_map": class_avg_size_basis_by_reel.get(reel_id, {}),
+                "type_breakdown": [],
+                "top_defect_type": class_counter.most_common(1)[0][0] if class_counter else None,
+                "sensitivity_snapshot": sensitivity_snapshot,
+                "bst_coverage": {
+                    "active_pct": active_pct,
+                    "inactive_pct": inactive_pct,
+                    "learn_pct": learn_pct,
+                    "unknown_pct": unknown_pct,
+                    "status": bst_status,
+                    "label": bst_label,
+                },
+                "mask_signature": _mask_signature_entries(masks_in_window),
+                "masks": serialized_masks_in_window,
+                "mask_state_signature": _mask_signature_entries(masks_for_state),
+                "mask_state_masks": serialized_masks_for_state,
+                "mask_effective_signature": effective_mask_signature,
+                "mask_effective_count": len(effective_mask_signature),
+                "mask_count": len(effective_mask_signature),
+                "reference_signature": _reference_signature(ordered_refs),
+                "reference_count": len(ordered_refs),
+                "reference_repeated_updates": max(len(ordered_refs) - 1, 0),
+                "reference_images": [
+                    _serialize_reference_detail(
+                        image,
+                        order_index=index + 1,
+                        reel_time=_iso(reel.time_end or reel.time_start),
+                    )
+                    for index, image in enumerate(ordered_refs)
+                ],
+                "speed_avg": _to_float(speed_entry.get("avg_speed")),
+                "speed_min": _to_float(speed_entry.get("min_speed")),
+                "speed_max": _to_float(speed_entry.get("max_speed")),
+                "speed_range": _to_float(speed_entry.get("speed_range")),
+                "speed_samples": int(speed_entry.get("sample_count", 0) or 0),
+                "events": [],
+                "instability_score": 0,
+                "has_mask_change": False,
+            }
+            reel_records.append(record)
+            group_key = (reel.job_name or SENTINEL_NONE, reel.order_number or SENTINEL_NONE)
+            grouped_records[group_key].append(record)
+
+        speed_thresholds = _bucket_thresholds(
+            [record["speed_avg"] for record in reel_records if _to_float(record.get("speed_avg")) is not None]
+        )
+        length_thresholds = _bucket_thresholds(
+            [record["length_ft"] for record in reel_records if (_to_float(record.get("length_ft")) or 0) > 0]
+        )
+        speed_variation_thresholds = _bucket_thresholds(
+            [
+                _to_float(record.get("speed_range")) or 0.0
+                for record in reel_records
+                if _to_float(record.get("speed_range")) is not None
+            ]
+        )
+
+        speed_bucket_stats: Dict[str, Dict[str, object]] = defaultdict(
+            lambda: {"reels": 0, "total_defects": 0, "total_footage": 0.0, "size_sum": 0.0, "size_count": 0}
+        )
+        length_bucket_stats: Dict[str, Dict[str, object]] = defaultdict(
+            lambda: {"reels": 0, "total_defects": 0, "total_footage": 0.0, "size_sum": 0.0, "size_count": 0}
+        )
+
+        for record in reel_records:
+            speed_bucket = _bucket_label(record.get("speed_avg"), speed_thresholds, "speed")
+            length_bucket = _bucket_label(record.get("length_ft"), length_thresholds, "reel length", digits=0, suffix=" ft")
+            record["speed_bucket"] = speed_bucket
+            record["length_bucket"] = length_bucket
+
+            speed_bucket_stats[speed_bucket]["reels"] += 1
+            speed_bucket_stats[speed_bucket]["total_defects"] += int(record.get("total_defects") or 0)
+            speed_bucket_stats[speed_bucket]["total_footage"] += _to_float(record.get("length_ft")) or 0.0
+            length_bucket_stats[length_bucket]["reels"] += 1
+            length_bucket_stats[length_bucket]["total_defects"] += int(record.get("total_defects") or 0)
+            length_bucket_stats[length_bucket]["total_footage"] += _to_float(record.get("length_ft")) or 0.0
+            avg_size = _to_float(record.get("avg_defect_size"))
+            if avg_size is not None:
+                speed_bucket_stats[speed_bucket]["size_sum"] += avg_size
+                speed_bucket_stats[speed_bucket]["size_count"] += 1
+                length_bucket_stats[length_bucket]["size_sum"] += avg_size
+                length_bucket_stats[length_bucket]["size_count"] += 1
+
+        event_counts: Counter = Counter()
+        sensitivity_impacts: List[Dict[str, object]] = []
+        mask_impacts: List[Dict[str, object]] = []
+        mask_segments: List[Dict[str, object]] = []
+        reference_events: List[Dict[str, object]] = []
+        reference_bucket_stats: Dict[str, Dict[str, object]] = {
+            "no_change": {
+                "bucket_key": "no_change",
+                "bucket_label": "No Reference Change",
+                "reels": 0,
+                "total_feet": 0.0,
+                "total_defects": 0,
+                "size_sum": 0.0,
+                "size_weight": 0,
+                "bst_sum": 0.0,
+                "bst_count": 0,
+            },
+            "single_change": {
+                "bucket_key": "single_change",
+                "bucket_label": "Single Reference Change",
+                "reels": 0,
+                "total_feet": 0.0,
+                "total_defects": 0,
+                "size_sum": 0.0,
+                "size_weight": 0,
+                "bst_sum": 0.0,
+                "bst_count": 0,
+            },
+            "multiple_changes": {
+                "bucket_key": "multiple_changes",
+                "bucket_label": "Multiple Reference Changes",
+                "reels": 0,
+                "total_feet": 0.0,
+                "total_defects": 0,
+                "size_sum": 0.0,
+                "size_weight": 0,
+                "bst_sum": 0.0,
+                "bst_count": 0,
+            },
+        }
+        reference_change_points: List[Dict[str, object]] = []
+        speed_shifts: List[Dict[str, object]] = []
+        sensitivity_summary_rows: List[Dict[str, object]] = []
+        sensitivity_threshold_stats: Dict[Tuple[str, float], Dict[str, object]] = defaultdict(
+            lambda: {
+                "reels": 0,
+                "total_feet": 0.0,
+                "total_defects": 0,
+                "bst_sum": 0.0,
+                "bst_count": 0,
+                "size_sum": 0.0,
+                "size_weight": 0,
+            }
+        )
+        reels_with_reference_changes = 0
+        reels_with_repeated_reference_updates = 0
+
+        event_priority = {
+            "sensitivity_change": 4,
+            "mask_change": 3,
+            "reference_change": 2,
+            "speed_shift": 1,
+        }
+
+        for record in reel_records:
+            snapshot = record.get("sensitivity_snapshot") or {}
+            bst_active_pct = _to_float((record.get("bst_coverage") or {}).get("active_pct"))
+            length_ft = _to_float(record.get("length_ft")) or 0.0
+            class_counter = record.get("class_counter") or Counter()
+            class_avg_size_map = record.get("class_avg_size_map") or {}
+            for cls in DRIVER_DEFECT_CLASSES:
+                threshold_tuple = snapshot.get(cls)
+                threshold_value = _to_float(threshold_tuple[0]) if threshold_tuple else None
+                if threshold_value is None:
+                    continue
+                bucket = sensitivity_threshold_stats[(cls, threshold_value)]
+                bucket["reels"] += 1
+                bucket["total_feet"] += length_ft
+                class_defects = int(class_counter.get(cls, 0) or 0)
+                bucket["total_defects"] += class_defects
+                if bst_active_pct is not None:
+                    bucket["bst_sum"] += bst_active_pct
+                    bucket["bst_count"] += 1
+                avg_size = _to_float(class_avg_size_map.get(cls))
+                if avg_size is not None and class_defects > 0:
+                    bucket["size_sum"] += avg_size * class_defects
+                    bucket["size_weight"] += class_defects
+        for (cls, threshold_value), stats in sensitivity_threshold_stats.items():
+            total_feet = _to_float(stats.get("total_feet")) or 0.0
+            total_defects_cls = int(stats.get("total_defects") or 0)
+            bst_count = int(stats.get("bst_count") or 0)
+            avg_bst_active_pct = (
+                round(((_to_float(stats.get("bst_sum")) or 0.0) / bst_count), 3)
+                if bst_count > 0
+                else None
+            )
+            size_weight = int(stats.get("size_weight") or 0)
+            avg_size = (
+                round(((_to_float(stats.get("size_sum")) or 0.0) / size_weight), 3)
+                if size_weight > 0
+                else None
+            )
+            sensitivity_summary_rows.append(
+                {
+                    "class_name": cls,
+                    "class_label": _driver_class_label(cls),
+                    "threshold_value": threshold_value,
+                    "reel_count": int(stats.get("reels") or 0),
+                    "total_footage": round(total_feet, 2),
+                    "avg_bst_active_pct": avg_bst_active_pct,
+                    "total_defects": total_defects_cls,
+                    "defects_per_1000ft": _rate_per_1000ft(total_defects_cls, total_feet),
+                    "adjusted_defects_per_1000ft": _driver_adjusted_rate(
+                        total_defects_cls,
+                        total_feet,
+                        avg_bst_active_pct,
+                    ),
+                    "avg_defect_size": avg_size,
+                }
+            )
+
+        for _, records in grouped_records.items():
+            ordered_records = sorted(records, key=lambda item: item["time_sort"])
+            mask_state_segments: List[Dict[str, object]] = []
+            current_mask_segment: Optional[Dict[str, object]] = None
+            for record in ordered_records:
+                signature = tuple(record.get("mask_effective_signature") or [])
+                if current_mask_segment is None or current_mask_segment["signature"] != signature:
+                    current_mask_segment = {
+                        "signature": signature,
+                        "records": [],
+                    }
+                    mask_state_segments.append(current_mask_segment)
+                current_mask_segment["records"].append(record)
+
+            for segment_index, segment in enumerate(mask_state_segments):
+                segment_records = segment["records"]
+                first_record = segment_records[0]
+                last_record = segment_records[-1]
+                total_segment_feet = sum(_to_float(row.get("length_ft")) or 0.0 for row in segment_records)
+                total_segment_defects = sum(int(row.get("total_defects") or 0) for row in segment_records)
+                avg_segment_size = _weighted_average(
+                    (
+                        row.get("avg_defect_size"),
+                        int(row.get("total_defects") or 0),
+                    )
+                    for row in segment_records
+                )
+                avg_bst_active = _average((row.get("bst_coverage") or {}).get("active_pct") for row in segment_records)
+                avg_bst_inactive = _average((row.get("bst_coverage") or {}).get("inactive_pct") for row in segment_records)
+                avg_bst_learn = _average((row.get("bst_coverage") or {}).get("learn_pct") for row in segment_records)
+                representative_masks = first_record.get("mask_state_masks") or []
+                current_active_masks = _active_mask_details(representative_masks)
+                active_mask_count = int(first_record.get("mask_effective_count") or _active_mask_count(representative_masks))
+                masks_on = active_mask_count > 0
+                previous_segment = mask_state_segments[segment_index - 1] if segment_index > 0 else None
+                added_count = 0
+                removed_count = 0
+                coordinate_change_count = 0
+                mask_event_type = "No Mask"
+                masks_involved_labels: List[str] = []
+                if previous_segment is not None:
+                    previous_masks = previous_segment["records"][0].get("mask_state_masks") or []
+                    previous_active_masks = _active_mask_details(previous_masks)
+                    prev_signature = set(previous_segment["records"][0].get("mask_effective_signature") or [])
+                    curr_signature = set(first_record.get("mask_effective_signature") or [])
+                    added_count = len(curr_signature - prev_signature)
+                    removed_count = len(prev_signature - curr_signature)
+                    shared_keys = {(entry[0], entry[1]) for entry in prev_signature} & {
+                        (entry[0], entry[1]) for entry in curr_signature
+                    }
+                    coordinate_change_count = sum(
+                        1
+                        for key in shared_keys
+                        if {
+                            entry[2]
+                            for entry in prev_signature
+                            if (entry[0], entry[1]) == key
+                        }
+                        != {
+                            entry[2]
+                            for entry in curr_signature
+                            if (entry[0], entry[1]) == key
+                        }
+                    )
+                    if not prev_signature and curr_signature:
+                        mask_event_type = "Mask Added"
+                        masks_involved_labels = _mask_display_labels(current_active_masks)
+                    elif prev_signature and not curr_signature:
+                        mask_event_type = "Mask Removed"
+                        removed_masks = [
+                            mask
+                            for mask in previous_active_masks
+                            if _mask_detail_signature(mask) in (prev_signature - curr_signature)
+                        ]
+                        masks_involved_labels = _mask_display_labels(removed_masks or previous_active_masks)
+                    elif prev_signature != curr_signature:
+                        mask_event_type = "Mask Updated"
+                        changed_signatures = (curr_signature - prev_signature) | (prev_signature - curr_signature)
+                        changed_masks = [
+                            mask
+                            for mask in current_active_masks
+                            if _mask_detail_signature(mask) in changed_signatures
+                        ]
+                        if not changed_masks and coordinate_change_count > 0:
+                            changed_keys = {
+                                key
+                                for key in shared_keys
+                                if {
+                                    entry[2]
+                                    for entry in prev_signature
+                                    if (entry[0], entry[1]) == key
+                                }
+                                != {
+                                    entry[2]
+                                    for entry in curr_signature
+                                    if (entry[0], entry[1]) == key
+                                }
+                            }
+                            changed_masks = [
+                                mask
+                                for mask in current_active_masks
+                                if (_mask_detail_signature(mask)[0], _mask_detail_signature(mask)[1]) in changed_keys
+                            ]
+                        masks_involved_labels = _mask_display_labels(changed_masks or current_active_masks)
+                elif current_active_masks:
+                    mask_event_type = "Mask Added"
+                    masks_involved_labels = _mask_display_labels(current_active_masks)
+                else:
+                    masks_involved_labels = ["none"]
+                if not masks_involved_labels:
+                    masks_involved_labels = _mask_display_labels(current_active_masks) or ["none"]
+                previous_segment_defects_per_1000ft = None
+                previous_segment_avg_size = None
+                if previous_segment is not None:
+                    prev_records = previous_segment["records"]
+                    prev_feet = sum(_to_float(row.get("length_ft")) or 0.0 for row in prev_records)
+                    prev_defects = sum(int(row.get("total_defects") or 0) for row in prev_records)
+                    previous_segment_defects_per_1000ft = _rate_per_1000ft(prev_defects, prev_feet)
+                    previous_segment_avg_size = _weighted_average(
+                        (
+                            row.get("avg_defect_size"),
+                            int(row.get("total_defects") or 0),
+                        )
+                        for row in prev_records
+                    )
+                segment_counter: Counter = Counter()
+                for row in segment_records:
+                    segment_counter.update(row.get("class_counter") or Counter())
+                top_type_name, _ = segment_counter.most_common(1)[0] if segment_counter else (None, 0)
+                mask_segments.append(
+                    {
+                        "segment_id": f"{first_record.get('job') or 'job'}-{first_record.get('order') or 'order'}-{segment_index + 1}",
+                        "job": first_record.get("job"),
+                        "order": first_record.get("order"),
+                        "reel_start": first_record.get("reel_code"),
+                        "reel_end": last_record.get("reel_code"),
+                        "time_start": first_record.get("time"),
+                        "time_end": last_record.get("time"),
+                        "reel_count": len(segment_records),
+                        "total_feet": round(total_segment_feet, 2),
+                        "mask_event_type": mask_event_type,
+                        "mask_state": "ON" if masks_on else "OFF",
+                        "mask_state_summary": _mask_state_label(active_mask_count),
+                        "masks_involved": masks_involved_labels,
+                        "active_mask_count": active_mask_count,
+                        "coordinates_changed_vs_prior": coordinate_change_count > 0,
+                        "masks_added_vs_prior": added_count,
+                        "masks_removed_vs_prior": removed_count,
+                        "bst_active_pct": avg_bst_active,
+                        "bst_inactive_pct": avg_bst_inactive,
+                        "bst_learn_pct": avg_bst_learn,
+                        "bst_validity": _mask_segment_validity_label(avg_bst_active),
+                        "total_defects": total_segment_defects,
+                        "defects_per_1000ft": _rate_per_1000ft(total_segment_defects, total_segment_feet),
+                        "avg_defect_size": avg_segment_size,
+                        "top_defect_type": _driver_class_label(top_type_name) if top_type_name else None,
+                        "previous_defects_per_1000ft": previous_segment_defects_per_1000ft,
+                        "delta_defects_per_1000ft": _safe_delta(
+                            _rate_per_1000ft(total_segment_defects, total_segment_feet),
+                            previous_segment_defects_per_1000ft,
+                        ),
+                        "previous_avg_defect_size": previous_segment_avg_size,
+                        "delta_avg_defect_size": _safe_delta(avg_segment_size, previous_segment_avg_size),
+                    }
+                )
+
+            previous_record: Optional[Dict[str, object]] = None
+            for index, record in enumerate(ordered_records):
+                matched_driver_events: List[Dict[str, object]] = []
+                reference_changed = int(record.get("reference_count") or 0) > 1
+                bst_coverage = record.get("bst_coverage") or {}
+                bst_status = bst_coverage.get("status")
+                prior_records = ordered_records[:index]
+
+                reference_count = int(record.get("reference_count") or 0)
+                if reference_count >= 3:
+                    bucket_key = "multiple_changes"
+                elif reference_count == 2:
+                    bucket_key = "single_change"
+                else:
+                    bucket_key = "no_change"
+                bucket_entry = reference_bucket_stats[bucket_key]
+                bucket_entry["reels"] += 1
+                bucket_entry["total_feet"] += _to_float(record.get("length_ft")) or 0.0
+                bucket_entry["total_defects"] += int(record.get("total_defects") or 0)
+                avg_size = _to_float(record.get("avg_defect_size"))
+                total_defects_for_size = int(record.get("total_defects") or 0)
+                if avg_size is not None and total_defects_for_size > 0:
+                    bucket_entry["size_sum"] += avg_size * total_defects_for_size
+                    bucket_entry["size_weight"] += total_defects_for_size
+                bst_active_pct = _to_float(bst_coverage.get("active_pct"))
+                if bst_active_pct is not None:
+                    bucket_entry["bst_sum"] += bst_active_pct
+                    bucket_entry["bst_count"] += 1
+
+                if reference_changed:
+                    reels_with_reference_changes += 1
+                    if record["reference_repeated_updates"]:
+                        reels_with_repeated_reference_updates += 1
+                    reference_change_points.append(
+                        {
+                            "time": record.get("time"),
+                            "time_sort": record.get("time_sort"),
+                            "reel_code": record.get("reel_code"),
+                            "job": record.get("job"),
+                            "order": record.get("order"),
+                        }
+                    )
+                    event = {
+                        "type": "reference_change",
+                        "label": DRIVER_EVENT_LABELS["reference_change"],
+                        "summary": (
+                            f"{int(record['reference_repeated_updates'] or 0)} repeated updates"
+                            if record["reference_repeated_updates"]
+                            else "reference updated within reel"
+                        ),
+                        "detail": {
+                            "reel_id": record.get("reel_id"),
+                            "reel_code": record.get("reel_code"),
+                            "job": record.get("job"),
+                            "order": record.get("order"),
+                            "time": record.get("time"),
+                            "reference_count": int(record.get("reference_count") or 0),
+                            "repeated_updates": int(record.get("reference_repeated_updates") or 0),
+                            "reference_images": record.get("reference_images") or [],
+                        },
+                    }
+                    record["events"].append(event)
+                    record["instability_score"] += 1 + int(record["reference_repeated_updates"] or 0)
+                    event_counts["reference_change"] += 1
+                    if previous_record is not None:
+                        matched_driver_events.append(event)
+
+                if bst_status in {"off", "partial"}:
+                    event = {
+                        "type": "bst_coverage",
+                        "label": DRIVER_EVENT_LABELS["bst_coverage"],
+                        "summary": (
+                            "BST Off"
+                            if bst_status == "off"
+                            else f"Partial BST coverage ({bst_coverage.get('active_pct', 0)}% active)"
+                        ),
+                        "detail": {
+                            "reel_id": record.get("reel_id"),
+                            "reel_code": record.get("reel_code"),
+                            "job": record.get("job"),
+                            "order": record.get("order"),
+                            "time": record.get("time"),
+                            "active_pct": bst_coverage.get("active_pct"),
+                            "inactive_pct": bst_coverage.get("inactive_pct"),
+                            "learn_pct": bst_coverage.get("learn_pct"),
+                            "unknown_pct": bst_coverage.get("unknown_pct"),
+                            "status": bst_status,
+                            "interpretation": (
+                                "BST was off"
+                                if bst_status == "off"
+                                else "BST was partially active"
+                            ),
+                        },
+                    }
+                    record["events"].append(event)
+                    event_counts["bst_coverage"] += 1
+
+                if previous_record is None:
+                    previous_record = record
+                    continue
+
+                sensitivity_changes = _sensitivity_change_detail(
+                    previous_record.get("sensitivity_snapshot") or {},
+                    record.get("sensitivity_snapshot") or {},
+                )
+                if sensitivity_changes:
+                    event = {
+                        "type": "sensitivity_change",
+                        "label": DRIVER_EVENT_LABELS["sensitivity_change"],
+                        "summary": f"{len(sensitivity_changes)} class changes",
+                        "detail": {
+                            "reel_id": record.get("reel_id"),
+                            "reel_code": record.get("reel_code"),
+                            "job": record.get("job"),
+                            "order": record.get("order"),
+                            "time": record.get("time"),
+                            "changes": sensitivity_changes,
+                        },
+                    }
+                    record["events"].append(event)
+                    record["instability_score"] += len(sensitivity_changes)
+                    event_counts["sensitivity_change"] += 1
+                    matched_driver_events.append(event)
+                    sensitivity_impacts.append(
+                        _driver_impact_row(
+                            record,
+                            previous_record,
+                            extra={"changed_classes": sensitivity_changes},
+                        )
+                    )
+
+                previous_mask_signature = set(previous_record.get("mask_effective_signature") or [])
+                current_mask_signature = set(record.get("mask_effective_signature") or [])
+                if current_mask_signature != previous_mask_signature:
+                    prev_set = previous_mask_signature
+                    curr_set = current_mask_signature
+                    record["has_mask_change"] = True
+                    shared_keys = {
+                        (entry[0], entry[1]) for entry in prev_set
+                    } & {
+                        (entry[0], entry[1]) for entry in curr_set
+                    }
+                    coordinate_change_count = sum(
+                        1
+                        for key in shared_keys
+                        if {
+                            entry[2] for entry in prev_set if (entry[0], entry[1]) == key
+                        }
+                        != {
+                            entry[2] for entry in curr_set if (entry[0], entry[1]) == key
+                        }
+                    )
+                    if not prev_set and curr_set:
+                        mask_summary = "Mask Added"
+                    elif prev_set and not curr_set:
+                        mask_summary = "Mask Removed"
+                    else:
+                        mask_summary = "Mask Updated"
+                    event = {
+                        "type": "mask_change",
+                        "label": DRIVER_EVENT_LABELS["mask_change"],
+                        "summary": mask_summary,
+                        "detail": {
+                            "reel_id": record.get("reel_id"),
+                            "reel_code": record.get("reel_code"),
+                            "job": record.get("job"),
+                            "order": record.get("order"),
+                            "time": record.get("time"),
+                            "before_mask_count": len(prev_set),
+                            "after_mask_count": len(curr_set),
+                            "coordinate_change_count": coordinate_change_count,
+                            "before_masks": _active_mask_details(previous_record.get("mask_state_masks") or []),
+                            "after_masks": _active_mask_details(record.get("mask_state_masks") or []),
+                        },
+                    }
+                    record["events"].append(event)
+                    record["instability_score"] += 1 + coordinate_change_count
+                    event_counts["mask_change"] += 1
+                    matched_driver_events.append(event)
+                    mask_impacts.append(
+                        _driver_impact_row(
+                            record,
+                            previous_record,
+                            extra={
+                                "added_mask_count": len(curr_set - prev_set),
+                                "removed_mask_count": len(prev_set - curr_set),
+                                "coordinate_change_count": coordinate_change_count,
+                            },
+                        )
+                    )
+
+                prev_speed = _to_float(previous_record.get("speed_avg"))
+                curr_speed = _to_float(record.get("speed_avg"))
+                speed_relative = _relative_change(curr_speed, prev_speed)
+                speed_bucket_changed = record.get("speed_bucket") != previous_record.get("speed_bucket")
+                if (
+                    prev_speed is not None
+                    and curr_speed is not None
+                    and abs(curr_speed - prev_speed) >= SPEED_SHIFT_MIN_DELTA
+                    and (
+                        speed_bucket_changed
+                        or (speed_relative is not None and abs(speed_relative) >= 0.15)
+                        or abs(curr_speed - prev_speed) >= SPEED_SHIFT_MIN_DELTA
+                    )
+                ):
+                    event = {
+                        "type": "speed_shift",
+                        "label": DRIVER_EVENT_LABELS["speed_shift"],
+                        "summary": f"{round(prev_speed, 1)} -> {round(curr_speed, 1)}",
+                        "detail": {
+                            "reel_id": record.get("reel_id"),
+                            "reel_code": record.get("reel_code"),
+                            "job": record.get("job"),
+                            "order": record.get("order"),
+                            "time": record.get("time"),
+                            "previous_speed_avg": prev_speed,
+                            "current_speed_avg": curr_speed,
+                            "delta_speed": _safe_delta(curr_speed, prev_speed),
+                            "previous_speed_bucket": previous_record.get("speed_bucket"),
+                            "current_speed_bucket": record.get("speed_bucket"),
+                            "reason": (
+                                "Speed bucket changed"
+                                if speed_bucket_changed
+                                else "Material average speed change exceeded threshold"
+                            ),
+                        },
+                    }
+                    record["events"].append(event)
+                    record["instability_score"] += 1
+                    event_counts["speed_shift"] += 1
+                    matched_driver_events.append(event)
+                    speed_shifts.append(
+                        _driver_impact_row(
+                            record,
+                            previous_record,
+                            extra={
+                                "before_speed_avg": prev_speed,
+                                "after_speed_avg": curr_speed,
+                                "before_speed_bucket": previous_record.get("speed_bucket"),
+                                "after_speed_bucket": record.get("speed_bucket"),
+                            },
+                        )
+                    )
+
+                previous_rate = previous_record.get("defects_per_1000ft") if previous_record else None
+                rolling_window = prior_records[-3:]
+                rolling_rate = _average(
+                    prior_record.get("defects_per_1000ft") for prior_record in rolling_window
+                )
+                rolling_count = len(rolling_window)
+                if rolling_count >= 2:
+                    baseline_rate = rolling_rate
+                    baseline_source = f"rolling_avg_{rolling_count}"
+                else:
+                    baseline_rate = previous_rate
+                    baseline_source = "previous_reel"
+                rate_change = _material_rate_change(
+                    baseline_rate,
+                    record.get("defects_per_1000ft"),
+                )
+                if rate_change and rate_change["direction"] == "up":
+                    type_breakdown = []
+                    for cls in DRIVER_DEFECT_CLASSES:
+                        current_count = int((record.get("class_counter") or Counter()).get(cls, 0) or 0)
+                        current_rate = _rate_per_1000ft(current_count, record.get("length_ft"))
+                        previous_count = (
+                            int((previous_record.get("class_counter") or Counter()).get(cls, 0) or 0)
+                            if previous_record
+                            else 0
+                        )
+                        previous_rate_type = (
+                            _rate_per_1000ft(previous_count, previous_record.get("length_ft"))
+                            if previous_record
+                            else None
+                        )
+                        baseline_type_rate = (
+                            _average(
+                                _rate_per_1000ft(
+                                    int((prior_record.get("class_counter") or Counter()).get(cls, 0) or 0),
+                                    prior_record.get("length_ft"),
+                                )
+                                for prior_record in rolling_window
+                            )
+                            if rolling_count >= 2
+                            else previous_rate_type
+                        )
+                        baseline_type_count = (
+                            _average(
+                                int((prior_record.get("class_counter") or Counter()).get(cls, 0) or 0)
+                                for prior_record in rolling_window
+                            )
+                            if rolling_count >= 2
+                            else previous_count
+                        )
+                        if current_count <= 0 and not baseline_type_rate and not baseline_type_count:
+                            continue
+                        type_breakdown.append(
+                            {
+                                "name": cls,
+                                "label": _driver_class_label(cls),
+                                "current_count": current_count,
+                                "current_rate_per_1000ft": current_rate,
+                                "baseline_count": baseline_type_count,
+                                "baseline_rate_per_1000ft": baseline_type_rate,
+                                "delta_rate_per_1000ft": _safe_delta(current_rate, baseline_type_rate),
+                                "previous_rate_per_1000ft": previous_rate_type,
+                                "baseline_source": baseline_source,
+                                "avg_defect_size": _to_float((record.get("class_avg_size_map") or {}).get(cls)),
+                            }
+                        )
+                    spike_event = {
+                        "type": "defect_spike",
+                        "label": DRIVER_EVENT_LABELS["defect_spike"],
+                        "summary": (
+                            f"{round(baseline_rate or 0.0, 2)}"
+                            f" -> {round(record.get('defects_per_1000ft') or 0.0, 2)} /1k ft"
+                        ),
+                        "detail": {
+                            "reel_id": record.get("reel_id"),
+                            "reel_code": record.get("reel_code"),
+                            "job": record.get("job"),
+                            "order": record.get("order"),
+                            "time": record.get("time"),
+                            "current_rate_per_1000ft": record.get("defects_per_1000ft"),
+                            "current_defect_count": record.get("total_defects"),
+                            "current_avg_defect_size": record.get("avg_defect_size"),
+                            "previous_reel_rate_per_1000ft": previous_rate,
+                            "previous_reel_count": previous_record.get("total_defects") if previous_record else None,
+                            "rolling_rate_per_1000ft": rolling_rate,
+                            "rolling_reel_count": rolling_count,
+                            "baseline_rate_per_1000ft": baseline_rate,
+                            "baseline_source": baseline_source,
+                            "triggered_by": baseline_source,
+                            "type_breakdown": type_breakdown,
+                        },
+                    }
+                    record["events"].append(spike_event)
+                    event_counts["defect_spike"] += 1
+
+                previous_record = record
+
+        timeline = []
+        for record in sorted(reel_records, key=lambda item: item["time_sort"]):
+            record["type_breakdown"] = [
+                {
+                    "name": cls,
+                    "label": _driver_class_label(cls),
+                    "count": int((record.get("class_counter") or Counter()).get(cls, 0) or 0),
+                    "avg_size": _to_float((record.get("class_avg_size_map") or {}).get(cls)),
+                    "avg_size_basis": (record.get("class_avg_size_basis_map") or {}).get(cls),
+                }
+                for cls in DRIVER_DEFECT_CLASSES
+                if int((record.get("class_counter") or Counter()).get(cls, 0) or 0) > 0
+            ]
+            timeline.append(
+                {
+                    "reel_id": record["reel_id"],
+                    "reel_code": record["reel_code"],
+                    "job": record["job"],
+                    "order": record["order"],
+                    "time": record["time"],
+                    "length_ft": record["length_ft"],
+                    "total_defects": record["total_defects"],
+                    "defects_per_1000ft": record["defects_per_1000ft"],
+                    "avg_defect_size": record["avg_defect_size"],
+                    "avg_defect_size_basis": record.get("avg_defect_size_basis"),
+                    "type_breakdown": record["type_breakdown"],
+                    "top_defect_type": record["top_defect_type"],
+                    "speed_avg": record["speed_avg"],
+                    "speed_bucket": record["speed_bucket"],
+                    "length_bucket": record["length_bucket"],
+                    "events": record["events"],
+                    "instability_score": int(record["instability_score"] or 0),
+                }
+            )
+
+        def _bucket_payload(bucket_map: Dict[str, Dict[str, object]]) -> List[Dict[str, object]]:
+            rows: List[Dict[str, object]] = []
+            for bucket, stats in bucket_map.items():
+                total_bucket_footage = _to_float(stats.get("total_footage")) or 0.0
+                total_bucket_defects = int(stats.get("total_defects") or 0)
+                size_count = int(stats.get("size_count") or 0)
+                size_sum = _to_float(stats.get("size_sum")) or 0.0
+                rows.append(
+                    {
+                        "bucket": bucket,
+                        "reels": int(stats.get("reels") or 0),
+                        "total_footage": round(total_bucket_footage, 2),
+                        "defects_per_1000ft": _rate_per_1000ft(total_bucket_defects, total_bucket_footage),
+                        "avg_defect_size": round(size_sum / size_count, 3) if size_count else None,
+                    }
+                )
+            return sorted(rows, key=lambda item: item["bucket"])
+
+        top_type_name, top_type_count = overall_class_counter.most_common(1)[0] if overall_class_counter else (None, 0)
+        overall_avg_basis = "severity_value"
+        if severity_basis_count == 0 and fallback_basis_count > 0:
+            overall_avg_basis = "magnitude_value_fallback"
+        elif severity_basis_count > 0 and fallback_basis_count > 0:
+            overall_avg_basis = "severity_value_with_fallback"
+        baseline_reference_rate = None
+        if (_to_float(reference_bucket_stats["no_change"].get("total_feet")) or 0.0) > 0:
+            baseline_reference_rate = _rate_per_1000ft(
+                int(reference_bucket_stats["no_change"].get("total_defects") or 0),
+                reference_bucket_stats["no_change"].get("total_feet"),
+            )
+        speed_records = [record for record in reel_records if _to_float(record.get("speed_avg")) is not None]
+        speed_definition = _driver_speed_range_definition(
+            [_to_float(record.get("speed_avg")) or 0.0 for record in speed_records]
+        )
+        speed_bucket_overview: List[Dict[str, object]] = []
+        speed_stability_rows: List[Dict[str, object]] = []
+        speed_time_of_day_rows: List[Dict[str, object]] = []
+        speed_best_range = None
+        if speed_definition:
+            speed_bucket_stats_overview: List[Dict[str, object]] = [
+                {
+                    "bucket_key": f"speed_{idx + 1}",
+                    "bucket_label": _driver_speed_bucket_label(idx, speed_definition),
+                    "reels": 0,
+                    "total_feet": 0.0,
+                    "total_defects": 0,
+                    "speed_sum": 0.0,
+                    "speed_count": 0,
+                    "bst_sum": 0.0,
+                    "bst_count": 0,
+                    "size_sum": 0.0,
+                    "size_weight": 0,
+                }
+                for idx in range(5)
+            ]
+            stability_thresholds = _bucket_thresholds(
+                [_to_float(record.get("speed_range")) or 0.0 for record in speed_records if _to_float(record.get("speed_range")) is not None]
+            )
+            speed_stability_stats: Dict[str, Dict[str, object]] = {
+                "stable": {"bucket_label": "Stable Speed", "reels": 0, "total_feet": 0.0, "total_defects": 0, "bst_sum": 0.0, "bst_count": 0, "size_sum": 0.0, "size_weight": 0, "metric_sum": 0.0, "metric_count": 0},
+                "moderate": {"bucket_label": "Moderate Variation", "reels": 0, "total_feet": 0.0, "total_defects": 0, "bst_sum": 0.0, "bst_count": 0, "size_sum": 0.0, "size_weight": 0, "metric_sum": 0.0, "metric_count": 0},
+                "high": {"bucket_label": "High Variation", "reels": 0, "total_feet": 0.0, "total_defects": 0, "bst_sum": 0.0, "bst_count": 0, "size_sum": 0.0, "size_weight": 0, "metric_sum": 0.0, "metric_count": 0},
+            }
+            speed_time_of_day_stats: List[Dict[str, object]] = [
+                {"bucket_label": "12:00 AM - 6:00 AM", "reels": 0, "speed_sum": 0.0, "speed_count": 0, "speed_min": None, "speed_max": None, "total_feet": 0.0, "total_defects": 0, "bst_sum": 0.0, "bst_count": 0},
+                {"bucket_label": "6:00 AM - 12:00 PM", "reels": 0, "speed_sum": 0.0, "speed_count": 0, "speed_min": None, "speed_max": None, "total_feet": 0.0, "total_defects": 0, "bst_sum": 0.0, "bst_count": 0},
+                {"bucket_label": "12:00 PM - 6:00 PM", "reels": 0, "speed_sum": 0.0, "speed_count": 0, "speed_min": None, "speed_max": None, "total_feet": 0.0, "total_defects": 0, "bst_sum": 0.0, "bst_count": 0},
+                {"bucket_label": "6:00 PM - 12:00 AM", "reels": 0, "speed_sum": 0.0, "speed_count": 0, "speed_min": None, "speed_max": None, "total_feet": 0.0, "total_defects": 0, "bst_sum": 0.0, "bst_count": 0},
+            ]
+            for record in speed_records:
+                speed_avg = _to_float(record.get("speed_avg"))
+                if speed_avg is None:
+                    continue
+                bucket_index = _driver_speed_bucket_index(speed_avg, speed_definition)
+                if bucket_index is not None:
+                    bucket = speed_bucket_stats_overview[bucket_index]
+                    bucket["reels"] += 1
+                    bucket["total_feet"] += _to_float(record.get("length_ft")) or 0.0
+                    bucket["total_defects"] += int(record.get("total_defects") or 0)
+                    bucket["speed_sum"] += speed_avg
+                    bucket["speed_count"] += 1
+                    avg_size = _to_float(record.get("avg_defect_size"))
+                    total_defects_for_size = int(record.get("total_defects") or 0)
+                    if avg_size is not None and total_defects_for_size > 0:
+                        bucket["size_sum"] += avg_size * total_defects_for_size
+                        bucket["size_weight"] += total_defects_for_size
+                    bst_active_pct = _to_float((record.get("bst_coverage") or {}).get("active_pct"))
+                    if bst_active_pct is not None:
+                        bucket["bst_sum"] += bst_active_pct
+                        bucket["bst_count"] += 1
+                speed_variation = _to_float(record.get("speed_range"))
+                if speed_variation is not None:
+                    low_cut, high_cut = stability_thresholds
+                    if low_cut is None or high_cut is None or speed_variation <= low_cut:
+                        stability_bucket = speed_stability_stats["stable"]
+                    elif speed_variation <= high_cut:
+                        stability_bucket = speed_stability_stats["moderate"]
+                    else:
+                        stability_bucket = speed_stability_stats["high"]
+                    stability_bucket["reels"] += 1
+                    stability_bucket["total_feet"] += _to_float(record.get("length_ft")) or 0.0
+                    stability_bucket["total_defects"] += int(record.get("total_defects") or 0)
+                    stability_bucket["metric_sum"] += speed_variation
+                    stability_bucket["metric_count"] += 1
+                    avg_size = _to_float(record.get("avg_defect_size"))
+                    total_defects_for_size = int(record.get("total_defects") or 0)
+                    if avg_size is not None and total_defects_for_size > 0:
+                        stability_bucket["size_sum"] += avg_size * total_defects_for_size
+                        stability_bucket["size_weight"] += total_defects_for_size
+                    bst_active_pct = _to_float((record.get("bst_coverage") or {}).get("active_pct"))
+                    if bst_active_pct is not None:
+                        stability_bucket["bst_sum"] += bst_active_pct
+                        stability_bucket["bst_count"] += 1
+                ts = record.get("time_sort")
+                if ts is not None:
+                    hour = ts.hour
+                    if hour < 6:
+                        time_bucket = speed_time_of_day_stats[0]
+                    elif hour < 12:
+                        time_bucket = speed_time_of_day_stats[1]
+                    elif hour < 18:
+                        time_bucket = speed_time_of_day_stats[2]
+                    else:
+                        time_bucket = speed_time_of_day_stats[3]
+                    time_bucket["reels"] += 1
+                    time_bucket["speed_sum"] += speed_avg
+                    time_bucket["speed_count"] += 1
+                    time_bucket["speed_min"] = speed_avg if time_bucket["speed_min"] is None else min(time_bucket["speed_min"], speed_avg)
+                    time_bucket["speed_max"] = speed_avg if time_bucket["speed_max"] is None else max(time_bucket["speed_max"], speed_avg)
+                    time_bucket["total_feet"] += _to_float(record.get("length_ft")) or 0.0
+                    time_bucket["total_defects"] += int(record.get("total_defects") or 0)
+                    bst_active_pct = _to_float((record.get("bst_coverage") or {}).get("active_pct"))
+                    if bst_active_pct is not None:
+                        time_bucket["bst_sum"] += bst_active_pct
+                        time_bucket["bst_count"] += 1
+            for bucket in speed_bucket_stats_overview:
+                total_feet = _to_float(bucket.get("total_feet")) or 0.0
+                total_defects = int(bucket.get("total_defects") or 0)
+                avg_bst_active_pct = (
+                    round(((_to_float(bucket.get("bst_sum")) or 0.0) / int(bucket.get("bst_count") or 0)), 3)
+                    if int(bucket.get("bst_count") or 0) > 0
+                    else None
+                )
+                avg_speed = (
+                    round(((_to_float(bucket.get("speed_sum")) or 0.0) / int(bucket.get("speed_count") or 0)), 3)
+                    if int(bucket.get("speed_count") or 0) > 0
+                    else None
+                )
+                size_weight = int(bucket.get("size_weight") or 0)
+                avg_size = (
+                    round(((_to_float(bucket.get("size_sum")) or 0.0) / size_weight), 3)
+                    if size_weight > 0
+                    else None
+                )
+                row = {
+                    "bucket_label": bucket.get("bucket_label"),
+                    "reels": int(bucket.get("reels") or 0),
+                    "total_defects": total_defects,
+                    "total_feet": round(total_feet, 2),
+                    "avg_speed": avg_speed,
+                    "avg_bst_active_pct": avg_bst_active_pct,
+                    "defects_per_1000ft": _rate_per_1000ft(total_defects, total_feet),
+                    "adjusted_defects_per_1000ft": _driver_adjusted_rate(total_defects, total_feet, avg_bst_active_pct),
+                    "avg_defect_size": avg_size,
+                }
+                speed_bucket_overview.append(row)
+            eligible_best_rows = [
+                row for row in speed_bucket_overview
+                if int(row.get("reels") or 0) >= 2
+                and (_to_float(row.get("total_feet")) or 0.0) >= 1000.0
+                and _to_float(row.get("adjusted_defects_per_1000ft")) is not None
+            ]
+            if not eligible_best_rows:
+                eligible_best_rows = [
+                    row for row in speed_bucket_overview if _to_float(row.get("adjusted_defects_per_1000ft")) is not None
+                ]
+            if eligible_best_rows:
+                speed_best_range = min(
+                    eligible_best_rows,
+                    key=lambda item: _to_float(item.get("adjusted_defects_per_1000ft")) or float("inf"),
+                )
+            for key in ("stable", "moderate", "high"):
+                bucket = speed_stability_stats[key]
+                total_feet = _to_float(bucket.get("total_feet")) or 0.0
+                total_defects = int(bucket.get("total_defects") or 0)
+                avg_bst_active_pct = (
+                    round(((_to_float(bucket.get("bst_sum")) or 0.0) / int(bucket.get("bst_count") or 0)), 3)
+                    if int(bucket.get("bst_count") or 0) > 0
+                    else None
+                )
+                size_weight = int(bucket.get("size_weight") or 0)
+                avg_size = (
+                    round(((_to_float(bucket.get("size_sum")) or 0.0) / size_weight), 3)
+                    if size_weight > 0
+                    else None
+                )
+                avg_metric = (
+                    round(((_to_float(bucket.get("metric_sum")) or 0.0) / int(bucket.get("metric_count") or 0)), 3)
+                    if int(bucket.get("metric_count") or 0) > 0
+                    else None
+                )
+                speed_stability_rows.append(
+                    {
+                        "bucket_label": bucket.get("bucket_label"),
+                        "reels": int(bucket.get("reels") or 0),
+                        "total_feet": round(total_feet, 2),
+                        "total_defects": total_defects,
+                        "avg_bst_active_pct": avg_bst_active_pct,
+                        "defects_per_1000ft": _rate_per_1000ft(total_defects, total_feet),
+                        "adjusted_defects_per_1000ft": _driver_adjusted_rate(total_defects, total_feet, avg_bst_active_pct),
+                        "avg_defect_size": avg_size,
+                        "avg_speed_variation": avg_metric,
+                    }
+                )
+            for bucket in speed_time_of_day_stats:
+                total_feet = _to_float(bucket.get("total_feet")) or 0.0
+                total_defects = int(bucket.get("total_defects") or 0)
+                avg_bst_active_pct = (
+                    round(((_to_float(bucket.get("bst_sum")) or 0.0) / int(bucket.get("bst_count") or 0)), 3)
+                    if int(bucket.get("bst_count") or 0) > 0
+                    else None
+                )
+                avg_speed = (
+                    round(((_to_float(bucket.get("speed_sum")) or 0.0) / int(bucket.get("speed_count") or 0)), 3)
+                    if int(bucket.get("speed_count") or 0) > 0
+                    else None
+                )
+                speed_time_of_day_rows.append(
+                    {
+                        "bucket_label": bucket.get("bucket_label"),
+                        "reels": int(bucket.get("reels") or 0),
+                        "avg_speed": avg_speed,
+                        "min_speed": _to_float(bucket.get("speed_min")),
+                        "max_speed": _to_float(bucket.get("speed_max")),
+                        "total_feet": round(total_feet, 2),
+                        "total_defects": total_defects,
+                        "defects_per_1000ft": _rate_per_1000ft(total_defects, total_feet),
+                        "adjusted_defects_per_1000ft": _driver_adjusted_rate(total_defects, total_feet, avg_bst_active_pct),
+                        "avg_bst_active_pct": avg_bst_active_pct,
+                    }
+                )
+        length_bucket_stats_fixed: Dict[str, Dict[str, object]] = {
+            "< 5,000 ft": {"bucket_label": "< 5,000 ft", "reels": 0, "total_feet": 0.0, "total_defects": 0, "bst_sum": 0.0, "bst_count": 0, "size_sum": 0.0, "size_weight": 0},
+            "5,000 - 8,000 ft": {"bucket_label": "5,000 - 8,000 ft", "reels": 0, "total_feet": 0.0, "total_defects": 0, "bst_sum": 0.0, "bst_count": 0, "size_sum": 0.0, "size_weight": 0},
+            "8,000 - 11,000 ft": {"bucket_label": "8,000 - 11,000 ft", "reels": 0, "total_feet": 0.0, "total_defects": 0, "bst_sum": 0.0, "bst_count": 0, "size_sum": 0.0, "size_weight": 0},
+            "11,000 - 14,000 ft": {"bucket_label": "11,000 - 14,000 ft", "reels": 0, "total_feet": 0.0, "total_defects": 0, "bst_sum": 0.0, "bst_count": 0, "size_sum": 0.0, "size_weight": 0},
+            "> 14,000 ft": {"bucket_label": "> 14,000 ft", "reels": 0, "total_feet": 0.0, "total_defects": 0, "bst_sum": 0.0, "bst_count": 0, "size_sum": 0.0, "size_weight": 0},
+        }
+        length_time_of_day_stats: List[Dict[str, object]] = [
+            {"bucket_label": "12:00 AM - 6:00 AM", "reels": 0, "length_sum": 0.0, "length_count": 0, "length_min": None, "length_max": None, "total_feet": 0.0, "total_defects": 0, "bst_sum": 0.0, "bst_count": 0},
+            {"bucket_label": "6:00 AM - 12:00 PM", "reels": 0, "length_sum": 0.0, "length_count": 0, "length_min": None, "length_max": None, "total_feet": 0.0, "total_defects": 0, "bst_sum": 0.0, "bst_count": 0},
+            {"bucket_label": "12:00 PM - 6:00 PM", "reels": 0, "length_sum": 0.0, "length_count": 0, "length_min": None, "length_max": None, "total_feet": 0.0, "total_defects": 0, "bst_sum": 0.0, "bst_count": 0},
+            {"bucket_label": "6:00 PM - 12:00 AM", "reels": 0, "length_sum": 0.0, "length_count": 0, "length_min": None, "length_max": None, "total_feet": 0.0, "total_defects": 0, "bst_sum": 0.0, "bst_count": 0},
+        ]
+        for record in reel_records:
+            length_ft = _to_float(record.get("length_ft")) or 0.0
+            length_bucket = length_bucket_stats_fixed[_driver_length_bucket_label(length_ft)]
+            length_bucket["reels"] += 1
+            length_bucket["total_feet"] += length_ft
+            length_bucket["total_defects"] += int(record.get("total_defects") or 0)
+            avg_size = _to_float(record.get("avg_defect_size"))
+            total_defects_for_size = int(record.get("total_defects") or 0)
+            if avg_size is not None and total_defects_for_size > 0:
+                length_bucket["size_sum"] += avg_size * total_defects_for_size
+                length_bucket["size_weight"] += total_defects_for_size
+            bst_active_pct = _to_float((record.get("bst_coverage") or {}).get("active_pct"))
+            if bst_active_pct is not None:
+                length_bucket["bst_sum"] += bst_active_pct
+                length_bucket["bst_count"] += 1
+            ts = record.get("time_sort")
+            if ts is not None:
+                hour = ts.hour
+                if hour < 6:
+                    time_bucket = length_time_of_day_stats[0]
+                elif hour < 12:
+                    time_bucket = length_time_of_day_stats[1]
+                elif hour < 18:
+                    time_bucket = length_time_of_day_stats[2]
+                else:
+                    time_bucket = length_time_of_day_stats[3]
+                time_bucket["reels"] += 1
+                time_bucket["length_sum"] += length_ft
+                time_bucket["length_count"] += 1
+                time_bucket["length_min"] = length_ft if time_bucket["length_min"] is None else min(time_bucket["length_min"], length_ft)
+                time_bucket["length_max"] = length_ft if time_bucket["length_max"] is None else max(time_bucket["length_max"], length_ft)
+                time_bucket["total_feet"] += length_ft
+                time_bucket["total_defects"] += int(record.get("total_defects") or 0)
+                if bst_active_pct is not None:
+                    time_bucket["bst_sum"] += bst_active_pct
+                    time_bucket["bst_count"] += 1
+        length_bucket_rows: List[Dict[str, object]] = []
+        for bucket_key in ("< 5,000 ft", "5,000 - 8,000 ft", "8,000 - 11,000 ft", "11,000 - 14,000 ft", "> 14,000 ft"):
+            bucket = length_bucket_stats_fixed[bucket_key]
+            total_feet = _to_float(bucket.get("total_feet")) or 0.0
+            total_defects = int(bucket.get("total_defects") or 0)
+            avg_bst_active_pct = (
+                round(((_to_float(bucket.get("bst_sum")) or 0.0) / int(bucket.get("bst_count") or 0)), 3)
+                if int(bucket.get("bst_count") or 0) > 0
+                else None
+            )
+            size_weight = int(bucket.get("size_weight") or 0)
+            avg_size = (
+                round(((_to_float(bucket.get("size_sum")) or 0.0) / size_weight), 3)
+                if size_weight > 0
+                else None
+            )
+            length_bucket_rows.append(
+                {
+                    "bucket_label": bucket.get("bucket_label"),
+                    "reels": int(bucket.get("reels") or 0),
+                    "total_feet": round(total_feet, 2),
+                    "total_defects": total_defects,
+                    "avg_bst_active_pct": avg_bst_active_pct,
+                    "defects_per_1000ft": _rate_per_1000ft(total_defects, total_feet),
+                    "adjusted_defects_per_1000ft": _driver_adjusted_rate(total_defects, total_feet, avg_bst_active_pct),
+                    "avg_defect_size": avg_size,
+                }
+            )
+        length_time_of_day_rows: List[Dict[str, object]] = []
+        for bucket in length_time_of_day_stats:
+            total_feet = _to_float(bucket.get("total_feet")) or 0.0
+            total_defects = int(bucket.get("total_defects") or 0)
+            avg_bst_active_pct = (
+                round(((_to_float(bucket.get("bst_sum")) or 0.0) / int(bucket.get("bst_count") or 0)), 3)
+                if int(bucket.get("bst_count") or 0) > 0
+                else None
+            )
+            avg_length = (
+                round(((_to_float(bucket.get("length_sum")) or 0.0) / int(bucket.get("length_count") or 0)), 2)
+                if int(bucket.get("length_count") or 0) > 0
+                else None
+            )
+            length_time_of_day_rows.append(
+                {
+                    "bucket_label": bucket.get("bucket_label"),
+                    "reels": int(bucket.get("reels") or 0),
+                    "avg_length_ft": avg_length,
+                    "min_length_ft": _to_float(bucket.get("length_min")),
+                    "max_length_ft": _to_float(bucket.get("length_max")),
+                    "total_feet": round(total_feet, 2),
+                    "total_defects": total_defects,
+                    "defects_per_1000ft": _rate_per_1000ft(total_defects, total_feet),
+                    "adjusted_defects_per_1000ft": _driver_adjusted_rate(total_defects, total_feet, avg_bst_active_pct),
+                    "avg_bst_active_pct": avg_bst_active_pct,
+                }
+            )
+        mask_presence_stats: Dict[str, Dict[str, object]] = {
+            "no_mask": {
+                "bucket_key": "no_mask",
+                "bucket_label": "No Mask",
+                "reels": 0,
+                "total_feet": 0.0,
+                "total_defects": 0,
+                "size_sum": 0.0,
+                "size_weight": 0,
+                "bst_sum": 0.0,
+                "bst_count": 0,
+            },
+            "masked_reel": {
+                "bucket_key": "masked_reel",
+                "bucket_label": "Masked Reel",
+                "reels": 0,
+                "total_feet": 0.0,
+                "total_defects": 0,
+                "size_sum": 0.0,
+                "size_weight": 0,
+                "bst_sum": 0.0,
+                "bst_count": 0,
+            },
+            "mask_changes": {
+                "bucket_key": "mask_changes",
+                "bucket_label": "Mask Changes",
+                "reels": 0,
+                "total_feet": 0.0,
+                "total_defects": 0,
+                "size_sum": 0.0,
+                "size_weight": 0,
+                "bst_sum": 0.0,
+                "bst_count": 0,
+            },
+        }
+        mask_time_of_day_stats: List[Dict[str, object]] = [
+            {"bucket_key": "overnight", "bucket_label": "12:00 AM - 6:00 AM", "reel_count": 0, "reels_with_masks": 0, "total_feet": 0.0},
+            {"bucket_key": "morning", "bucket_label": "6:00 AM - 12:00 PM", "reel_count": 0, "reels_with_masks": 0, "total_feet": 0.0},
+            {"bucket_key": "afternoon", "bucket_label": "12:00 PM - 6:00 PM", "reel_count": 0, "reels_with_masks": 0, "total_feet": 0.0},
+            {"bucket_key": "evening", "bucket_label": "6:00 PM - 12:00 AM", "reel_count": 0, "reels_with_masks": 0, "total_feet": 0.0},
+        ]
+        for record in reel_records:
+            masked = int(record.get("mask_effective_count") or 0) > 0
+            if bool(record.get("has_mask_change")):
+                mask_bucket = mask_presence_stats["mask_changes"]
+            elif masked:
+                mask_bucket = mask_presence_stats["masked_reel"]
+            else:
+                mask_bucket = mask_presence_stats["no_mask"]
+            mask_bucket["reels"] += 1
+            mask_bucket["total_feet"] += _to_float(record.get("length_ft")) or 0.0
+            mask_bucket["total_defects"] += int(record.get("total_defects") or 0)
+            avg_size = _to_float(record.get("avg_defect_size"))
+            total_defects_for_size = int(record.get("total_defects") or 0)
+            if avg_size is not None and total_defects_for_size > 0:
+                mask_bucket["size_sum"] += avg_size * total_defects_for_size
+                mask_bucket["size_weight"] += total_defects_for_size
+            bst_active_pct = _to_float((record.get("bst_coverage") or {}).get("active_pct"))
+            if bst_active_pct is not None:
+                mask_bucket["bst_sum"] += bst_active_pct
+                mask_bucket["bst_count"] += 1
+            ts = record.get("time_sort")
+            if ts is not None:
+                hour = ts.hour
+                if hour < 6:
+                    time_bucket = mask_time_of_day_stats[0]
+                elif hour < 12:
+                    time_bucket = mask_time_of_day_stats[1]
+                elif hour < 18:
+                    time_bucket = mask_time_of_day_stats[2]
+                else:
+                    time_bucket = mask_time_of_day_stats[3]
+                time_bucket["reel_count"] += 1
+                time_bucket["total_feet"] += _to_float(record.get("length_ft")) or 0.0
+                if masked:
+                    time_bucket["reels_with_masks"] += 1
+        reference_bucket_rows: List[Dict[str, object]] = []
+        mask_bucket_rows: List[Dict[str, object]] = []
+        for bucket_key in ("no_change", "single_change", "multiple_changes"):
+            bucket = reference_bucket_stats[bucket_key]
+            total_feet = _to_float(bucket.get("total_feet")) or 0.0
+            total_defects = int(bucket.get("total_defects") or 0)
+            defects_per_1000ft = _rate_per_1000ft(total_defects, total_feet)
+            size_weight = int(bucket.get("size_weight") or 0)
+            avg_size = (
+                round(((_to_float(bucket.get("size_sum")) or 0.0) / size_weight), 3)
+                if size_weight > 0
+                else None
+            )
+            bst_count = int(bucket.get("bst_count") or 0)
+            avg_bst_active_pct = (
+                round(((_to_float(bucket.get("bst_sum")) or 0.0) / bst_count), 3)
+                if bst_count > 0
+                else None
+            )
+            interpretation = "Baseline"
+            if bucket_key != "no_change":
+                delta = _safe_delta(defects_per_1000ft, baseline_reference_rate)
+                if delta is None:
+                    interpretation = "No comparison"
+                elif delta > 0.1:
+                    interpretation = "Higher defects"
+                elif delta < -0.1:
+                    interpretation = "Lower defects"
+                else:
+                    interpretation = "Similar"
+            reference_bucket_rows.append(
+                {
+                    "bucket_key": bucket_key,
+                    "bucket_label": bucket.get("bucket_label"),
+                    "reels": int(bucket.get("reels") or 0),
+                    "total_feet": round(total_feet, 2),
+                    "total_defects": total_defects,
+                    "defects_per_1000ft": defects_per_1000ft,
+                    "adjusted_feet": (
+                        round(total_feet * (avg_bst_active_pct / 100.0), 2)
+                        if avg_bst_active_pct is not None
+                        else None
+                    ),
+                    "adjusted_defects_per_1000ft": (
+                        _rate_per_1000ft(
+                            total_defects,
+                            total_feet * (avg_bst_active_pct / 100.0),
+                        )
+                        if avg_bst_active_pct is not None
+                        and (total_feet * (avg_bst_active_pct / 100.0)) >= 1.0
+                        else None
+                    ),
+                    "avg_defect_size": avg_size,
+                    "avg_bst_active_pct": avg_bst_active_pct,
+                    "interpretation": interpretation,
+                }
+            )
+        for bucket_key in ("no_mask", "masked_reel", "mask_changes"):
+            bucket = mask_presence_stats[bucket_key]
+            total_feet = _to_float(bucket.get("total_feet")) or 0.0
+            total_defects = int(bucket.get("total_defects") or 0)
+            bst_count = int(bucket.get("bst_count") or 0)
+            avg_bst_active_pct = (
+                round(((_to_float(bucket.get("bst_sum")) or 0.0) / bst_count), 3)
+                if bst_count > 0
+                else None
+            )
+            size_weight = int(bucket.get("size_weight") or 0)
+            avg_size = (
+                round(((_to_float(bucket.get("size_sum")) or 0.0) / size_weight), 3)
+                if size_weight > 0
+                else None
+            )
+            mask_bucket_rows.append(
+                {
+                    "bucket_key": bucket_key,
+                    "bucket_label": bucket.get("bucket_label"),
+                    "reels": int(bucket.get("reels") or 0),
+                    "total_feet": round(total_feet, 2),
+                    "total_defects": total_defects,
+                    "avg_bst_active_pct": avg_bst_active_pct,
+                    "defects_per_1000ft": _rate_per_1000ft(total_defects, total_feet),
+                    "adjusted_defects_per_1000ft": (
+                        _rate_per_1000ft(total_defects, total_feet * (avg_bst_active_pct / 100.0))
+                        if avg_bst_active_pct is not None and (total_feet * (avg_bst_active_pct / 100.0)) >= 1.0
+                        else None
+                    ),
+                    "avg_defect_size": avg_size,
+                }
+            )
+        mask_time_of_day_rows: List[Dict[str, object]] = []
+        for bucket in mask_time_of_day_stats:
+            reel_count = int(bucket.get("reel_count") or 0)
+            reels_with_masks = int(bucket.get("reels_with_masks") or 0)
+            mask_time_of_day_rows.append(
+                {
+                    "bucket_key": bucket.get("bucket_key"),
+                    "bucket_label": bucket.get("bucket_label"),
+                    "reel_count": reel_count,
+                    "reels_with_masks": reels_with_masks,
+                    "total_feet": round(_to_float(bucket.get("total_feet")) or 0.0, 2),
+                    "pct_with_masks": round((reels_with_masks / reel_count) * 100.0, 1) if reel_count else 0.0,
+                }
+            )
+        reference_hour_buckets: List[Dict[str, object]] = []
+        reference_time_of_day_rows: List[Dict[str, object]] = []
+        timeline_records = sorted(
+            [record for record in reel_records if record.get("time_sort") is not None],
+            key=lambda item: item.get("time_sort"),
+        )
+        time_of_day_stats: List[Dict[str, object]] = [
+            {
+                "bucket_key": "overnight",
+                "bucket_label": "12:00 AM - 6:00 AM",
+                "start_hour": 0,
+                "end_hour": 6,
+                "reel_count": 0,
+                "reels_with_reference_changes": 0,
+                "total_reference_changes": 0,
+                "total_feet": 0.0,
+                "total_defects": 0,
+                "size_sum": 0.0,
+                "size_weight": 0,
+                "bst_sum": 0.0,
+                "bst_count": 0,
+            },
+            {
+                "bucket_key": "morning",
+                "bucket_label": "6:00 AM - 12:00 PM",
+                "start_hour": 6,
+                "end_hour": 12,
+                "reel_count": 0,
+                "reels_with_reference_changes": 0,
+                "total_reference_changes": 0,
+                "total_feet": 0.0,
+                "total_defects": 0,
+                "size_sum": 0.0,
+                "size_weight": 0,
+                "bst_sum": 0.0,
+                "bst_count": 0,
+            },
+            {
+                "bucket_key": "afternoon",
+                "bucket_label": "12:00 PM - 6:00 PM",
+                "start_hour": 12,
+                "end_hour": 18,
+                "reel_count": 0,
+                "reels_with_reference_changes": 0,
+                "total_reference_changes": 0,
+                "total_feet": 0.0,
+                "total_defects": 0,
+                "size_sum": 0.0,
+                "size_weight": 0,
+                "bst_sum": 0.0,
+                "bst_count": 0,
+            },
+            {
+                "bucket_key": "evening",
+                "bucket_label": "6:00 PM - 12:00 AM",
+                "start_hour": 18,
+                "end_hour": 24,
+                "reel_count": 0,
+                "reels_with_reference_changes": 0,
+                "total_reference_changes": 0,
+                "total_feet": 0.0,
+                "total_defects": 0,
+                "size_sum": 0.0,
+                "size_weight": 0,
+                "bst_sum": 0.0,
+                "bst_count": 0,
+            },
+        ]
+        if timeline_records:
+            start_time = timeline_records[0]["time_sort"]
+            end_time = timeline_records[-1]["time_sort"]
+            for record in timeline_records:
+                ts = record.get("time_sort")
+                if ts is None:
+                    continue
+                hour = ts.hour
+                if hour < 6:
+                    time_bucket = time_of_day_stats[0]
+                elif hour < 12:
+                    time_bucket = time_of_day_stats[1]
+                elif hour < 18:
+                    time_bucket = time_of_day_stats[2]
+                else:
+                    time_bucket = time_of_day_stats[3]
+                time_bucket["reel_count"] += 1
+                time_bucket["total_feet"] += _to_float(record.get("length_ft")) or 0.0
+                time_bucket["total_defects"] += int(record.get("total_defects") or 0)
+                if int(record.get("reference_count") or 0) > 1:
+                    time_bucket["reels_with_reference_changes"] += 1
+                time_bucket["total_reference_changes"] += int(record.get("reference_repeated_updates") or 0)
+                avg_size = _to_float(record.get("avg_defect_size"))
+                total_defects_for_size = int(record.get("total_defects") or 0)
+                if avg_size is not None and total_defects_for_size > 0:
+                    time_bucket["size_sum"] += avg_size * total_defects_for_size
+                    time_bucket["size_weight"] += total_defects_for_size
+                bst_active_pct = _to_float((record.get("bst_coverage") or {}).get("active_pct"))
+                if bst_active_pct is not None:
+                    time_bucket["bst_sum"] += bst_active_pct
+                    time_bucket["bst_count"] += 1
+            bucket_start = start_time
+            bucket_index = 0
+            while bucket_start <= end_time:
+                bucket_end = bucket_start + timedelta(hours=1)
+                bucket_records = [
+                    record
+                    for record in timeline_records
+                    if record.get("time_sort") is not None
+                    and record["time_sort"] >= bucket_start
+                    and (
+                        record["time_sort"] < bucket_end
+                        or (bucket_end > end_time and record["time_sort"] <= end_time)
+                    )
+                ]
+                reel_count = len(bucket_records)
+                reels_with_changes = sum(
+                    1 for record in bucket_records if int(record.get("reference_count") or 0) > 1
+                )
+                total_reference_changes = sum(
+                    int(record.get("reference_repeated_updates") or 0) for record in bucket_records
+                )
+                total_feet_bucket = sum(_to_float(record.get("length_ft")) or 0.0 for record in bucket_records)
+                total_defects_bucket = sum(int(record.get("total_defects") or 0) for record in bucket_records)
+                avg_bst_active_bucket = _average(
+                    (record.get("bst_coverage") or {}).get("active_pct") for record in bucket_records
+                )
+                reference_hour_buckets.append(
+                    {
+                        "bucket_key": f"hour_{bucket_index + 1}",
+                        "bucket_index": bucket_index,
+                        "bucket_start": _iso(bucket_start),
+                        "bucket_end": _iso(bucket_end if bucket_end <= end_time else end_time),
+                        "reel_count": reel_count,
+                        "reels_with_reference_changes": reels_with_changes,
+                        "total_reference_changes": total_reference_changes,
+                        "total_feet": round(total_feet_bucket, 2),
+                        "total_defects": total_defects_bucket,
+                        "defects_per_1000ft": _rate_per_1000ft(total_defects_bucket, total_feet_bucket),
+                        "avg_bst_active_pct": avg_bst_active_bucket,
+                    }
+                )
+                bucket_index += 1
+                bucket_start = bucket_end
+        max_time_of_day_changes = max(
+            (int(bucket.get("reels_with_reference_changes") or 0) for bucket in time_of_day_stats),
+            default=0,
+        )
+        for bucket in time_of_day_stats:
+            total_feet_bucket = _to_float(bucket.get("total_feet")) or 0.0
+            total_defects_bucket = int(bucket.get("total_defects") or 0)
+            avg_bst_active_bucket = (
+                round(((_to_float(bucket.get("bst_sum")) or 0.0) / int(bucket.get("bst_count") or 0)), 3)
+                if int(bucket.get("bst_count") or 0) > 0
+                else None
+            )
+            size_weight = int(bucket.get("size_weight") or 0)
+            avg_size_bucket = (
+                round(((_to_float(bucket.get("size_sum")) or 0.0) / size_weight), 3)
+                if size_weight > 0
+                else None
+            )
+            adjusted_feet_bucket = (
+                total_feet_bucket * (avg_bst_active_bucket / 100.0)
+                if avg_bst_active_bucket is not None
+                else None
+            )
+            reference_time_of_day_rows.append(
+                {
+                    "bucket_key": bucket.get("bucket_key"),
+                    "bucket_label": bucket.get("bucket_label"),
+                    "reel_count": int(bucket.get("reel_count") or 0),
+                    "reels_with_reference_changes": int(bucket.get("reels_with_reference_changes") or 0),
+                    "total_reference_changes": int(bucket.get("total_reference_changes") or 0),
+                    "total_feet": round(total_feet_bucket, 2),
+                    "total_defects": total_defects_bucket,
+                    "defects_per_1000ft": _rate_per_1000ft(total_defects_bucket, total_feet_bucket),
+                    "adjusted_defects_per_1000ft": (
+                        _rate_per_1000ft(total_defects_bucket, adjusted_feet_bucket)
+                        if adjusted_feet_bucket is not None and adjusted_feet_bucket >= 1.0
+                        else None
+                    ),
+                    "avg_bst_active_pct": avg_bst_active_bucket,
+                    "avg_defect_size": avg_size_bucket,
+                    "is_peak_change_bucket": int(bucket.get("reels_with_reference_changes") or 0) == max_time_of_day_changes
+                    and max_time_of_day_changes > 0,
+                }
+            )
+        BST_SUMMARY_ACTIVE_THRESHOLD = 95.0
+        bst_length_stats: Dict[str, Dict[str, object]] = {
+            bucket_label: {
+                "bucket_label": bucket_label,
+                "reels": 0,
+                "active_reels": 0,
+                "partial_reels": 0,
+                "inactive_reels": 0,
+            }
+            for bucket_label in (
+                "< 5,000 ft",
+                "5,000 - 8,000 ft",
+                "8,000 - 11,000 ft",
+                "11,000 - 14,000 ft",
+                "> 14,000 ft",
+            )
+        }
+        bst_time_of_day_stats: List[Dict[str, object]] = [
+            {
+                "bucket_key": "overnight",
+                "bucket_label": "12:00 AM - 6:00 AM",
+                "reels": 0,
+                "length_buckets": {
+                    bucket_label: {"reels": 0, "active_reels": 0, "partial_reels": 0, "inactive_reels": 0}
+                    for bucket_label in ("< 5,000 ft", "5,000 - 8,000 ft", "8,000 - 11,000 ft", "11,000 - 14,000 ft", "> 14,000 ft")
+                },
+            },
+            {
+                "bucket_key": "morning",
+                "bucket_label": "6:00 AM - 12:00 PM",
+                "reels": 0,
+                "length_buckets": {
+                    bucket_label: {"reels": 0, "active_reels": 0, "partial_reels": 0, "inactive_reels": 0}
+                    for bucket_label in ("< 5,000 ft", "5,000 - 8,000 ft", "8,000 - 11,000 ft", "11,000 - 14,000 ft", "> 14,000 ft")
+                },
+            },
+            {
+                "bucket_key": "afternoon",
+                "bucket_label": "12:00 PM - 6:00 PM",
+                "reels": 0,
+                "length_buckets": {
+                    bucket_label: {"reels": 0, "active_reels": 0, "partial_reels": 0, "inactive_reels": 0}
+                    for bucket_label in ("< 5,000 ft", "5,000 - 8,000 ft", "8,000 - 11,000 ft", "11,000 - 14,000 ft", "> 14,000 ft")
+                },
+            },
+            {
+                "bucket_key": "evening",
+                "bucket_label": "6:00 PM - 12:00 AM",
+                "reels": 0,
+                "length_buckets": {
+                    bucket_label: {"reels": 0, "active_reels": 0, "partial_reels": 0, "inactive_reels": 0}
+                    for bucket_label in ("< 5,000 ft", "5,000 - 8,000 ft", "8,000 - 11,000 ft", "11,000 - 14,000 ft", "> 14,000 ft")
+                },
+            },
+        ]
+        bst_active_reels = 0
+        bst_partial_reels = 0
+        bst_inactive_reels = 0
+        for record in reel_records:
+            bst_active_pct = _to_float((record.get("bst_coverage") or {}).get("active_pct")) or 0.0
+            if bst_active_pct >= BST_SUMMARY_ACTIVE_THRESHOLD:
+                bst_summary_status = "active"
+                bst_active_reels += 1
+            elif bst_active_pct > BST_OFF_ACTIVE_PCT_THRESHOLD:
+                bst_summary_status = "partial"
+                bst_partial_reels += 1
+            else:
+                bst_summary_status = "inactive"
+                bst_inactive_reels += 1
+            length_bucket = bst_length_stats[_driver_length_bucket_label(_to_float(record.get("length_ft")))]
+            length_bucket["reels"] += 1
+            if bst_summary_status == "active":
+                length_bucket["active_reels"] += 1
+            elif bst_summary_status == "partial":
+                length_bucket["partial_reels"] += 1
+            else:
+                length_bucket["inactive_reels"] += 1
+            ts = record.get("time_sort")
+            if ts is not None:
+                hour = ts.hour
+                if hour < 6:
+                    time_bucket = bst_time_of_day_stats[0]
+                elif hour < 12:
+                    time_bucket = bst_time_of_day_stats[1]
+                elif hour < 18:
+                    time_bucket = bst_time_of_day_stats[2]
+                else:
+                    time_bucket = bst_time_of_day_stats[3]
+                time_bucket["reels"] += 1
+                length_bucket_label = _driver_length_bucket_label(_to_float(record.get("length_ft")))
+                matrix_bucket = time_bucket["length_buckets"][length_bucket_label]
+                matrix_bucket["reels"] += 1
+                if bst_summary_status == "active":
+                    matrix_bucket["active_reels"] += 1
+                elif bst_summary_status == "partial":
+                    matrix_bucket["partial_reels"] += 1
+                else:
+                    matrix_bucket["inactive_reels"] += 1
+        bst_length_rows: List[Dict[str, object]] = []
+        for bucket_key in ("< 5,000 ft", "5,000 - 8,000 ft", "8,000 - 11,000 ft", "11,000 - 14,000 ft", "> 14,000 ft"):
+            bucket = bst_length_stats[bucket_key]
+            reels_count = int(bucket.get("reels") or 0)
+            active_count = int(bucket.get("active_reels") or 0)
+            partial_count = int(bucket.get("partial_reels") or 0)
+            inactive_count = int(bucket.get("inactive_reels") or 0)
+            bst_length_rows.append(
+                {
+                    "bucket_label": bucket.get("bucket_label"),
+                    "reels": reels_count,
+                    "active_reels": active_count,
+                    "partial_reels": partial_count,
+                    "inactive_reels": inactive_count,
+                    "active_pct": round((active_count / reels_count) * 100.0, 1) if reels_count else 0.0,
+                    "partial_pct": round((partial_count / reels_count) * 100.0, 1) if reels_count else 0.0,
+                    "inactive_pct": round((inactive_count / reels_count) * 100.0, 1) if reels_count else 0.0,
+                }
+            )
+        bst_time_of_day_rows: List[Dict[str, object]] = []
+        for bucket in bst_time_of_day_stats:
+            matrix_cells = []
+            for bucket_key in ("< 5,000 ft", "5,000 - 8,000 ft", "8,000 - 11,000 ft", "11,000 - 14,000 ft", "> 14,000 ft"):
+                length_bucket = bucket["length_buckets"][bucket_key]
+                reels_count = int(length_bucket.get("reels") or 0)
+                active_count = int(length_bucket.get("active_reels") or 0)
+                partial_count = int(length_bucket.get("partial_reels") or 0)
+                inactive_count = int(length_bucket.get("inactive_reels") or 0)
+                matrix_cells.append(
+                    {
+                        "bucket_label": bucket_key,
+                        "reels": reels_count,
+                        "active_reels": active_count,
+                        "partial_reels": partial_count,
+                        "inactive_reels": inactive_count,
+                        "active_pct": round((active_count / reels_count) * 100.0, 1) if reels_count else 0.0,
+                        "partial_pct": round((partial_count / reels_count) * 100.0, 1) if reels_count else 0.0,
+                        "inactive_pct": round((inactive_count / reels_count) * 100.0, 1) if reels_count else 0.0,
+                    }
+                )
+            bst_time_of_day_rows.append(
+                {
+                    "bucket_key": bucket.get("bucket_key"),
+                    "bucket_label": bucket.get("bucket_label"),
+                    "reels": int(bucket.get("reels") or 0),
+                    "length_buckets": matrix_cells,
+                }
+            )
+        flag_labels = {
+            "reference_change": "Reference Change",
+            "multiple_reference_changes": "Multiple Reference Changes",
+            "mask_change": "Mask Change",
+            "masked_reel": "Masked Reel",
+            "sensitivity_change": "Sensitivity Change",
+            "speed_shift": "Speed Shift",
+            "speed_instability": "Speed Instability",
+            "bst_low_off": "BST Low/Off",
+            "long_reel": "Long Reel",
+            "short_reel": "Short Reel",
+        }
+        spike_records: List[Dict[str, object]] = []
+        low_length_cut, high_length_cut = length_thresholds
+        _, high_variation_cut = speed_variation_thresholds
+        for record in reel_records:
+            event_types = {event.get("type") for event in record.get("events") or [] if event.get("type")}
+            flags: List[Tuple[str, str]] = []
+            reference_count = int(record.get("reference_count") or 0)
+            if reference_count > 1:
+                flags.append(("reference_change", flag_labels["reference_change"]))
+            if reference_count >= 3:
+                flags.append(("multiple_reference_changes", flag_labels["multiple_reference_changes"]))
+            if bool(record.get("has_mask_change")):
+                flags.append(("mask_change", flag_labels["mask_change"]))
+            if int(record.get("mask_effective_count") or 0) > 0:
+                flags.append(("masked_reel", flag_labels["masked_reel"]))
+            if "sensitivity_change" in event_types:
+                flags.append(("sensitivity_change", flag_labels["sensitivity_change"]))
+            if "speed_shift" in event_types:
+                flags.append(("speed_shift", flag_labels["speed_shift"]))
+            speed_range = _to_float(record.get("speed_range"))
+            if speed_range is not None and high_variation_cut is not None and speed_range > high_variation_cut:
+                flags.append(("speed_instability", flag_labels["speed_instability"]))
+            bst_active_pct = _to_float((record.get("bst_coverage") or {}).get("active_pct"))
+            if bst_active_pct is not None and bst_active_pct < BST_PARTIAL_ACTIVE_PCT_THRESHOLD:
+                flags.append(("bst_low_off", flag_labels["bst_low_off"]))
+            length_ft = _to_float(record.get("length_ft"))
+            if length_ft is not None and high_length_cut is not None and length_ft > high_length_cut:
+                flags.append(("long_reel", flag_labels["long_reel"]))
+            if length_ft is not None and low_length_cut is not None and length_ft <= low_length_cut:
+                flags.append(("short_reel", flag_labels["short_reel"]))
+            record["driver_summary_flags"] = flags
+            is_spike = "defect_spike" in event_types
+            record["is_spike_reel"] = is_spike
+            if is_spike:
+                spike_records.append(record)
+
+        all_flag_stats: Dict[str, Dict[str, object]] = {}
+        single_flag_stats: Dict[str, Dict[str, object]] = {}
+        combination_stats: Dict[Tuple[str, str], Dict[str, object]] = {}
+        spike_time_of_day_stats: List[Dict[str, object]] = [
+            {
+                "bucket_key": "overnight",
+                "bucket_label": "12:00 AM - 6:00 AM",
+                "reels": 0,
+                "total_feet": 0.0,
+                "total_defects": 0,
+                "bst_sum": 0.0,
+                "bst_count": 0,
+            },
+            {
+                "bucket_key": "morning",
+                "bucket_label": "6:00 AM - 12:00 PM",
+                "reels": 0,
+                "total_feet": 0.0,
+                "total_defects": 0,
+                "bst_sum": 0.0,
+                "bst_count": 0,
+            },
+            {
+                "bucket_key": "afternoon",
+                "bucket_label": "12:00 PM - 6:00 PM",
+                "reels": 0,
+                "total_feet": 0.0,
+                "total_defects": 0,
+                "bst_sum": 0.0,
+                "bst_count": 0,
+            },
+            {
+                "bucket_key": "evening",
+                "bucket_label": "6:00 PM - 12:00 AM",
+                "reels": 0,
+                "total_feet": 0.0,
+                "total_defects": 0,
+                "bst_sum": 0.0,
+                "bst_count": 0,
+            },
+        ]
+        spike_no_flag_count = 0
+        spike_one_flag_count = 0
+        spike_multi_flag_count = 0
+        for record in spike_records:
+            flags = list(dict.fromkeys(record.get("driver_summary_flags") or []))
+            flag_keys = [key for key, _ in flags]
+            ts = record.get("time_sort")
+            if ts is not None:
+                hour = ts.hour
+                if hour < 6:
+                    time_bucket = spike_time_of_day_stats[0]
+                elif hour < 12:
+                    time_bucket = spike_time_of_day_stats[1]
+                elif hour < 18:
+                    time_bucket = spike_time_of_day_stats[2]
+                else:
+                    time_bucket = spike_time_of_day_stats[3]
+                time_bucket["reels"] += 1
+                time_bucket["total_feet"] += _to_float(record.get("length_ft")) or 0.0
+                time_bucket["total_defects"] += int(record.get("total_defects") or 0)
+                bst_active_pct = _to_float((record.get("bst_coverage") or {}).get("active_pct"))
+                if bst_active_pct is not None:
+                    time_bucket["bst_sum"] += bst_active_pct
+                    time_bucket["bst_count"] += 1
+            if not flag_keys:
+                spike_no_flag_count += 1
+                continue
+            for key, label in flags:
+                bucket = all_flag_stats.setdefault(
+                    key,
+                    {
+                        "flag_key": key,
+                        "flag_label": label,
+                        "reels": 0,
+                    },
+                )
+                bucket["reels"] += 1
+            if len(flag_keys) == 1:
+                spike_one_flag_count += 1
+                key, label = flags[0]
+                if key != "masked_reel":
+                    bucket = single_flag_stats.setdefault(
+                        key,
+                        {
+                            "flag_key": key,
+                            "flag_label": label,
+                            "reels": 0,
+                        },
+                    )
+                    bucket["reels"] += 1
+                continue
+            spike_multi_flag_count += 1
+            sorted_keys = sorted(set(flag_keys), key=lambda item: flag_labels.get(item, item))
+            combination_label = " + ".join(flag_labels.get(key, key) for key in sorted_keys)
+            combo_key = tuple(sorted_keys)
+            combo_bucket = combination_stats.setdefault(
+                combo_key,
+                {
+                    "combination_label": combination_label,
+                    "reels": 0,
+                }
+            )
+            combo_bucket["reels"] += 1
+
+        spike_count = len(spike_records)
+        all_flag_rows: List[Dict[str, object]] = []
+        for key, stats in all_flag_stats.items():
+            all_flag_rows.append(
+                {
+                    "flag_key": key,
+                    "flag_label": stats.get("flag_label"),
+                    "reels": int(stats.get("reels") or 0),
+                    "pct_of_spike_reels": round((int(stats.get("reels") or 0) / spike_count) * 100.0, 1)
+                    if spike_count
+                    else 0.0,
+                }
+            )
+        all_flag_rows.sort(
+            key=lambda item: (
+                -(int(item.get("reels") or 0)),
+                item.get("flag_label") or "",
+            )
+        )
+
+        single_flag_rows: List[Dict[str, object]] = []
+        for key, stats in single_flag_stats.items():
+            single_flag_rows.append(
+                {
+                    "flag_key": key,
+                    "flag_label": stats.get("flag_label"),
+                    "reels": int(stats.get("reels") or 0),
+                    "pct_of_spike_reels": round((int(stats.get("reels") or 0) / spike_count) * 100.0, 1)
+                    if spike_count
+                    else 0.0,
+                }
+            )
+        single_flag_rows.sort(
+            key=lambda item: (
+                -(int(item.get("reels") or 0)),
+                item.get("flag_label") or "",
+            )
+        )
+
+        combination_rows: List[Dict[str, object]] = []
+        for _, stats in combination_stats.items():
+            combination_rows.append(
+                {
+                    "combination_label": stats.get("combination_label"),
+                    "reels": int(stats.get("reels") or 0),
+                    "pct_of_spike_reels": round((int(stats.get("reels") or 0) / spike_count) * 100.0, 1)
+                    if spike_count
+                    else 0.0,
+                }
+            )
+        combination_rows.sort(
+            key=lambda item: (
+                -(int(item.get("reels") or 0)),
+                item.get("combination_label") or "",
+            )
+        )
+        combination_rows = combination_rows[:8]
+        spike_time_of_day_rows: List[Dict[str, object]] = []
+        for bucket in spike_time_of_day_stats:
+            total_feet_bucket = _to_float(bucket.get("total_feet")) or 0.0
+            total_defects_bucket = int(bucket.get("total_defects") or 0)
+            bst_count_bucket = int(bucket.get("bst_count") or 0)
+            avg_bst_active_bucket = (
+                round(((_to_float(bucket.get("bst_sum")) or 0.0) / bst_count_bucket), 3)
+                if bst_count_bucket > 0
+                else None
+            )
+            spike_time_of_day_rows.append(
+                {
+                    "bucket_key": bucket.get("bucket_key"),
+                    "bucket_label": bucket.get("bucket_label"),
+                    "reels": int(bucket.get("reels") or 0),
+                    "total_feet": round(total_feet_bucket, 2),
+                    "total_defects": total_defects_bucket,
+                    "avg_bst_active_pct": avg_bst_active_bucket,
+                    "defects_per_1000ft": _rate_per_1000ft(total_defects_bucket, total_feet_bucket),
+                    "adjusted_defects_per_1000ft": _driver_adjusted_rate(
+                        total_defects_bucket,
+                        total_feet_bucket,
+                        avg_bst_active_bucket,
+                    ),
+                }
+            )
+        payload = {
+            "kpis": {
+                "reels_analyzed": len(reel_records),
+                "total_footage": round(total_footage, 2),
+                "defects_per_1000ft": _rate_per_1000ft(total_defects, total_footage),
+                "average_defect_size": round(avg_size_sum / sized_reels, 3) if sized_reels else None,
+                "avg_size_basis": overall_avg_basis,
+                "top_defect_type": top_type_name,
+                "top_defect_type_label": _driver_class_label(top_type_name) if top_type_name else None,
+                "top_defect_type_count": int(top_type_count or 0),
+                "total_defects": int(total_defects),
+            },
+            "event_counts": {key: int(value) for key, value in event_counts.items()},
+            "timeline": timeline,
+            "driver_summary": {
+                "summary": {
+                    "total_spike_reels": int(spike_count),
+                    "no_flag_spike_reels": int(spike_no_flag_count),
+                    "one_flag_spike_reels": int(spike_one_flag_count),
+                    "multi_flag_spike_reels": int(spike_multi_flag_count),
+                },
+                "all_flag_rows": all_flag_rows,
+                "single_flag_rows": single_flag_rows,
+                "combination_rows": combination_rows,
+                "time_of_day": spike_time_of_day_rows,
+            },
+            "bst_active_summary": {
+                "summary": {
+                    "total_reels": int(len(reel_records)),
+                    "active_reels": int(bst_active_reels),
+                    "partial_reels": int(bst_partial_reels),
+                    "inactive_reels": int(bst_inactive_reels),
+                    "active_pct": round((bst_active_reels / len(reel_records)) * 100.0, 1) if reel_records else 0.0,
+                    "partial_pct": round((bst_partial_reels / len(reel_records)) * 100.0, 1) if reel_records else 0.0,
+                    "inactive_pct": round((bst_inactive_reels / len(reel_records)) * 100.0, 1) if reel_records else 0.0,
+                },
+                "length_buckets": bst_length_rows,
+                "time_of_day": bst_time_of_day_rows,
+            },
+            "sensitivity_impacts": sorted(
+                sensitivity_impacts,
+                key=lambda item: (
+                    -(abs(_to_float(item.get("rate_delta_per_1000ft")) or 0.0)),
+                    item.get("time") or "",
+                ),
+            ),
+            "sensitivity_summary": sorted(
+                sensitivity_summary_rows,
+                key=lambda item: (
+                    0 if item.get("class_name") == "flaw" else 1,
+                    item.get("class_label") or "",
+                    -(_to_float(item.get("threshold_value")) or 0.0),
+                ),
+            ),
+            "mask_impacts": sorted(
+                mask_impacts,
+                key=lambda item: (
+                    -(abs(_to_float(item.get("rate_delta_per_1000ft")) or 0.0)),
+                    -(int(item.get("coordinate_change_count") or 0)),
+                ),
+            ),
+            "mask_segments": sorted(
+                mask_segments,
+                key=lambda item: (
+                    item.get("job") or "",
+                    item.get("order") or "",
+                    item.get("segment_id") or "",
+                ),
+            ),
+            "mask_overview": {
+                "summary": {
+                    "total_reels": int(len(reel_records)),
+                    "reels_with_masks": int(mask_presence_stats["masked_reel"].get("reels") or 0),
+                    "reels_without_masks": int(mask_presence_stats["no_mask"].get("reels") or 0),
+                    "total_feet_with_masks": round(
+                        _to_float(mask_presence_stats["masked_reel"].get("total_feet")) or 0.0,
+                        2,
+                    ),
+                },
+                "buckets": mask_bucket_rows,
+                "time_of_day": mask_time_of_day_rows,
+            },
+            "reference_stability": {
+                "summary": {
+                    "total_reels": int(len(reel_records)),
+                    "reels_with_changes": int(reels_with_reference_changes),
+                    "pct_with_changes": round(
+                        (int(reels_with_reference_changes) / len(reel_records)) * 100.0, 1
+                    )
+                    if reel_records
+                    else 0.0,
+                    "time_start": reel_records[0].get("time") if reel_records else None,
+                    "time_end": reel_records[-1].get("time") if reel_records else None,
+                    "total_feet": round(total_footage, 2),
+                    "reels_with_repeated_updates": int(reels_with_repeated_reference_updates),
+                    "total_reference_events": int(reels_with_reference_changes),
+                },
+                "buckets": reference_bucket_rows,
+                "hour_buckets": reference_hour_buckets,
+                "time_of_day": reference_time_of_day_rows,
+            },
+            "speed_impact": {
+                "summary": {
+                    "total_reels_with_speed": int(len(speed_records)),
+                    "reels_without_speed": int(max(len(reel_records) - len(speed_records), 0)),
+                    "speed_range_min": _to_float(speed_definition.get("min")) if speed_definition else None,
+                    "speed_range_max": _to_float(speed_definition.get("max")) if speed_definition else None,
+                    "bucket_size": _to_float(speed_definition.get("step")) if speed_definition else None,
+                },
+                "buckets": speed_bucket_overview,
+                "stability": speed_stability_rows,
+                "time_of_day": speed_time_of_day_rows,
+                "best_range": speed_best_range,
+            },
+            "length_impact": {
+                "buckets": length_bucket_rows,
+                "time_of_day": length_time_of_day_rows,
+            },
+        }
+        return jsonify(payload)
+
+
 def _baseline_for_job_order(
     session: Session,
     filters: Dict[str, Optional[str]],

@@ -116,6 +116,7 @@
     const hashToRoute = {
       "job-explorer": "job",
       "defect-explorer": "defects",
+      "defect-drivers": "defect-drivers",
       overview: "overview",
       heatmap: "heatmap",
       "qc-review": "qc-review",
@@ -125,6 +126,7 @@
     const routeToHash = {
       job: "job-explorer",
       defects: "defect-explorer",
+      "defect-drivers": "defect-drivers",
       overview: "overview",
       heatmap: "heatmap",
       "qc-review": "qc-review",

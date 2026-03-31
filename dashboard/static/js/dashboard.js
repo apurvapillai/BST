@@ -7,6 +7,7 @@
   const TAB_SCRIPT_CONFIG = {
     job: { path: "/static/js/tabs/job_explorer.js", exportName: "JobExplorerTab" },
     defects: { path: "/static/js/tabs/defect_explorer.js", exportName: "DefectExplorerTab" },
+    "defect-drivers": { path: "/static/js/tabs/defect_drivers.js", exportName: "DefectDriversTab" },
     "qc-review": { path: "/static/js/tabs/qc_review.js", exportName: "QcReviewTab" },
     heatmap: { path: "/static/js/tabs/heatmap.js", exportName: "HeatmapTab" },
   };
@@ -140,6 +141,7 @@
     Router.register("overview", OverviewTab);
     Router.register("job", createLazyTab("job"));
     Router.register("defects", createLazyTab("defects"));
+    Router.register("defect-drivers", createLazyTab("defect-drivers"));
     Router.register("qc-review", createLazyTab("qc-review"));
     Router.register("heatmap", createLazyTab("heatmap"));
     Router.init();

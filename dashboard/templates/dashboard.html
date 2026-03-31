@@ -122,6 +122,7 @@
       <button type="button" class="tab tab-active" data-tab="overview">Overview</button>
       <button type="button" class="tab" data-tab="job">Job Explorer</button>
       <button type="button" class="tab" data-tab="defects">Defect Explorer</button>
+      <button type="button" class="tab" data-tab="defect-drivers">Defect Drivers</button>
       <button type="button" class="tab" data-tab="qc-review">QC Review</button>
       <button type="button" class="tab" data-tab="heatmap">Heatmap</button>
     </div>
@@ -370,6 +371,122 @@
         <div class="job-detail" id="jobDetail">
           <div class="placeholder">
             Select a reel to view configuration, phases, and RLM details.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Defect Drivers Tab -->
+    <section id="tab-defect-drivers" class="tab-content hidden">
+      <div class="drivers-page">
+        <div class="drivers-shell">
+          <div class="drivers-header">
+            <div>
+              <p class="kpi-section__title">Defect Drivers</p>
+              <small>Trace normalized defect swings against process changes, reference churn, mask edits, speed shifts, and reel-length context.</small>
+            </div>
+            <div class="drivers-header__legend" id="defectDriversLegend"></div>
+          </div>
+
+          <div class="drivers-kpi-strip" id="defectDriversKpis" aria-live="polite"></div>
+
+          <div class="drivers-chip-row">
+            <div class="job-coverage-chip hidden" id="driversMinLengthChip">
+              <span></span>
+              <button type="button" id="driversMinLengthClear" aria-label="Clear min reel length filter">&times;</button>
+            </div>
+          </div>
+
+          <section class="drivers-section">
+            <div class="drivers-section__header">
+              <div>
+                <p class="kpi-section__title">Event Timeline</p>
+                <small>Reels are ordered chronologically and annotated with the main drivers that changed around each defect-rate movement.</small>
+              </div>
+              <div class="job-coverage-filter">
+                <label for="driversMinReelLengthInput">Min ft.</label>
+                <input type="number" id="driversMinReelLengthInput" min="0" step="10" placeholder="4000">
+                <button type="button" id="driversMinReelLengthApply">Apply</button>
+              </div>
+            </div>
+            <div class="drivers-filter-bar" id="defectDriversEventFilters" aria-label="Timeline driver filters"></div>
+            <div class="drivers-timeline-layout">
+              <div class="drivers-timeline" id="defectDriversTimeline"></div>
+              <aside class="drivers-timeline-detail" id="defectDriversTimelineDetail" aria-live="polite"></aside>
+            </div>
+          </section>
+
+          <section class="drivers-panel">
+            <div class="drivers-section__header">
+              <div>
+                <p class="kpi-section__title">BST Active Summary</p>
+                <small>Active = 95%+ BST coverage, Partial = above 0% and below 95%, Inactive = 0%.</small>
+              </div>
+            </div>
+            <div id="defectDriversBstSummary"></div>
+          </section>
+
+          <section class="drivers-panel">
+            <div class="drivers-section__header">
+              <div>
+                <p class="kpi-section__title">Defect Spike Causes</p>
+                <small>Summarizes which timeline flags appeared on defect spike reels.</small>
+              </div>
+            </div>
+            <div id="defectDriversSummary"></div>
+          </section>
+
+          <div class="drivers-panels">
+            <section class="drivers-panel">
+              <div class="drivers-section__header">
+                <div>
+                  <p class="kpi-section__title">Sensitivity Summary</p>
+                  <small>Threshold-run summaries plus reel-to-reel markers when effective sensitivity settings changed.</small>
+                </div>
+              </div>
+              <div id="defectDriversSensitivity"></div>
+            </section>
+
+            <section class="drivers-panel">
+              <div class="drivers-section__header">
+                <div>
+                  <p class="kpi-section__title">Mask Impact</p>
+                  <small>Summarizes consecutive mask ON/OFF segments, BST validity, and normalized defect behavior by mask state.</small>
+                </div>
+              </div>
+              <div id="defectDriversMask"></div>
+            </section>
+
+            <section class="drivers-panel drivers-panel--reference">
+              <div class="drivers-section__header">
+                <div>
+                  <p class="kpi-section__title">Reference Stability</p>
+                  <small>Flags reels and windows with reference churn or repeated updates.</small>
+                </div>
+              </div>
+              <div id="defectDriversReference"></div>
+            </section>
+
+            <section class="drivers-panel drivers-panel--speed">
+              <div class="drivers-section__header">
+                <div>
+                  <p class="kpi-section__title">Speed Impact</p>
+                  <small>Normalized defect behavior by RLM speed bucket and major speed shifts.</small>
+                </div>
+              </div>
+              <div id="defectDriversSpeed"></div>
+            </section>
+
+            <section class="drivers-panel">
+              <div class="drivers-section__header">
+                <div>
+                  <p class="kpi-section__title">Reel Length Impact</p>
+                  <small>Defect rates normalized by 1,000 ft and grouped by reel-length context.</small>
+                </div>
+              </div>
+              <div id="defectDriversLength"></div>
+            </section>
+
           </div>
         </div>
       </div>
