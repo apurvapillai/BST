@@ -2825,6 +2825,152 @@ def _baseline_for_job_order(
     )
 
 
+def _job_explorer_key(job_name: Optional[str], order_number: Optional[str]) -> Tuple[str, str]:
+    return job_name or SENTINEL_NONE, order_number or SENTINEL_NONE
+
+
+def _job_explorer_phase_seconds_by_reel(
+    phases: Iterable[object],
+    window_start: datetime,
+    window_end: datetime,
+) -> Dict[int, Dict[str, float]]:
+    grouped: Dict[int, List[object]] = defaultdict(list)
+    for phase in phases or []:
+        reel_id = getattr(phase, "reel_id", None)
+        if reel_id is None:
+            continue
+        grouped[reel_id].append(phase)
+    return {
+        reel_id: _phase_seconds(rows, window_start, window_end)
+        for reel_id, rows in grouped.items()
+    }
+
+
+def _job_explorer_phase_pct(seconds_by_phase: Optional[Dict[str, float]]) -> Dict[str, float]:
+    totals = seconds_by_phase or {}
+    total_seconds = sum(totals.values())
+    if total_seconds <= 0:
+        return {}
+    return {
+        key: round((value or 0.0) / total_seconds * 100.0, 1)
+        for key, value in totals.items()
+        if value
+    }
+
+
+def _job_explorer_standard_maps(
+    sensitivity_rows: Iterable[SensitivitySet],
+) -> Dict[int, Dict[str, Tuple[Optional[float], Optional[float]]]]:
+    grouped: Dict[int, List[SensitivitySet]] = defaultdict(list)
+    for row in sensitivity_rows or []:
+        if row.reel_id is None:
+            continue
+        grouped[row.reel_id].append(row)
+    return {
+        reel_id: _standard_map(rows)
+        for reel_id, rows in grouped.items()
+    }
+
+
+def _job_explorer_baseline_ids(
+    session: Session,
+    filters: Dict[str, Any],
+    target_keys: Set[Tuple[str, str]],
+) -> Dict[Tuple[str, str], int]:
+    if not target_keys:
+        return {}
+    rows = (
+        _apply_reel_filters(
+            session.query(
+                Reel.reel_id,
+                Reel.job_name,
+                Reel.order_number,
+                Reel.time_start,
+            ),
+            filters,
+            include_reel_code=False,
+        )
+        .order_by(Reel.time_start.asc(), Reel.reel_id.asc())
+        .all()
+    )
+    result: Dict[Tuple[str, str], int] = {}
+    for row in rows:
+        reel_id = getattr(row, "reel_id", None)
+        if reel_id is None:
+            continue
+        key = _job_explorer_key(getattr(row, "job_name", None), getattr(row, "order_number", None))
+        if key in target_keys and key not in result:
+            result[key] = reel_id
+            if len(result) == len(target_keys):
+                break
+    return result
+
+
+def _job_explorer_sensitivity_changes(
+    reels: Iterable[object],
+    standard_maps: Dict[int, Dict[str, Tuple[Optional[float], Optional[float]]]],
+    baseline_ids: Dict[Tuple[str, str], int],
+) -> Tuple[Dict[int, List[Dict[str, object]]], Counter]:
+    changes_by_reel: Dict[int, List[Dict[str, object]]] = {}
+    class_counter: Counter = Counter()
+    for reel in reels or []:
+        reel_id = getattr(reel, "reel_id", None)
+        if reel_id is None:
+            continue
+        key = _job_explorer_key(getattr(reel, "job_name", None), getattr(reel, "order_number", None))
+        baseline_reel_id = baseline_ids.get(key)
+        current_std = standard_maps.get(reel_id, {})
+        baseline_std = standard_maps.get(baseline_reel_id, {}) if baseline_reel_id is not None else {}
+        sens_changes: List[Dict[str, object]] = []
+        for cls in sorted(set(current_std) | set(baseline_std)):
+            current_values = current_std.get(cls)
+            baseline_values = baseline_std.get(cls)
+            delta = _sensitivity_tuple_delta(baseline_values, current_values)
+            if not delta:
+                continue
+            prev_thresh = delta["previous"].get("threshold")
+            curr_thresh = delta["current"].get("threshold")
+            prev_warn = delta["previous"].get("warn")
+            curr_warn = delta["current"].get("warn")
+            sens_changes.append(
+                {
+                    "name": cls,
+                    "previous_threshold": prev_thresh,
+                    "current_threshold": curr_thresh,
+                    "previous_warn": prev_warn,
+                    "current_warn": curr_warn,
+                    "thres_delta": round(curr_thresh - prev_thresh, 3)
+                    if prev_thresh is not None and curr_thresh is not None
+                    else None,
+                    "warn_delta": round(curr_warn - prev_warn, 3)
+                    if prev_warn is not None and curr_warn is not None
+                    else None,
+                }
+            )
+            class_counter[cls] += 1
+        changes_by_reel[reel_id] = sens_changes
+    return changes_by_reel, class_counter
+
+
+def _job_explorer_latest_reviews(
+    session: Session,
+    reel_ids: List[int],
+) -> Dict[int, ReelReview]:
+    if not reel_ids:
+        return {}
+    review_rows = (
+        session.query(ReelReview)
+        .filter(ReelReview.reel_id.in_(reel_ids))
+        .order_by(ReelReview.reel_id.asc(), ReelReview.created_at.desc(), ReelReview.review_id.desc())
+        .all()
+    )
+    result: Dict[int, ReelReview] = {}
+    for review in review_rows:
+        if review.reel_id and review.reel_id not in result:
+            result[review.reel_id] = review
+    return result
+
+
 @dashboard_bp.route("/api/job-explorer")
 def api_job_explorer():
     with SessionLocal() as session:
@@ -2880,106 +3026,231 @@ def api_job_explorer():
         elif status_filter == "uninspected":
             base_query = base_query.filter(latest_review_subq.c.lrr_review_id.is_(None))
 
+        all_reel_rows = (
+            base_query.with_entities(
+                Reel.reel_id,
+                Reel.reel_code,
+                Reel.job_name,
+                Reel.order_number,
+                Reel.time_start,
+                Reel.time_end,
+                Reel.reel_start,
+                Reel.reel_end,
+                Reel.format_length,
+                Reel.format_width,
+                Reel.classification,
+            )
+            .order_by(Reel.time_start.desc(), Reel.reel_id.desc())
+            .all()
+        )
         total = base_query.count()
-        reels = (
+        page_reels = (
             base_query.order_by(Reel.time_start.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
-            .options(
-                selectinload(Reel.reference_images),
-                selectinload(Reel.inspection_phases),
-                selectinload(Reel.sensitivity_sets),
-                selectinload(Reel.masks),
-                selectinload(Reel.rlm_phases),
-                selectinload(Reel.rlm_monitoring),
-                selectinload(Reel.rlm_config),
-                selectinload(Reel.defects),
-            )
             .all()
         )
 
-        baseline_cache: Dict[Tuple[str, str], Optional[Reel]] = {}
-        reel_id_to_review: Dict[int, ReelReview] = {}
-        reel_ids = [reel.reel_id for reel in reels if reel and reel.reel_id]
-        if reel_ids:
-            review_rows = (
-                session.query(ReelReview)
-                .filter(ReelReview.reel_id.in_(reel_ids))
-                .order_by(ReelReview.reel_id.asc(), ReelReview.created_at.desc(), ReelReview.review_id.desc())
-                .all()
+        qualifying_reel_ids = [row.reel_id for row in all_reel_rows if getattr(row, "reel_id", None) is not None]
+        page_reel_ids = [reel.reel_id for reel in page_reels if reel and reel.reel_id is not None]
+        job_order_keys: Set[Tuple[str, str]] = {
+            _job_explorer_key(getattr(row, "job_name", None), getattr(row, "order_number", None))
+            for row in all_reel_rows
+        }
+        baseline_ids = _job_explorer_baseline_ids(session, filters, job_order_keys)
+
+        needed_sensitivity_reel_ids = set(qualifying_reel_ids) | set(baseline_ids.values())
+        sensitivity_rows = (
+            session.query(SensitivitySet)
+            .filter(SensitivitySet.reel_id.in_(needed_sensitivity_reel_ids))
+            .all()
+            if needed_sensitivity_reel_ids
+            else []
+        )
+        standard_maps = _job_explorer_standard_maps(sensitivity_rows)
+        sens_changes_by_reel, sensitivity_class_counter = _job_explorer_sensitivity_changes(
+            all_reel_rows,
+            standard_maps,
+            baseline_ids,
+        )
+
+        inspection_phase_rows = (
+            session.query(InspectionPhase)
+            .filter(InspectionPhase.reel_id.in_(qualifying_reel_ids))
+            .all()
+            if qualifying_reel_ids
+            else []
+        )
+        inspection_seconds_by_reel = _job_explorer_phase_seconds_by_reel(
+            inspection_phase_rows,
+            filters["start"],
+            filters["end"],
+        )
+        inspection_pct_by_reel = {
+            reel_id: _job_explorer_phase_pct(seconds)
+            for reel_id, seconds in inspection_seconds_by_reel.items()
+        }
+
+        rlm_phase_rows = (
+            session.query(RLMPhase)
+            .filter(RLMPhase.reel_id.in_(qualifying_reel_ids))
+            .all()
+            if qualifying_reel_ids
+            else []
+        )
+        rlm_seconds_by_reel = _job_explorer_phase_seconds_by_reel(
+            rlm_phase_rows,
+            filters["start"],
+            filters["end"],
+        )
+        rlm_pct_by_reel = {
+            reel_id: _job_explorer_phase_pct(seconds)
+            for reel_id, seconds in rlm_seconds_by_reel.items()
+        }
+
+        monitor_count_rows = (
+            session.query(
+                RLMMonitoring.reel_id,
+                func.count(RLMMonitoring.monitor_id).label("monitor_count"),
             )
-            for review in review_rows:
-                if review.reel_id and review.reel_id not in reel_id_to_review:
-                    reel_id_to_review[review.reel_id] = review
+            .filter(RLMMonitoring.reel_id.in_(qualifying_reel_ids))
+            .filter(RLMMonitoring.timestamp >= filters["start"])
+            .filter(RLMMonitoring.timestamp <= filters["end"])
+            .group_by(RLMMonitoring.reel_id)
+            .all()
+            if qualifying_reel_ids
+            else []
+        )
+        rlm_monitor_counts = {
+            row.reel_id: int(row.monitor_count or 0)
+            for row in monitor_count_rows
+            if getattr(row, "reel_id", None) is not None
+        }
+
+        reference_count_rows = (
+            session.query(
+                ReferenceImage.reel_id,
+                func.count(ReferenceImage.ref_image_id).label("ref_count"),
+            )
+            .filter(ReferenceImage.reel_id.in_(qualifying_reel_ids))
+            .group_by(ReferenceImage.reel_id)
+            .all()
+            if qualifying_reel_ids
+            else []
+        )
+        reference_counts = {
+            row.reel_id: int(row.ref_count or 0)
+            for row in reference_count_rows
+            if getattr(row, "reel_id", None) is not None
+        }
+
+        page_reference_images_rows = (
+            session.query(ReferenceImage)
+            .filter(ReferenceImage.reel_id.in_(page_reel_ids))
+            .order_by(ReferenceImage.reel_id.asc(), ReferenceImage.ref_image_id.asc())
+            .all()
+            if page_reel_ids
+            else []
+        )
+        page_reference_images: Dict[int, List[Dict[str, object]]] = defaultdict(list)
+        for image in page_reference_images_rows:
+            reel_id = image.reel_id
+            if reel_id is None or len(page_reference_images[reel_id]) >= 5:
+                continue
+            page_reference_images[reel_id].append(
+                {
+                    "filename": image.filename,
+                    "image_src": (image.image_src or "").replace("\\", "/"),
+                }
+            )
+
+        mask_count_rows = (
+            session.query(
+                Mask.reel_id,
+                func.count(Mask.mask_id).label("mask_count"),
+            )
+            .filter(Mask.reel_id.in_(page_reel_ids))
+            .group_by(Mask.reel_id)
+            .all()
+            if page_reel_ids
+            else []
+        )
+        page_mask_counts = {
+            row.reel_id: int(row.mask_count or 0)
+            for row in mask_count_rows
+            if getattr(row, "reel_id", None) is not None
+        }
+
+        defect_rows = (
+            session.query(
+                Defect.reel_id,
+                func.count(Defect.defect_id).label("defect_count"),
+                func.count(func.distinct(Defect.class_name)).label("defect_types"),
+            )
+            .filter(Defect.reel_id.in_(page_reel_ids))
+            .filter(Defect.defect_time >= filters["start"])
+            .filter(Defect.defect_time <= filters["end"])
+            .group_by(Defect.reel_id)
+            .all()
+            if page_reel_ids
+            else []
+        )
+        page_defect_summary = {
+            row.reel_id: {
+                "defect_count": int(row.defect_count or 0),
+                "defect_types": int(row.defect_types or 0),
+            }
+            for row in defect_rows
+            if getattr(row, "reel_id", None) is not None
+        }
+
+        config_needed_ids = set(page_reel_ids)
+        for reel in page_reels:
+            key = _job_explorer_key(reel.job_name, reel.order_number)
+            baseline_id = baseline_ids.get(key)
+            if baseline_id is not None:
+                config_needed_ids.add(baseline_id)
+        config_rows = (
+            session.query(RLMConfig)
+            .filter(RLMConfig.reel_id.in_(config_needed_ids))
+            .all()
+            if config_needed_ids
+            else []
+        )
+        config_map = {
+            row.reel_id: row.config_json
+            for row in config_rows
+            if row.reel_id is not None
+        }
+
+        config_enabled_ids = set(config_map.keys())
+        rlm_phase_enabled_ids = set(rlm_seconds_by_reel.keys())
+        rlm_enabled_ids = config_enabled_ids | rlm_phase_enabled_ids
+
+        reel_id_to_review = _job_explorer_latest_reviews(session, page_reel_ids)
         items: List[Dict[str, object]] = []
 
-        for reel in reels:
-            job_key = reel.job_name or SENTINEL_NONE
-            order_key = reel.order_number or SENTINEL_NONE
-            cache_key = (job_key, order_key)
-            if cache_key not in baseline_cache:
-                baseline_cache[cache_key] = _baseline_for_job_order(
-                    session, filters, reel.job_name, reel.order_number
-                )
-            baseline = baseline_cache[cache_key]
-
+        for reel in page_reels:
+            reel_id = reel.reel_id
+            key = _job_explorer_key(reel.job_name, reel.order_number)
             reel_meters = 0.0
             if reel.reel_start is not None and reel.reel_end is not None:
                 start_val = _to_float(reel.reel_start) or 0.0
                 end_val = _to_float(reel.reel_end) or 0.0
                 reel_meters = max(end_val - start_val, 0.0)
 
-            ordered_refs = _ordered_reference_images(reel.reference_images)
-            ref_images = [
-                {
-                    "filename": img.filename,
-                    "image_src": (img.image_src or "").replace("\\", "/"),
-                }
-                for img in ordered_refs
-            ]
+            ref_image_count = reference_counts.get(reel_id, 0)
+            ref_change_count = max(ref_image_count - 1, 0)
+            sens_changes = sens_changes_by_reel.get(reel_id, [])
 
-            ref_change_pairs = _reference_change_pairs(ordered_refs)
-            ref_change_count = len(ref_change_pairs)
-            ref_change_times: List[str] = []
+            rlm_phase_pct = rlm_pct_by_reel.get(reel_id, {})
+            rlm_active_pct = rlm_phase_pct.get("active", 0.0) if rlm_phase_pct else 0.0
+            rlm_monitor_count = rlm_monitor_counts.get(reel_id, 0)
+            rlm_enabled = reel_id in rlm_enabled_ids
 
-            current_std = _standard_map(reel.sensitivity_sets)
-            baseline_std = _standard_map(baseline.sensitivity_sets) if baseline else {}
-            sens_changes = []
-            for cls in sorted(set(current_std) | set(baseline_std)):
-                current_values = current_std.get(cls)
-                baseline_values = baseline_std.get(cls)
-                delta = _sensitivity_tuple_delta(baseline_values, current_values)
-                if not delta:
-                    continue
-                prev_thresh = delta["previous"].get("threshold")
-                curr_thresh = delta["current"].get("threshold")
-                prev_warn = delta["previous"].get("warn")
-                curr_warn = delta["current"].get("warn")
-                sens_changes.append(
-                    {
-                        "name": cls,
-                        "previous_threshold": prev_thresh,
-                        "current_threshold": curr_thresh,
-                        "previous_warn": prev_warn,
-                        "current_warn": curr_warn,
-                        "thres_delta": round(curr_thresh - prev_thresh, 3) if prev_thresh is not None and curr_thresh is not None else None,
-                        "warn_delta": round(curr_warn - prev_warn, 3) if prev_warn is not None and curr_warn is not None else None,
-                    }
-                )
-
-            rlm_enabled = bool(reel.rlm_config or (reel.rlm_phases or []))
-            rlm_seconds = _phase_seconds(reel.rlm_phases or [], filters["start"], filters["end"])
-            rlm_active_seconds = rlm_seconds.get("active", 0.0)
-            rlm_total_seconds = sum(rlm_seconds.values())
-            rlm_active_pct = round(rlm_active_seconds / rlm_total_seconds * 100, 1) if rlm_total_seconds else 0.0
-            rlm_monitor_count = sum(
-                1
-                for mon in reel.rlm_monitoring or []
-                if mon.timestamp and filters["start"] <= mon.timestamp <= filters["end"]
-            )
-
-            baseline_config_flat = _flatten_config(baseline.rlm_config.config_json) if baseline and baseline.rlm_config else {}
-            current_config_flat = _flatten_config(reel.rlm_config.config_json) if reel.rlm_config else {}
+            baseline_reel_id = baseline_ids.get(key)
+            baseline_config_flat = _flatten_config(config_map.get(baseline_reel_id)) if baseline_reel_id is not None else {}
+            current_config_flat = _flatten_config(config_map.get(reel_id))
             rlm_drift = []
             for key in sorted(set(current_config_flat) | set(baseline_config_flat)):
                 baseline_val = baseline_config_flat.get(key)
@@ -2995,22 +3266,11 @@ def api_job_explorer():
                         }
                     )
 
-            phase_mix = _phase_mix_for_reel(reel, filters["start"], filters["end"])
-            total_phase_seconds = sum(entry.get("seconds", 0.0) for entry in phase_mix.values())
-            phase_mix_pct = {
-                key: round(entry.get("seconds", 0.0) / total_phase_seconds * 100, 1)
-                for key, entry in phase_mix.items()
-                if total_phase_seconds
-            }
+            phase_mix_pct = inspection_pct_by_reel.get(reel_id, {})
             active_inspection_pct = phase_mix_pct.get("active", 0.0) if phase_mix_pct else 0.0
 
-            defects_visible = [
-                d
-                for d in reel.defects or []
-                if _defect_within_window(d, filters["start"], filters["end"])
-            ]
-
-            latest_review_obj = reel_id_to_review.get(reel.reel_id)
+            defect_summary = page_defect_summary.get(reel_id, {})
+            latest_review_obj = reel_id_to_review.get(reel_id)
             serialized_review = _serialize_review(latest_review_obj)
             if serialized_review:
                 decision_value = (serialized_review.get("decision") or "").lower()
@@ -3029,18 +3289,18 @@ def api_job_explorer():
                 "meters": round(reel_meters, 2),
                 "format_length": _to_float(reel.format_length),
                 "format_width": _to_float(reel.format_width),
-                "ref_images": ref_images,
+                "ref_images": page_reference_images.get(reel_id, []),
                 "ref_change_count": ref_change_count,
-                "ref_change_times": [ts for ts in ref_change_times if ts],
+                "ref_change_times": [],
                 "sens_standard_changed": bool(sens_changes),
                 "sens_changed_classes": sens_changes,
-                "mask_count": len(reel.masks or []),
+                "mask_count": page_mask_counts.get(reel_id, 0),
                 "rlm_enabled": rlm_enabled,
                 "rlm_active_pct": rlm_active_pct,
                 "rlm_monitor_count": rlm_monitor_count,
                 "rlm_config_drift": rlm_drift,
-                "defect_count": len(defects_visible),
-                "defect_types": len({d.class_name for d in defects_visible if d.class_name}),
+                "defect_count": int(defect_summary.get("defect_count", 0)),
+                "defect_types": int(defect_summary.get("defect_types", 0)),
                 "phase_mix_pct": phase_mix_pct,
                 "active_inspection_pct": active_inspection_pct,
                 "review": serialized_review,
@@ -3048,10 +3308,84 @@ def api_job_explorer():
             }
             items.append(item)
 
+        qualifying_count = len(all_reel_rows)
+        bst_active_count = 0
+        rlm_active_count = 0
+        reels_with_reference_changes = 0
+        reels_with_sensitivity_changes = 0
+
+        for row in all_reel_rows:
+            reel_id = row.reel_id
+            if reel_id is None:
+                continue
+            inspection_pct = inspection_pct_by_reel.get(reel_id, {})
+            active_pct = inspection_pct.get("active", 0.0) if inspection_pct else 0.0
+            if active_pct >= 99.9:
+                bst_active_count += 1
+
+            rlm_pct = rlm_pct_by_reel.get(reel_id, {})
+            rlm_active_pct = rlm_pct.get("active", 0.0) if rlm_pct else 0.0
+            rlm_monitor_count = rlm_monitor_counts.get(reel_id, 0)
+            rlm_enabled = reel_id in rlm_enabled_ids
+            if rlm_enabled and (rlm_active_pct > 0 or rlm_monitor_count > 0):
+                rlm_active_count += 1
+
+            ref_change_count = max(reference_counts.get(reel_id, 0) - 1, 0)
+            if ref_change_count > 0:
+                reels_with_reference_changes += 1
+
+            sens_changes = sens_changes_by_reel.get(reel_id, [])
+            changed_classes = len(sens_changes)
+            if changed_classes > 0:
+                reels_with_sensitivity_changes += 1
+
+        def _pct(part: int, whole: int) -> float:
+            return round((part / whole * 100.0), 1) if whole else 0.0
+
+        insights = {
+            "qualifying_reel_count": qualifying_count,
+            "min_reel_length": filters.get("min_reel_length") or 0.0,
+            "bst_coverage": {
+                "qualifying_reel_count": qualifying_count,
+                "active_count": bst_active_count,
+                "inactive_count": max(qualifying_count - bst_active_count, 0),
+                "active_pct": _pct(bst_active_count, qualifying_count),
+                "inactive_pct": _pct(max(qualifying_count - bst_active_count, 0), qualifying_count),
+                "subtitle": "100% active inspection across qualifying reels.",
+            },
+            "rlm_coverage": {
+                "qualifying_reel_count": qualifying_count,
+                "active_count": rlm_active_count,
+                "inactive_count": max(qualifying_count - rlm_active_count, 0),
+                "active_pct": _pct(rlm_active_count, qualifying_count),
+                "inactive_pct": _pct(max(qualifying_count - rlm_active_count, 0), qualifying_count),
+                "subtitle": "RLM enabled and active via phase time or monitor points.",
+            },
+            "reference_summary": {
+                "qualifying_reel_count": qualifying_count,
+                "reels_with_reference_changes": reels_with_reference_changes,
+                "reels_without_reference_changes": max(qualifying_count - reels_with_reference_changes, 0),
+                "pct_with_changes": _pct(reels_with_reference_changes, qualifying_count),
+                "pct_without_changes": _pct(
+                    max(qualifying_count - reels_with_reference_changes, 0), qualifying_count
+                ),
+            },
+            "sensitivity_summary": {
+                "qualifying_reel_count": qualifying_count,
+                "reels_with_sensitivity_changes": reels_with_sensitivity_changes,
+                "reels_with_same_sensitivity": max(qualifying_count - reels_with_sensitivity_changes, 0),
+                "pct_changed": _pct(reels_with_sensitivity_changes, qualifying_count),
+                "pct_same": _pct(
+                    max(qualifying_count - reels_with_sensitivity_changes, 0), qualifying_count
+                ),
+            },
+        }
+
         total_pages = (total + page_size - 1) // page_size if total else 1
         return jsonify(
             {
                 "items": items,
+                "insights": insights,
                 "total": total,
                 "page_info": {
                     "page": page,

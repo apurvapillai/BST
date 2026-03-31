@@ -270,6 +270,63 @@
 
     <!-- Job Explorer Tab -->
     <section id="tab-job" class="tab-content hidden">
+      <div class="job-insights" id="jobInsights">
+        <div class="job-insights-bar">
+          <div class="job-insights-copy">
+            <p>Job Explorer Insights</p>
+            <small>Summary cards are computed from the full filtered and qualifying reel set, not just the current page.</small>
+          </div>
+          <div class="job-coverage-stats">
+            <div>
+              <strong data-insights-total>0</strong>
+              <span>Qualifying reels</span>
+            </div>
+            <div class="job-coverage-filter">
+              <label for="coverageMinReelLengthInput">Min ft.</label>
+              <input type="number" id="coverageMinReelLengthInput" min="0" step="10" placeholder="4000">
+              <button type="button" id="coverageMinReelLengthApply">Apply</button>
+            </div>
+          </div>
+        </div>
+        <div class="job-coverage-chip hidden" id="coverageMinLengthChip">
+          <span></span>
+          <button type="button" id="coverageMinLengthClear" aria-label="Clear min reel length filter">&times;</button>
+        </div>
+        <div class="job-insights-grid">
+        <div class="job-insight-card" id="jobBstCoverageCard">
+          <div class="job-insight-card__header">
+            <div>
+              <p>BST Active Coverage</p>
+            </div>
+          </div>
+          <div class="job-insight-card__body placeholder">Loading insights...</div>
+        </div>
+        <div class="job-insight-card" id="jobRlmCoverageCard">
+          <div class="job-insight-card__header">
+            <div>
+              <p>RLM Active Coverage</p>
+            </div>
+          </div>
+          <div class="job-insight-card__body placeholder">Loading insights...</div>
+        </div>
+        <div class="job-insight-card" id="jobReferenceSummaryCard">
+          <div class="job-insight-card__header">
+            <div>
+              <p>Reference Changes</p>
+            </div>
+          </div>
+          <div class="job-insight-card__body placeholder">Loading insights...</div>
+        </div>
+        <div class="job-insight-card" id="jobSensitivitySummaryCard">
+          <div class="job-insight-card__header">
+            <div>
+              <p>Sensitivity Drift</p>
+            </div>
+          </div>
+          <div class="job-insight-card__body placeholder">Loading insights...</div>
+        </div>
+        </div>
+      </div>
       <div class="job-layout">
         <div class="job-list">
           <div class="job-list-toolbar">

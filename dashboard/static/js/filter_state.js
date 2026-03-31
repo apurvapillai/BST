@@ -93,8 +93,10 @@
     }
     store.meta.pages[page] = pageMeta;
     if (isReloadNavigation()) {
-      const resetValues = Object.keys(resetOnReload || {}).length ? resetOnReload : defaults;
-      applyDefaults(filters, resetValues);
+      const hasResetOverrides = Boolean(resetOnReload && Object.keys(resetOnReload).length);
+      if (hasResetOverrides) {
+        applyDefaults(filters, resetOnReload);
+      }
     }
     store.filters = filters;
     store.meta.currentPage = page;

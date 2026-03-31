@@ -14,12 +14,20 @@
       { value: "splice", label: "Splice" },
       { value: "scrap", label: "Scrap" },
     ];
+    const COVERAGE_DEFAULT_MIN_FEET = 4000;
+    const COVERAGE_MIN_STORAGE_KEY = "job.coverageMinReelLength";
+    const FEET_TO_METERS = 0.3048;
+    const METERS_TO_FEET = 3.28084;
+
+    let coverageMinLengthFilter = loadCoverageMinLength();
+
     let state = {
       page: 1,
       selectedReelId: null,
       sort: "time",
       cachedItems: [],
       pageInfo: null,
+      insights: null,
       reviewStatus: null,
     };
     const summaryCache = new Map();
@@ -48,7 +56,6 @@
     }
 
     let latestLoadToken = 0;
-
     const load = Utils.debounce(async () => {
       const requestToken = ++latestLoadToken;
       LoadingOverlay.show();
@@ -57,6 +64,9 @@
         if (state.reviewStatus) {
           params.review_status = state.reviewStatus;
         }
+        if (coverageMinLengthFilter > 0) {
+          params.min_reel_length = coverageMinLengthFilter;
+        }
         const data = await Api.get("job-explorer", params);
         if (requestToken !== latestLoadToken) {
           return;
@@ -64,6 +74,8 @@
         state.cachedItems = applySort(data.items || []);
         registerReelMetadataFromItems(state.cachedItems);
         state.pageInfo = data.page_info || null;
+        state.insights = data.insights || null;
+        renderJobInsights();
         renderList();
         renderPagination();
         ensureSelection();
@@ -80,6 +92,7 @@
       paginationEl = Utils.qs("#jobPagination");
       sortSelect = Utils.qs("#jobSort");
       statusFilterRoot = Utils.qs("#jobReviewFilters");
+      setupCoverageMinLengthControls();
 
       if (sortSelect) {
         sortSelect.addEventListener("change", () => {
@@ -548,6 +561,186 @@
           renderDetail(state.selectedReelId, true);
         }
       }
+    }
+
+    function setupCoverageMinLengthControls() {
+      const input = document.getElementById("coverageMinReelLengthInput");
+      const applyBtn = document.getElementById("coverageMinReelLengthApply");
+      const clearBtn = document.getElementById("coverageMinLengthClear");
+      if (input) {
+        const feetValue = coverageMinLengthFilter ? coverageMinLengthFilter * METERS_TO_FEET : 0;
+        input.value = feetValue ? Math.round(feetValue) : "";
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            applyCoverageMinLength(input.value);
+          }
+        });
+      }
+      if (applyBtn) {
+        applyBtn.addEventListener("click", () => applyCoverageMinLength(input ? input.value : ""));
+      }
+      if (clearBtn) {
+        clearBtn.addEventListener("click", () => applyCoverageMinLength(""));
+      }
+      updateCoverageMinChip();
+    }
+
+    function applyCoverageMinLength(rawValue) {
+      const parsed = Number(rawValue);
+      const nextValue = Number.isFinite(parsed) && parsed > 0 ? parsed * FEET_TO_METERS : 0;
+      if (nextValue === coverageMinLengthFilter) {
+        updateCoverageMinChip();
+        return;
+      }
+      coverageMinLengthFilter = nextValue;
+      persistCoverageMinLength(coverageMinLengthFilter);
+      const input = document.getElementById("coverageMinReelLengthInput");
+      if (input) {
+        const feetValue = coverageMinLengthFilter ? coverageMinLengthFilter * METERS_TO_FEET : 0;
+        input.value = feetValue ? Math.round(feetValue) : "";
+      }
+      updateCoverageMinChip();
+      state.page = 1;
+      load.flush();
+    }
+
+    function updateCoverageMinChip() {
+      const chip = document.getElementById("coverageMinLengthChip");
+      const text = chip ? chip.querySelector("span") : null;
+      if (!chip) return;
+      if (coverageMinLengthFilter > 0) {
+        chip.classList.remove("hidden");
+        if (text) {
+          text.textContent = `Min reel length ≥ ${Utils.formatMeters(coverageMinLengthFilter)}`;
+        }
+      } else {
+        chip.classList.add("hidden");
+        if (text) {
+          text.textContent = "";
+        }
+      }
+    }
+
+    function loadCoverageMinLength() {
+      const defaultMeters = COVERAGE_DEFAULT_MIN_FEET * FEET_TO_METERS;
+      if (typeof sessionStorage === "undefined") return defaultMeters;
+      try {
+        const raw = sessionStorage.getItem(COVERAGE_MIN_STORAGE_KEY);
+        if (raw === null || raw === undefined) {
+          return defaultMeters;
+        }
+        const parsed = Number(raw);
+        if (!Number.isFinite(parsed)) {
+          return defaultMeters;
+        }
+        if (parsed <= 0) {
+          return 0;
+        }
+        return parsed;
+      } catch (err) {
+        return defaultMeters;
+      }
+    }
+
+    function persistCoverageMinLength(value) {
+      if (typeof sessionStorage === "undefined") return;
+      try {
+        sessionStorage.setItem(COVERAGE_MIN_STORAGE_KEY, String(value || 0));
+      } catch (err) {
+        // ignore
+      }
+    }
+
+    function renderJobInsights() {
+      const insights = state.insights || {};
+      const qualifyingCount = Number(insights.qualifying_reel_count) || 0;
+      const totalNode = document.querySelector("[data-insights-total]");
+      if (totalNode) {
+        totalNode.textContent = Utils.formatNumber(qualifyingCount, 0);
+      }
+      renderCoverageInsightCard("jobBstCoverageCard", insights.bst_coverage || {}, "BST fully active");
+      renderCoverageInsightCard("jobRlmCoverageCard", insights.rlm_coverage || {}, "RLM active");
+      renderReferenceSummaryCard("jobReferenceSummaryCard", insights.reference_summary || {});
+      renderSensitivitySummaryCard("jobSensitivitySummaryCard", insights.sensitivity_summary || {});
+    }
+
+    function renderCoverageInsightCard(cardId, payload = {}, label) {
+      const card = document.getElementById(cardId);
+      if (!card) return;
+      const body = card.querySelector(".job-insight-card__body");
+      if (!body) return;
+      const activeCount = Number(payload.active_count) || 0;
+      const inactiveCount = Number(payload.inactive_count) || 0;
+      const activePct = Number(payload.active_pct) || 0;
+      body.innerHTML = `
+        <div class="job-insight-kpi">
+          <strong>${Utils.formatNumber(activePct, 1)}%</strong>
+          <span>${Utils.escapeHtml(label || "Active")}</span>
+        </div>
+        <div class="job-insight-breakdown">
+          <div>
+            <strong>${Utils.formatNumber(activeCount, 0)}</strong>
+            <span>Active reels</span>
+          </div>
+          <div>
+            <strong>${Utils.formatNumber(inactiveCount, 0)}</strong>
+            <span>Needs attention</span>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderReferenceSummaryCard(cardId, payload = {}) {
+      const card = document.getElementById(cardId);
+      if (!card) return;
+      const body = card.querySelector(".job-insight-card__body");
+      if (!body) return;
+      const withChanges = Number(payload.reels_with_reference_changes) || 0;
+      const withoutChanges = Number(payload.reels_without_reference_changes) || 0;
+      const pctWithChanges = Number(payload.pct_with_changes) || 0;
+      body.innerHTML = `
+        <div class="job-insight-kpi">
+          <strong>${Utils.formatNumber(pctWithChanges, 1)}%</strong>
+          <span>With reference changes</span>
+        </div>
+        <div class="job-insight-breakdown">
+          <div>
+            <strong>${Utils.formatNumber(withChanges, 0)}</strong>
+            <span>With changes</span>
+          </div>
+          <div>
+            <strong>${Utils.formatNumber(withoutChanges, 0)}</strong>
+            <span>Without changes</span>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderSensitivitySummaryCard(cardId, payload = {}) {
+      const card = document.getElementById(cardId);
+      if (!card) return;
+      const body = card.querySelector(".job-insight-card__body");
+      if (!body) return;
+      const withChanges = Number(payload.reels_with_sensitivity_changes) || 0;
+      const withoutChanges = Number(payload.reels_with_same_sensitivity) || 0;
+      const pctChanged = Number(payload.pct_changed) || 0;
+      body.innerHTML = `
+        <div class="job-insight-kpi">
+          <strong>${Utils.formatNumber(pctChanged, 1)}%</strong>
+          <span>With sensitivity drift</span>
+        </div>
+        <div class="job-insight-breakdown">
+          <div>
+            <strong>${Utils.formatNumber(withChanges, 0)}</strong>
+            <span>Changed reels</span>
+          </div>
+          <div>
+            <strong>${Utils.formatNumber(withoutChanges, 0)}</strong>
+            <span>Same sensitivity</span>
+          </div>
+        </div>
+      `;
     }
 
     function renderPhaseChips(mix) {
