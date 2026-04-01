@@ -64,6 +64,10 @@ REFERENCE_CHECK_IMAGE_SIZE = (128, 128)
 REFERENCE_CHECK_CHANGE_THRESHOLD = 80.0
 REFERENCE_CHECK_MINOR_THRESHOLD = 90.0
 REFERENCE_CHECK_STRONG_THRESHOLD = 95.0
+REFERENCE_CHECK_ALIGNMENT_MAX_SHIFT_RATIO = 0.18
+REFERENCE_CHECK_OVERALL_WEIGHT = 0.5
+REFERENCE_CHECK_COLOR_WEIGHT = 0.3
+REFERENCE_CHECK_ALIGNMENT_WEIGHT = 0.2
 
 dashboard_bp = Blueprint("dashboard", __name__)
 dashboard_live_service = DashboardLiveService()
@@ -3470,7 +3474,30 @@ def _reference_check_image_array(image_src: Optional[str]) -> Optional[np.ndarra
         return None
 
 
-def _reference_check_similarity_percent(
+def _reference_check_image_payload(image_src: Optional[str]) -> Optional[Dict[str, np.ndarray]]:
+    asset_path = _resolve_reference_asset_path(image_src)
+    if not asset_path:
+        return None
+    try:
+        with Image.open(asset_path) as image:
+            rgb_image = ImageOps.exif_transpose(image).convert("RGB")
+            rgb_image = rgb_image.resize(REFERENCE_CHECK_IMAGE_SIZE, Image.Resampling.BILINEAR)
+            gray_image = ImageOps.autocontrast(rgb_image.convert("L"))
+            gray_array = np.asarray(gray_image, dtype=np.float32) / 255.0
+            rgb_array = np.asarray(rgb_image, dtype=np.float32) / 255.0
+            edge_x = np.abs(np.diff(gray_array, axis=1, append=gray_array[:, -1:]))
+            edge_y = np.abs(np.diff(gray_array, axis=0, append=gray_array[-1:, :]))
+            edge_array = np.clip(edge_x + edge_y, 0.0, 1.0)
+            return {
+                "gray": gray_array,
+                "rgb": rgb_array,
+                "edge": edge_array,
+            }
+    except (FileNotFoundError, OSError, ValueError):
+        return None
+
+
+def _reference_check_ssim_percent(
     baseline_array: Optional[np.ndarray],
     comparison_array: Optional[np.ndarray],
 ) -> Optional[float]:
@@ -3494,6 +3521,160 @@ def _reference_check_similarity_percent(
         similarity = ((2 * mu_base * mu_comp + c1) * (2 * covariance + c2)) / denominator
     similarity = max(0.0, min(1.0, similarity))
     return round(similarity * 100.0, 1)
+
+
+def _reference_check_color_match_percent(
+    baseline_rgb: Optional[np.ndarray],
+    comparison_rgb: Optional[np.ndarray],
+) -> Optional[float]:
+    if baseline_rgb is None or comparison_rgb is None:
+        return None
+    if baseline_rgb.shape != comparison_rgb.shape:
+        return None
+    mean_abs_diff = float(np.mean(np.abs(baseline_rgb.astype(np.float32) - comparison_rgb.astype(np.float32))))
+    similarity = max(0.0, min(1.0, 1.0 - mean_abs_diff / 0.65))
+    return round(similarity * 100.0, 1)
+
+
+def _reference_check_alignment_match_percent(
+    baseline_gray: Optional[np.ndarray],
+    comparison_gray: Optional[np.ndarray],
+) -> Tuple[Optional[float], Optional[Dict[str, float]]]:
+    if baseline_gray is None or comparison_gray is None:
+        return None, None
+    if baseline_gray.shape != comparison_gray.shape:
+        return None, None
+    base = baseline_gray.astype(np.float32) - float(baseline_gray.mean())
+    comp = comparison_gray.astype(np.float32) - float(comparison_gray.mean())
+    if not np.any(base) or not np.any(comp):
+        return 100.0, {"dx_px": 0.0, "dy_px": 0.0, "shift_px": 0.0}
+    correlation = np.fft.ifft2(np.fft.fft2(base) * np.conj(np.fft.fft2(comp)))
+    correlation = np.abs(correlation)
+    peak_y, peak_x = np.unravel_index(int(np.argmax(correlation)), correlation.shape)
+    height, width = correlation.shape
+    if peak_x > width // 2:
+        peak_x -= width
+    if peak_y > height // 2:
+        peak_y -= height
+    shift_px = math.sqrt(float(peak_x * peak_x + peak_y * peak_y))
+    max_shift = math.sqrt(width * width + height * height) * REFERENCE_CHECK_ALIGNMENT_MAX_SHIFT_RATIO
+    similarity = max(0.0, min(1.0, 1.0 - (shift_px / max_shift if max_shift > 0 else 0.0)))
+    return round(similarity * 100.0, 1), {
+        "dx_px": float(peak_x),
+        "dy_px": float(peak_y),
+        "shift_px": round(shift_px, 2),
+    }
+
+
+def _reference_check_difference_profile(
+    baseline_payload: Optional[Dict[str, np.ndarray]],
+    comparison_payload: Optional[Dict[str, np.ndarray]],
+) -> Dict[str, object]:
+    if not baseline_payload or not comparison_payload:
+        return {
+            "overall_match_pct": None,
+            "content_match_pct": None,
+            "color_match_pct": None,
+            "alignment_match_pct": None,
+            "likely_difference_type": "Unscored",
+            "difference_reason_key": "unscored",
+            "difference_explanation": "Reference scoring is unavailable for this comparison.",
+            "brightness_delta_pct": None,
+            "alignment_offset": None,
+        }
+    gray_base = baseline_payload.get("gray")
+    gray_comp = comparison_payload.get("gray")
+    rgb_base = baseline_payload.get("rgb")
+    rgb_comp = comparison_payload.get("rgb")
+    edge_base = baseline_payload.get("edge")
+    edge_comp = comparison_payload.get("edge")
+    gray_score = _reference_check_ssim_percent(gray_base, gray_comp)
+    edge_score = _reference_check_ssim_percent(edge_base, edge_comp)
+    if gray_score is not None and edge_score is not None:
+        content_match = round((gray_score * 0.65) + (edge_score * 0.35), 1)
+    else:
+        content_match = gray_score if gray_score is not None else edge_score
+    color_match = _reference_check_color_match_percent(rgb_base, rgb_comp)
+    alignment_match, alignment_offset = _reference_check_alignment_match_percent(gray_base, gray_comp)
+    brightness_delta_pct = None
+    if gray_base is not None and gray_comp is not None:
+        brightness_delta_pct = round(abs(float(gray_base.mean()) - float(gray_comp.mean())) * 100.0, 1)
+    overall_components: List[float] = []
+    overall_weights: List[float] = []
+    if content_match is not None:
+        overall_components.append(content_match)
+        overall_weights.append(REFERENCE_CHECK_OVERALL_WEIGHT)
+    if color_match is not None:
+        overall_components.append(color_match)
+        overall_weights.append(REFERENCE_CHECK_COLOR_WEIGHT)
+    if alignment_match is not None:
+        overall_components.append(alignment_match)
+        overall_weights.append(REFERENCE_CHECK_ALIGNMENT_WEIGHT)
+    if overall_components and overall_weights:
+        weighted_total = sum(value * weight for value, weight in zip(overall_components, overall_weights))
+        total_weight = sum(overall_weights) or 1.0
+        overall_match = round(weighted_total / total_weight, 1)
+    else:
+        overall_match = None
+    reason_key = "mixed_change"
+    reason_label = "Mixed change"
+    explanation = "Multiple difference signals are contributing to this comparison."
+    content_value = float(content_match or 0.0)
+    color_value = float(color_match or 0.0)
+    alignment_value = float(alignment_match or 0.0)
+    brightness_value = float(brightness_delta_pct or 0.0)
+    overall_value = float(overall_match or 0.0)
+    if overall_match is None:
+        reason_key = "unscored"
+        reason_label = "Unscored"
+        explanation = "Comparison scoring is unavailable for this image pair."
+    elif content_value >= 95 and color_value >= 92 and alignment_value >= 93:
+        reason_key = "strong_match"
+        reason_label = "Strong match"
+        explanation = "Content, color, and placement all remain highly consistent with the baseline."
+    elif content_value >= 88 and alignment_value >= 85 and color_value < 72:
+        if brightness_value >= 10:
+            reason_key = "exposure_shift"
+            reason_label = "Exposure / brightness shift"
+            explanation = "Printed structure remains stable, but brightness or exposure changed noticeably."
+        else:
+            reason_key = "color_shift"
+            reason_label = "Color shift"
+            explanation = "Printed content still matches strongly, but color consistency drifted from the baseline."
+    elif content_value >= 86 and alignment_value < 78:
+        reason_key = "alignment_shift"
+        reason_label = "Alignment shift"
+        explanation = "The main difference appears to be placement or registration offset rather than content."
+    elif content_value < 72 and color_value < 70:
+        reason_key = "major_change"
+        reason_label = "Major change"
+        explanation = "Both structure and color differ substantially from the baseline."
+    elif content_value < 80 and alignment_value >= 78:
+        reason_key = "content_change"
+        reason_label = "Content / template change"
+        explanation = "The printed structure changed more than color or placement, suggesting a template/content change."
+    elif overall_value >= 85 and color_value >= 80:
+        reason_key = "minor_variation"
+        reason_label = "Minor variation"
+        explanation = "Differences are present but remain modest across the main comparison signals."
+    return {
+        "overall_match_pct": overall_match,
+        "content_match_pct": content_match,
+        "color_match_pct": color_match,
+        "alignment_match_pct": alignment_match,
+        "likely_difference_type": reason_label,
+        "difference_reason_key": reason_key,
+        "difference_explanation": explanation,
+        "brightness_delta_pct": brightness_delta_pct,
+        "alignment_offset": alignment_offset,
+    }
+
+
+def _reference_check_similarity_percent(
+    baseline_array: Optional[np.ndarray],
+    comparison_array: Optional[np.ndarray],
+) -> Optional[float]:
+    return _reference_check_ssim_percent(baseline_array, comparison_array)
 
 
 def _reference_check_average(values: Iterable[Optional[float]]) -> Optional[float]:
@@ -3559,8 +3740,8 @@ def _reference_check_defect_association(rows: List[Dict[str, object]]) -> Dict[s
     strong_match_rows = [
         row
         for row in rows
-        if isinstance(row.get("match_pct"), (int, float))
-        and row["match_pct"] >= REFERENCE_CHECK_STRONG_THRESHOLD
+        if isinstance(row.get("overall_match_pct"), (int, float))
+        and row["overall_match_pct"] >= REFERENCE_CHECK_STRONG_THRESHOLD
         and isinstance(row.get("defect_count"), int)
     ]
     low_avg = _reference_check_average([row.get("defect_count") for row in low_match_rows])
@@ -3603,6 +3784,22 @@ def _reference_check_cluster_summary(rows: List[Dict[str, object]]) -> Dict[str,
         "clusters": clusters,
         "dominant_cluster": dominant,
     }
+
+
+def _reference_check_difference_type_summary(rows: List[Dict[str, object]]) -> Dict[str, object]:
+    counts: Counter[str] = Counter()
+    labels: Dict[str, str] = {}
+    for row in rows:
+        key = str(row.get("difference_reason_key") or "unscored")
+        label = str(row.get("likely_difference_type") or "Unscored")
+        counts[key] += 1
+        labels[key] = label
+    items = [
+        {"key": key, "label": labels.get(key, key.replace("_", " ").title()), "count": int(count)}
+        for key, count in counts.most_common()
+    ]
+    dominant = items[0] if items else None
+    return {"items": items, "dominant": dominant}
 
 
 def _reference_check_change_windows(rows: List[Dict[str, object]]) -> List[Dict[str, object]]:
@@ -6562,6 +6759,7 @@ def api_reference_check():
         gallery: List[Dict[str, object]] = []
         for reel in reels:
             captured_at = _iso(reel.time_end or reel.time_start)
+            total_feet = _reel_length_feet(reel)
             ordered_images = _ordered_reference_images(reel.reference_images)
             for image_index, image in enumerate(ordered_images, start=1):
                 gallery.append(
@@ -6573,6 +6771,7 @@ def api_reference_check():
                         "order_number": reel.order_number,
                         "machine_name": reel.machine.name if reel.machine else None,
                         "captured_at": captured_at,
+                        "total_feet": total_feet,
                         "image_src": (image.image_src or "").replace("\\", "/"),
                         "filename": image.filename,
                         "reference_index": image_index,
@@ -6612,29 +6811,38 @@ def api_reference_check():
         summary = None
 
         if baseline_row:
-            baseline_array = _reference_check_image_array(baseline_row.get("image_src"))
+            baseline_image_payload = _reference_check_image_payload(baseline_row.get("image_src"))
             baseline_payload = {**baseline_row, "is_baseline": True}
             enriched_gallery: List[Dict[str, object]] = []
             for row in gallery:
                 comparison = dict(row)
                 comparison["is_baseline"] = comparison.get("ref_image_id") == baseline_row.get("ref_image_id")
                 if comparison["is_baseline"]:
+                    comparison["overall_match_pct"] = 100.0
+                    comparison["content_match_pct"] = 100.0
+                    comparison["color_match_pct"] = 100.0
+                    comparison["alignment_match_pct"] = 100.0
                     comparison["match_pct"] = 100.0
                     comparison["status_band"] = "Baseline"
                     comparison["status_key"] = "baseline"
                     comparison["likely_changed"] = False
                     comparison["change_group"] = None
+                    comparison["likely_difference_type"] = "Strong match"
+                    comparison["difference_reason_key"] = "baseline"
+                    comparison["difference_explanation"] = "This reference is the active baseline for the selected job."
                 else:
-                    comparison_array = _reference_check_image_array(comparison.get("image_src"))
-                    match_pct = _reference_check_similarity_percent(baseline_array, comparison_array)
-                    cluster = _reference_check_similarity_cluster(match_pct)
-                    comparison["match_pct"] = match_pct
-                    comparison["status_band"] = _reference_check_status_band(match_pct)
-                    comparison["status_key"] = _reference_check_status_key(match_pct)
+                    comparison_image_payload = _reference_check_image_payload(comparison.get("image_src"))
+                    score_profile = _reference_check_difference_profile(baseline_image_payload, comparison_image_payload)
+                    overall_match_pct = score_profile.get("overall_match_pct")
+                    cluster = _reference_check_similarity_cluster(_to_float(overall_match_pct))
+                    comparison.update(score_profile)
+                    comparison["match_pct"] = overall_match_pct
+                    comparison["status_band"] = _reference_check_status_band(_to_float(overall_match_pct))
+                    comparison["status_key"] = _reference_check_status_key(_to_float(overall_match_pct))
                     comparison["similarity_cluster_key"] = cluster["key"]
                     comparison["similarity_cluster_label"] = cluster["label"]
                     comparison["likely_changed"] = bool(
-                        match_pct is not None and match_pct < REFERENCE_CHECK_CHANGE_THRESHOLD
+                        overall_match_pct is not None and overall_match_pct < REFERENCE_CHECK_CHANGE_THRESHOLD
                     )
                     comparison["change_group"] = None
                     comparison_rows.append(comparison)
@@ -6666,10 +6874,43 @@ def api_reference_check():
                 if not actual_images:
                     continue
                 match_values_for_reel = [
-                    _to_float(row.get("match_pct"))
+                    _to_float(row.get("overall_match_pct"))
                     for row in actual_images
-                    if _to_float(row.get("match_pct")) is not None
+                    if _to_float(row.get("overall_match_pct")) is not None
                 ]
+                content_values_for_reel = [
+                    _to_float(row.get("content_match_pct"))
+                    for row in actual_images
+                    if _to_float(row.get("content_match_pct")) is not None
+                ]
+                color_values_for_reel = [
+                    _to_float(row.get("color_match_pct"))
+                    for row in actual_images
+                    if _to_float(row.get("color_match_pct")) is not None
+                ]
+                alignment_values_for_reel = [
+                    _to_float(row.get("alignment_match_pct"))
+                    for row in actual_images
+                    if _to_float(row.get("alignment_match_pct")) is not None
+                ]
+                reason_counter: Counter[str] = Counter(str(row.get("difference_reason_key") or "unscored") for row in actual_images)
+                dominant_reason_key = reason_counter.most_common(1)[0][0] if reason_counter else "unscored"
+                dominant_reason_label = next(
+                    (
+                        str(row.get("likely_difference_type") or "Unscored")
+                        for row in actual_images
+                        if str(row.get("difference_reason_key") or "unscored") == dominant_reason_key
+                    ),
+                    "Unscored",
+                )
+                dominant_explanation = next(
+                    (
+                        str(row.get("difference_explanation") or "")
+                        for row in actual_images
+                        if str(row.get("difference_reason_key") or "unscored") == dominant_reason_key
+                    ),
+                    "",
+                )
                 total_feet = _reel_length_feet(reel)
                 bst_active_pct = 0.0
                 phase_intervals = reel.inspection_phases or []
@@ -6698,7 +6939,14 @@ def api_reference_check():
                         "order_number": reel.order_number,
                         "machine_name": reel.machine.name if reel.machine else None,
                         "captured_at": _iso(reel.time_end or reel.time_start),
+                        "overall_match_pct": round(min(match_values_for_reel), 1) if match_values_for_reel else None,
+                        "content_match_pct": _reference_check_average(content_values_for_reel),
+                        "color_match_pct": _reference_check_average(color_values_for_reel),
+                        "alignment_match_pct": _reference_check_average(alignment_values_for_reel),
                         "match_pct": round(min(match_values_for_reel), 1) if match_values_for_reel else None,
+                        "likely_difference_type": dominant_reason_label,
+                        "difference_reason_key": dominant_reason_key,
+                        "difference_explanation": dominant_explanation,
                         "bst_active_pct": bst_active_pct,
                         "total_feet": total_feet,
                         "defect_count": total_defects,
@@ -6724,6 +6972,18 @@ def api_reference_check():
                     in_change_group = False
 
             match_values = [row.get("match_pct") for row in comparison_rows if row.get("match_pct") is not None]
+            content_values = [
+                row.get("content_match_pct") for row in comparison_rows if row.get("content_match_pct") is not None
+            ]
+            color_values = [
+                row.get("color_match_pct") for row in comparison_rows if row.get("color_match_pct") is not None
+            ]
+            alignment_values = [
+                row.get("alignment_match_pct")
+                for row in comparison_rows
+                if row.get("alignment_match_pct") is not None
+            ]
+            difference_summary = _reference_check_difference_type_summary(comparison_rows)
             first_major_change_point = next((row for row in comparison_rows if row.get("likely_changed")), None)
             lowest_match_references = sorted(
                 [row for row in comparison_rows if row.get("match_pct") is not None],
@@ -6761,16 +7021,30 @@ def api_reference_check():
             summary = {
                 "compared_references": len(comparison_rows),
                 "average_match_pct": _reference_check_average(match_values),
+                "average_content_match_pct": _reference_check_average(content_values),
+                "average_color_match_pct": _reference_check_average(color_values),
+                "average_alignment_match_pct": _reference_check_average(alignment_values),
                 "min_match_pct": round(min(match_values), 1) if match_values else None,
                 "max_match_pct": round(max(match_values), 1) if match_values else None,
                 "below_threshold_count": sum(1 for row in comparison_rows if row.get("likely_changed")),
                 "likely_change_event_count": change_group,
+                "difference_type_summary": difference_summary,
+                "color_shift_count": sum(
+                    1 for row in comparison_rows if row.get("difference_reason_key") in {"color_shift", "exposure_shift"}
+                ),
+                "content_change_count": sum(
+                    1 for row in comparison_rows if row.get("difference_reason_key") in {"content_change", "major_change"}
+                ),
+                "alignment_shift_count": sum(
+                    1 for row in comparison_rows if row.get("difference_reason_key") == "alignment_shift"
+                ),
             }
         else:
             cluster_summary = {"clusters": [], "dominant_cluster": None}
             change_windows = []
             largest_drop = None
             reel_comparison_rows = []
+            difference_summary = {"items": [], "dominant": None}
 
         job_context = {
             "job_name": resolved_job,
@@ -6785,6 +7059,11 @@ def api_reference_check():
                 "reel_code": row.get("reel_code"),
                 "captured_at": row.get("captured_at"),
                 "match_pct": row.get("match_pct"),
+                "overall_match_pct": row.get("overall_match_pct"),
+                "content_match_pct": row.get("content_match_pct"),
+                "color_match_pct": row.get("color_match_pct"),
+                "alignment_match_pct": row.get("alignment_match_pct"),
+                "likely_difference_type": row.get("likely_difference_type"),
                 "status_key": row.get("status_key"),
                 "likely_changed": row.get("likely_changed"),
             }
@@ -6821,6 +7100,7 @@ def api_reference_check():
                     "unstable_periods": unstable_periods,
                     "defect_association": defect_association,
                     "cluster_summary": cluster_summary,
+                    "difference_type_summary": difference_summary,
                     "change_windows": change_windows,
                     "largest_match_drop": largest_drop,
                 },

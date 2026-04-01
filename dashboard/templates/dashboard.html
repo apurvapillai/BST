@@ -1061,6 +1061,18 @@
           </div>
         </section>
 
+        <div class="reference-check-toolbar">
+          <div class="job-coverage-filter">
+            <label for="referenceCheckMinReelLengthInput">Min ft.</label>
+            <input type="number" id="referenceCheckMinReelLengthInput" min="0" step="10" placeholder="4000">
+            <button type="button" id="referenceCheckMinReelLengthApply">Apply</button>
+          </div>
+          <div class="job-coverage-chip hidden" id="referenceCheckMinLengthChip">
+            <span></span>
+            <button type="button" id="referenceCheckMinLengthClear" aria-label="Clear min reel length filter">&times;</button>
+          </div>
+        </div>
+
         <div class="reference-check-state hidden" id="referenceCheckLoading" role="status" aria-live="polite">
           Loading reference images…
         </div>
@@ -1200,13 +1212,14 @@
               <h3 id="referenceCheckModalTitle">Reference Preview</h3>
               <p id="referenceCheckModalSubtitle"></p>
               <dl class="reference-check-modal__meta" id="referenceCheckModalMeta"></dl>
+              <div class="reference-check-modal__score-grid" id="referenceCheckModalScores"></div>
+              <p class="reference-check-modal__explanation" id="referenceCheckModalExplanation"></p>
               <div class="reference-check-modal__analysis hidden" id="referenceCheckModalAnalysis">
                 <div class="reference-check-modal__analysis-header">
                   <div>
                     <strong>Change Analysis</strong>
                     <small>Grouped difference regions are highlighted directly on both images.</small>
                   </div>
-                  <button type="button" class="button-secondary" id="referenceCheckModalOverlayToggle">Hide Highlights</button>
                 </div>
                 <div class="reference-check-modal__analysis-grid">
                   <div class="reference-check-modal__heatmap">

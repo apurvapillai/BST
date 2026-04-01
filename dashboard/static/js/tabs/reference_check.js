@@ -1,4 +1,8 @@
   const ReferenceCheckTab = (() => {
+    const FEET_TO_METERS = 0.3048;
+    const METERS_TO_FEET = 3.28084;
+    const DEFAULT_MIN_REEL_LENGTH_FEET = 4000;
+    const MIN_LENGTH_STORAGE_KEY = "referenceCheck.minReelLength";
     let initialized = false;
     let active = false;
     let requestToken = 0;
@@ -6,6 +10,7 @@
     let errorMessage = "";
     let currentResolvedJob = "";
     let pendingAutoSelectedJob = "";
+    let minReelLengthFilter = loadMinReelLength();
     const baselineByJob = new Map();
 
     const state = {
@@ -29,6 +34,10 @@
       elements.empty = Utils.qs("#referenceCheckEmpty");
       elements.content = Utils.qs("#referenceCheckContent");
       elements.jobMeta = Utils.qs("#referenceCheckJobMeta");
+      elements.minLengthInput = Utils.qs("#referenceCheckMinReelLengthInput");
+      elements.minLengthApply = Utils.qs("#referenceCheckMinReelLengthApply");
+      elements.minLengthChip = Utils.qs("#referenceCheckMinLengthChip");
+      elements.minLengthClear = Utils.qs("#referenceCheckMinLengthClear");
       elements.galleryMeta = Utils.qs("#referenceCheckGalleryMeta");
       elements.gallery = Utils.qs("#referenceCheckGallery");
       elements.baselineSection = Utils.qs("#referenceCheckBaselineSection");
@@ -57,17 +66,19 @@
       elements.modalAnalysis = Utils.qs("#referenceCheckModalAnalysis");
       elements.modalSummaryText = Utils.qs("#referenceCheckModalSummaryText");
       elements.modalSummaryList = Utils.qs("#referenceCheckModalSummaryList");
-      elements.modalOverlayToggle = Utils.qs("#referenceCheckModalOverlayToggle");
       elements.modalPrev = Utils.qs("#referenceCheckModalPrev");
       elements.modalNext = Utils.qs("#referenceCheckModalNext");
       elements.modalImageCounter = Utils.qs("#referenceCheckModalImageCounter");
       elements.modalTitle = Utils.qs("#referenceCheckModalTitle");
       elements.modalSubtitle = Utils.qs("#referenceCheckModalSubtitle");
       elements.modalMeta = Utils.qs("#referenceCheckModalMeta");
+      elements.modalScores = Utils.qs("#referenceCheckModalScores");
+      elements.modalExplanation = Utils.qs("#referenceCheckModalExplanation");
 
       if (elements.gallery) {
         elements.gallery.addEventListener("click", handleGalleryClick);
       }
+      setupMinReelLengthControls();
 
       if (elements.resultsBody) {
         elements.resultsBody.addEventListener("click", handleResultsClick);
@@ -84,12 +95,6 @@
           if (state.modalRefImageId != null) {
             applyBaseline(state.modalRefImageId);
           }
-        });
-      }
-      if (elements.modalOverlayToggle) {
-        elements.modalOverlayToggle.addEventListener("click", () => {
-          state.modalOverlaysVisible = !state.modalOverlaysVisible;
-          updateOverlayVisibility();
         });
       }
       if (elements.modalPrev) {
@@ -152,6 +157,9 @@
           pendingAutoSelectedJob = "";
         }
         const extra = {};
+        if (minReelLengthFilter > 0) {
+          extra.min_reel_length = minReelLengthFilter;
+        }
         if (requestedJob && baselineByJob.has(requestedJob)) {
           extra.baseline_ref_image_id = baselineByJob.get(requestedJob);
         }
@@ -195,6 +203,84 @@
       pendingAutoSelectedJob = resolvedJob;
       if (Filters && typeof Filters.set === "function") {
         Filters.set("job", resolvedJob, { emit: true, updateUrl: true });
+      }
+    }
+
+    function loadMinReelLength() {
+      const defaultMeters = DEFAULT_MIN_REEL_LENGTH_FEET * FEET_TO_METERS;
+      if (typeof sessionStorage === "undefined") return defaultMeters;
+      try {
+        const raw = sessionStorage.getItem(MIN_LENGTH_STORAGE_KEY);
+        if (raw === null || raw === undefined) return defaultMeters;
+        const parsed = Number(raw);
+        if (!Number.isFinite(parsed)) return defaultMeters;
+        if (parsed <= 0) return 0;
+        return parsed;
+      } catch (err) {
+        return defaultMeters;
+      }
+    }
+
+    function persistMinReelLength(value) {
+      if (typeof sessionStorage === "undefined") return;
+      try {
+        sessionStorage.setItem(MIN_LENGTH_STORAGE_KEY, String(value || 0));
+      } catch (err) {
+        // ignore storage failures
+      }
+    }
+
+    function setupMinReelLengthControls() {
+      if (elements.minLengthInput) {
+        const feetValue = minReelLengthFilter ? minReelLengthFilter * METERS_TO_FEET : 0;
+        elements.minLengthInput.value = feetValue ? Math.round(feetValue) : "";
+        elements.minLengthInput.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            applyMinReelLength(elements.minLengthInput.value);
+          }
+        });
+      }
+      if (elements.minLengthApply) {
+        elements.minLengthApply.addEventListener("click", () =>
+          applyMinReelLength(elements.minLengthInput ? elements.minLengthInput.value : "")
+        );
+      }
+      if (elements.minLengthClear) {
+        elements.minLengthClear.addEventListener("click", () => applyMinReelLength(""));
+      }
+      updateMinLengthChip();
+    }
+
+    function applyMinReelLength(rawValue) {
+      const parsed = Number(rawValue);
+      const nextValue = Number.isFinite(parsed) && parsed > 0 ? parsed * FEET_TO_METERS : 0;
+      if (nextValue === minReelLengthFilter) {
+        updateMinLengthChip();
+        return;
+      }
+      minReelLengthFilter = nextValue;
+      persistMinReelLength(minReelLengthFilter);
+      if (elements.minLengthInput) {
+        const feetValue = minReelLengthFilter ? minReelLengthFilter * METERS_TO_FEET : 0;
+        elements.minLengthInput.value = feetValue ? Math.round(feetValue) : "";
+      }
+      updateMinLengthChip();
+      load();
+    }
+
+    function updateMinLengthChip() {
+      const chip = elements.minLengthChip;
+      const text = chip ? chip.querySelector("span") : null;
+      if (!chip) return;
+      if (minReelLengthFilter > 0) {
+        chip.classList.remove("hidden");
+        if (text) {
+          text.textContent = `Min reel length ≥ ${Utils.formatMeters(minReelLengthFilter)}`;
+        }
+      } else {
+        chip.classList.add("hidden");
+        if (text) text.textContent = "";
       }
     }
 
@@ -259,45 +345,100 @@
     function renderGallery() {
       if (!elements.gallery || !payload) return;
       const gallery = Array.isArray(payload.gallery) ? payload.gallery : [];
-      elements.gallery.innerHTML = gallery
+      const grouped = [];
+      const byReel = new Map();
+      gallery.forEach((item) => {
+        const key = Number(item.reel_id) || `ref-${Number(item.ref_image_id) || Math.random()}`;
+        if (!byReel.has(key)) {
+          byReel.set(key, []);
+          grouped.push(byReel.get(key));
+        }
+        byReel.get(key).push(item);
+      });
+      elements.gallery.innerHTML = grouped
+        .map((items) => renderGalleryGroupCard(items))
+        .join("");
+    }
+
+    function renderGalleryGroupCard(items) {
+      const group = Array.isArray(items) ? items.slice() : [];
+      if (!group.length) return "";
+      group.sort((a, b) => compareNumber(a.reference_index, b.reference_index) || compareNumber(a.ref_image_id, b.ref_image_id));
+      const primary = group[0];
+      const isBaselineGroup = group.some((item) => item.is_baseline);
+      const baselineItem = group.find((item) => item.is_baseline) || null;
+      const hero = baselineItem || primary;
+      const baselineBadge = isBaselineGroup ? '<span class="reference-check-badge">Baseline Reel</span>' : "";
+      const reasonSummary = summarizeDifferenceTypes(group);
+      const overallValues = group
+        .map((item) => Number(item.overall_match_pct))
+        .filter((value) => Number.isFinite(value));
+      const contentValues = group
+        .map((item) => Number(item.content_match_pct))
+        .filter((value) => Number.isFinite(value));
+      const thumbs = group
         .map((item) => {
-          const thumbnail = buildThumbnail(item, "reference-check-card__thumb");
           const matchHtml =
-            item.match_pct !== undefined && item.match_pct !== null
-              ? `<div class="reference-check-card__metric">${formatPercent(item.match_pct)}</div>`
+            item.overall_match_pct !== undefined && item.overall_match_pct !== null
+              ? `<span class="reference-check-gallery-thumb__match">${formatPercent(item.overall_match_pct)}</span>`
               : "";
-          const statusHtml = item.status_band
-            ? `<span class="reference-check-status reference-check-status--${Utils.escapeHtml(item.status_key || "unscored")}">${Utils.escapeHtml(item.status_band)}</span>`
-            : "";
-          const baselineHtml = item.is_baseline
-            ? '<span class="reference-check-badge">Baseline</span>'
+          const baselineThumbBadge = item.is_baseline
+            ? '<span class="reference-check-gallery-thumb__badge">Baseline</span>'
             : "";
           return `
-            <article class="reference-check-card${item.is_baseline ? " is-baseline" : ""}" data-ref-image-id="${Number(item.ref_image_id) || ""}">
-              <div class="reference-check-card__media">
-                ${thumbnail}
-              </div>
-              <div class="reference-check-card__body">
-                <div class="reference-check-card__title-row">
-                  <div>
-                    <strong>${Utils.escapeHtml(item.reel_code || item.filename || "Reference")}</strong>
-                    <p>${Utils.escapeHtml(formatTime(item.captured_at, "Timestamp unavailable"))}</p>
-                  </div>
-                  ${baselineHtml}
-                </div>
-                <div class="reference-check-card__meta">
-                  <span>${Utils.escapeHtml(item.machine_name || "Machine unavailable")}</span>
-                  <span>${Utils.escapeHtml(item.order_number || "Order unavailable")}</span>
-                </div>
-                <div class="reference-check-card__footer">
-                  ${matchHtml}
-                  ${statusHtml}
-                </div>
-              </div>
-            </article>
+            <button
+              type="button"
+              class="reference-check-gallery-thumb${item.is_baseline ? " is-baseline" : ""}"
+              data-ref-image-id="${Number(item.ref_image_id) || ""}"
+              title="${Utils.escapeHtml(`Ref ${item.reference_index || 1} · ${formatTime(item.captured_at, "Timestamp unavailable")}`)}"
+            >
+              <span class="reference-check-gallery-thumb__media">
+                ${buildThumbnail(item, "reference-check-gallery-thumb__image")}
+                ${baselineThumbBadge}
+              </span>
+              <span class="reference-check-gallery-thumb__meta">
+                <span>Ref ${Utils.formatNumber(item.reference_index || 1)}</span>
+                ${matchHtml}
+              </span>
+            </button>
           `;
         })
         .join("");
+
+      return `
+        <article class="reference-check-card${isBaselineGroup ? " is-baseline" : ""}">
+          <div class="reference-check-card__media reference-check-card__media--grouped">
+            ${buildThumbnail(hero, "reference-check-card__thumb")}
+          </div>
+          <div class="reference-check-card__body">
+            <div class="reference-check-card__title-row">
+              <div>
+                <strong>${Utils.escapeHtml(primary.reel_code || primary.filename || "Reference")}</strong>
+                <p>${Utils.escapeHtml(formatTime(primary.captured_at, "Timestamp unavailable"))}</p>
+              </div>
+              ${baselineBadge}
+            </div>
+            <div class="reference-check-card__meta">
+              <span>${Utils.escapeHtml(primary.machine_name || "Machine unavailable")}</span>
+              <span>${formatFeet(primary.total_feet)}</span>
+            </div>
+            <div class="reference-check-card__footer">
+              <div class="reference-check-card__metric-group">
+                <div class="reference-check-card__metric">${overallValues.length ? formatPercent(Math.min(...overallValues)) : "—"}</div>
+                <span class="reference-check-muted">Overall</span>
+              </div>
+              <div class="reference-check-card__metric-group">
+                <div class="reference-check-card__metric">${contentValues.length ? formatPercent(Math.max(...contentValues)) : "—"}</div>
+                <span class="reference-check-muted">Content</span>
+              </div>
+              <span class="reference-check-status reference-check-status--${Utils.escapeHtml(reasonSummary.key)}">${Utils.escapeHtml(reasonSummary.label)}</span>
+            </div>
+            <div class="reference-check-gallery-group">
+              ${thumbs}
+            </div>
+          </div>
+        </article>
+      `;
     }
 
     function renderResults() {
@@ -353,6 +494,9 @@
       const baseline = payload.baseline;
       const summary = payload.summary || {};
       const thumb = buildThumbnail(baseline, "reference-check-baseline__image");
+      const dominantDifference = summary.difference_type_summary && summary.difference_type_summary.dominant
+        ? summary.difference_type_summary.dominant.label
+        : "Strong match";
       elements.baselineSummary.innerHTML = `
         <div class="reference-check-baseline__media">
           ${thumb}
@@ -363,26 +507,25 @@
               <strong>${Utils.escapeHtml(baseline.reel_code || baseline.filename || "Baseline reference")}</strong>
               <p>${Utils.escapeHtml(formatTime(baseline.captured_at, "Timestamp unavailable"))}</p>
             </div>
-            <button type="button" class="button-secondary" data-ref-image-id="${Number(baseline.ref_image_id) || ""}" data-ref-action="preview">Open Preview</button>
           </div>
           <div class="reference-check-baseline__meta">
             <span>Machine: ${Utils.escapeHtml(baseline.machine_name || "—")}</span>
             <span>Order: ${Utils.escapeHtml(baseline.order_number || "—")}</span>
+            <span>Dominant Drift: ${Utils.escapeHtml(dominantDifference)}</span>
           </div>
           <div class="reference-check-kpis">
             ${renderKpi("Compared", Utils.formatNumber(summary.compared_references || 0))}
-            ${renderKpi("Average Match", formatPercent(summary.average_match_pct))}
-            ${renderKpi("Min Match", formatPercent(summary.min_match_pct))}
-            ${renderKpi("Max Match", formatPercent(summary.max_match_pct))}
-            ${renderKpi("Below Threshold", Utils.formatNumber(summary.below_threshold_count || 0))}
-            ${renderKpi("Likely Change Groups", Utils.formatNumber(summary.likely_change_event_count || 0))}
+            ${renderKpi("Avg Overall", formatPercent(summary.average_match_pct))}
+            ${renderKpi("Avg Content", formatPercent(summary.average_content_match_pct))}
+            ${renderKpi("Avg Color", formatPercent(summary.average_color_match_pct))}
+            ${renderKpi("Avg Align", formatPercent(summary.average_alignment_match_pct))}
+            ${renderKpi("Color Shifts", Utils.formatNumber(summary.color_shift_count || 0))}
+            ${renderKpi("Content Changes", Utils.formatNumber(summary.content_change_count || 0))}
+            ${renderKpi("Alignment Shifts", Utils.formatNumber(summary.alignment_shift_count || 0))}
+            ${renderKpi("Change Groups", Utils.formatNumber(summary.likely_change_event_count || 0))}
           </div>
         </div>
       `;
-      const previewButton = elements.baselineSummary.querySelector('[data-ref-action="preview"]');
-      if (previewButton) {
-        previewButton.addEventListener("click", () => openModal(Number(baseline.ref_image_id)));
-      }
     }
 
     function renderResultsTable(rows, defectTypes) {
@@ -399,7 +542,11 @@
             <th>Reel</th>
             <th>Timestamp</th>
             <th>Images</th>
-            <th>Match %</th>
+            <th>Overall %</th>
+            <th>Content %</th>
+            <th>Color %</th>
+            <th>Align %</th>
+            <th>Likely Difference</th>
             <th>BST Active %</th>
             <th>Total Feet</th>
             <th>Defects</th>
@@ -412,7 +559,7 @@
       if (!reelRows.length) {
         elements.resultsBody.innerHTML = `
           <tr>
-            <td colspan="${9 + defectColumns.length}" class="reference-check-table__empty">No non-baseline references were available for comparison.</td>
+            <td colspan="${13 + defectColumns.length}" class="reference-check-table__empty">No non-baseline references were available for comparison.</td>
           </tr>
         `;
         return;
@@ -431,7 +578,11 @@
               <td>${Utils.escapeHtml(item.reel_code || "—")}</td>
               <td>${Utils.escapeHtml(formatTime(item.captured_at, "—"))}</td>
               <td>${iconMarkup}</td>
-              <td>${formatPercent(item.match_pct)}</td>
+              <td>${formatPercent(item.overall_match_pct)}</td>
+              <td>${formatPercent(item.content_match_pct)}</td>
+              <td>${formatPercent(item.color_match_pct)}</td>
+              <td>${formatPercent(item.alignment_match_pct)}</td>
+              <td><span class="reference-check-status reference-check-status--${Utils.escapeHtml(item.difference_reason_key || "unscored")}">${Utils.escapeHtml(item.likely_difference_type || "—")}</span></td>
               <td>${formatPercent(item.bst_active_pct)}</td>
               <td>${formatFeet(item.total_feet)}</td>
               <td>${Utils.formatNumber(item.defect_count || 0)}</td>
@@ -593,8 +744,11 @@
       const unstablePeriods = Array.isArray(insights.unstable_periods) ? insights.unstable_periods : [];
       const defectAssociation = insights.defect_association || {};
       const clusterSummary = insights.cluster_summary || {};
+      const differenceSummary = insights.difference_type_summary || {};
       const clusters = Array.isArray(clusterSummary.clusters) ? clusterSummary.clusters : [];
       const dominantCluster = clusterSummary.dominant_cluster || null;
+      const differenceItems = Array.isArray(differenceSummary.items) ? differenceSummary.items : [];
+      const dominantDifference = differenceSummary.dominant || null;
       const changeWindows = Array.isArray(insights.change_windows) ? insights.change_windows : [];
       const largestDrop = insights.largest_match_drop || null;
 
@@ -634,11 +788,21 @@
             )
             .join("")
         : "<li>No sustained low-match windows detected.</li>";
+      const differenceMarkup = differenceItems.length
+        ? differenceItems
+            .map((entry) => `<li>${Utils.escapeHtml(entry.label || "Difference")} · ${Utils.formatNumber(entry.count || 0)} refs</li>`)
+            .join("")
+        : "<li>No difference typing available.</li>";
 
       elements.insights.innerHTML = `
         <article class="reference-check-insight-card">
           <h4>First Likely Major Change</h4>
           <p>${firstChange ? `${Utils.escapeHtml(firstChange.reel_code || "Reference")} at ${Utils.escapeHtml(formatTime(firstChange.captured_at, "—"))}` : "No major change point detected."}</p>
+        </article>
+        <article class="reference-check-insight-card">
+          <h4>Difference Types</h4>
+          <p>${dominantDifference ? `Most drift looks like ${Utils.escapeHtml(String(dominantDifference.label || "").toLowerCase())}.` : "No dominant difference type yet."}</p>
+          <ul class="reference-check-insight-list">${differenceMarkup}</ul>
         </article>
         <article class="reference-check-insight-card">
           <h4>Similarity Clusters</h4>
@@ -794,8 +958,23 @@
           metaRow("Reel", item.reel_code || "—"),
           metaRow("Timestamp", formatTime(item.captured_at, "—")),
           metaRow("Machine", item.machine_name || "—"),
-          metaRow("Match", formatPercent(item.match_pct)),
+          metaRow("Likely Difference", item.likely_difference_type || "—"),
         ].join("");
+      }
+      if (elements.modalScores) {
+        elements.modalScores.innerHTML = comparisonMode
+          ? [
+              renderScoreTile("Overall", item.overall_match_pct),
+              renderScoreTile("Content", item.content_match_pct),
+              renderScoreTile("Color", item.color_match_pct),
+              renderScoreTile("Alignment", item.alignment_match_pct),
+            ].join("")
+          : "";
+      }
+      if (elements.modalExplanation) {
+        elements.modalExplanation.textContent = comparisonMode
+          ? (item.difference_explanation || "")
+          : "Preview this reference image, then set it as the baseline to unlock content, color, and alignment scoring.";
       }
       if (elements.modalBaseline) {
         elements.modalBaseline.disabled = Boolean(item.is_baseline);
@@ -1226,14 +1405,10 @@
     }
 
     function updateOverlayVisibility() {
-      const visible = state.modalOverlaysVisible;
       [elements.modalBaselineOverlay, elements.modalCompareOverlay].forEach((canvas) => {
         if (!canvas) return;
-        canvas.classList.toggle("hidden", !visible);
+        canvas.classList.remove("hidden");
       });
-      if (elements.modalOverlayToggle) {
-        elements.modalOverlayToggle.textContent = visible ? "Hide Highlights" : "Show Highlights";
-      }
     }
 
     function isComparisonMode(item) {
@@ -1301,6 +1476,15 @@
       `;
     }
 
+    function renderScoreTile(label, value) {
+      return `
+        <div class="reference-check-kpi reference-check-kpi--compact">
+          <span>${Utils.escapeHtml(label)}</span>
+          <strong>${Utils.escapeHtml(formatPercent(value))}</strong>
+        </div>
+      `;
+    }
+
     function metaRow(label, value) {
       return `
         <div>
@@ -1328,6 +1512,25 @@
     function formatNumberOrDash(value) {
       if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
       return Utils.formatNumber(value, 1);
+    }
+
+    function summarizeDifferenceTypes(rows) {
+      const counts = new Map();
+      const labels = new Map();
+      (Array.isArray(rows) ? rows : []).forEach((row) => {
+        const key = String(row.difference_reason_key || "unscored");
+        counts.set(key, (counts.get(key) || 0) + 1);
+        labels.set(key, row.likely_difference_type || "Unscored");
+      });
+      let bestKey = "unscored";
+      let bestCount = -1;
+      counts.forEach((count, key) => {
+        if (count > bestCount) {
+          bestKey = key;
+          bestCount = count;
+        }
+      });
+      return { key: bestKey, label: labels.get(bestKey) || "Unscored" };
     }
 
     return {
