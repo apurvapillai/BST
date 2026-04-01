@@ -30,6 +30,7 @@
       elements.baselineSection = Utils.qs("#referenceCheckBaselineSection");
       elements.baselineSummary = Utils.qs("#referenceCheckBaselineSummary");
       elements.resultsSection = Utils.qs("#referenceCheckResultsSection");
+      elements.resultsTableSection = Utils.qs("#referenceCheckResultsTableSection");
       elements.resultsBody = Utils.qs("#referenceCheckResultsBody");
       elements.sortSelect = Utils.qs("#referenceCheckSortSelect");
       elements.chart = Utils.qs("#referenceCheckTrendChart");
@@ -89,11 +90,18 @@
           closeModal();
         }
       });
+      window.addEventListener("resize", () => {
+        if (!active) return;
+        resizeTrendChart();
+      });
     }
 
     function activate() {
       active = true;
       load();
+      window.requestAnimationFrame(() => {
+        resizeTrendChart();
+      });
     }
 
     function deactivate() {
@@ -275,6 +283,9 @@
       if (elements.resultsSection) {
         elements.resultsSection.classList.toggle("hidden", !hasBaseline);
       }
+      if (elements.resultsTableSection) {
+        elements.resultsTableSection.classList.toggle("hidden", !hasBaseline);
+      }
       if (elements.insightsSection) {
         elements.insightsSection.classList.toggle("hidden", !hasBaseline);
       }
@@ -379,7 +390,7 @@
     function renderTrendChart(comparisons) {
       if (!elements.chart) return;
       if (!comparisons.length || !window.Plotly) {
-        elements.chart.innerHTML = '<div class="reference-check-empty-inline">Select a baseline to plot the reference trend.</div>';
+        elements.chart.innerHTML = "";
         return;
       }
       const x = comparisons.map((item) => formatTime(item.captured_at, item.reel_code || "Reference"));
@@ -392,17 +403,37 @@
       });
       const layout = typeof withResponsiveLayout === "function"
         ? withResponsiveLayout({
-            margin: { l: 44, r: 18, t: 16, b: 64 },
-            xaxis: { title: "Reference sequence", tickangle: -30 },
-            yaxis: { title: "Match %", range: [0, 100] },
+            autosize: true,
+            margin: { l: 44, r: 18, t: 20, b: 96 },
+            xaxis: {
+              title: "Timestamp",
+              tickangle: -45,
+              automargin: true,
+              nticks: 10,
+            },
+            yaxis: {
+              title: "Match %",
+              range: [0, 100],
+              automargin: true,
+            },
           })
         : {
-            margin: { l: 44, r: 18, t: 16, b: 64 },
-            xaxis: { title: "Reference sequence", tickangle: -30 },
-            yaxis: { title: "Match %", range: [0, 100] },
+            autosize: true,
+            margin: { l: 44, r: 18, t: 20, b: 96 },
+            xaxis: {
+              title: "Timestamp",
+              tickangle: -45,
+              automargin: true,
+              nticks: 10,
+            },
+            yaxis: {
+              title: "Match %",
+              range: [0, 100],
+              automargin: true,
+            },
           };
       const config = typeof plotlyConfig === "function"
-        ? plotlyConfig({ displayModeBar: false })
+        ? plotlyConfig({ responsive: true, displayModeBar: false })
         : { responsive: true, displayModeBar: false };
       Plotly.react(
         elements.chart,
@@ -422,6 +453,19 @@
         layout,
         config
       );
+      window.requestAnimationFrame(() => {
+        resizeTrendChart();
+      });
+    }
+
+    function resizeTrendChart() {
+      if (!elements.chart || !window.Plotly) return;
+      if (!elements.chart.offsetWidth) return;
+      try {
+        window.Plotly.Plots.resize(elements.chart);
+      } catch (err) {
+        // ignore transient resize errors while the tab is mounting
+      }
     }
 
     function renderInsights() {

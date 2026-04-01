@@ -1070,17 +1070,6 @@
         </div>
 
         <div class="reference-check-shell hidden" id="referenceCheckContent">
-          <section class="reference-check-section">
-            <div class="reference-check-section__header">
-              <div>
-                <p class="kpi-section__title">Reference Gallery</p>
-                <small>Click a reference to inspect it and set the active baseline image for job-wide comparison.</small>
-              </div>
-              <div class="reference-check-gallery-meta" id="referenceCheckGalleryMeta"></div>
-            </div>
-            <div class="reference-check-gallery" id="referenceCheckGallery"></div>
-          </section>
-
           <section class="reference-check-section hidden" id="referenceCheckBaselineSection">
             <div class="reference-check-section__header">
               <div>
@@ -1094,42 +1083,54 @@
           <section class="reference-check-section hidden" id="referenceCheckResultsSection">
             <div class="reference-check-section__header">
               <div>
-                <p class="kpi-section__title">Comparison Results</p>
-                <small>Each non-baseline reference image scored against the selected baseline.</small>
-              </div>
-              <div class="reference-check-table-tools">
-                <label for="referenceCheckSortSelect">Sort</label>
-                <select id="referenceCheckSortSelect">
-                  <option value="captured_at_desc">Newest first</option>
-                  <option value="captured_at_asc">Oldest first</option>
-                  <option value="match_pct_asc">Lowest match %</option>
-                  <option value="match_pct_desc">Highest match %</option>
-                  <option value="defect_count_desc">Most defects</option>
-                </select>
+                <p class="kpi-section__title">Reference Match Trend</p>
+                <small>Timestamp-based match trend for every non-baseline reference image compared against the selected baseline.</small>
               </div>
             </div>
             <div class="reference-check-results-grid">
               <div class="reference-check-chart-card">
                 <div class="reference-check-chart" id="referenceCheckTrendChart"></div>
               </div>
-              <div class="reference-check-table-card">
-                <div class="reference-check-table-wrapper">
-                  <table class="reference-check-table">
-                    <thead>
-                      <tr>
-                        <th>Reel</th>
-                        <th>Timestamp</th>
-                        <th>Thumbnail</th>
-                        <th>Match %</th>
-                        <th>Status</th>
-                        <th>Change</th>
-                        <th>Defects</th>
-                        <th>Top Defect</th>
-                      </tr>
-                    </thead>
-                    <tbody id="referenceCheckResultsBody"></tbody>
-                  </table>
-                </div>
+            </div>
+          </section>
+
+          <section class="reference-check-section">
+            <div class="reference-check-section__header">
+              <div>
+                <p class="kpi-section__title">Reference Gallery</p>
+                <small>Click a reference to inspect it and set the active baseline image for job-wide comparison.</small>
+              </div>
+              <div class="reference-check-gallery-meta" id="referenceCheckGalleryMeta"></div>
+            </div>
+            <div class="reference-check-gallery-scroller">
+              <div class="reference-check-gallery" id="referenceCheckGallery"></div>
+            </div>
+          </section>
+
+          <section class="reference-check-section hidden" id="referenceCheckResultsTableSection">
+            <div class="reference-check-section__header">
+              <div>
+                <p class="kpi-section__title">Comparison Results Table</p>
+                <small>Detailed comparison rows for each non-baseline reference image.</small>
+              </div>
+            </div>
+            <div class="reference-check-table-card">
+              <div class="reference-check-table-wrapper">
+                <table class="reference-check-table">
+                  <thead>
+                    <tr>
+                      <th>Reel</th>
+                      <th>Timestamp</th>
+                      <th>Thumbnail</th>
+                      <th>Match %</th>
+                      <th>Status</th>
+                      <th>Change</th>
+                      <th>Defects</th>
+                      <th>Top Defect</th>
+                    </tr>
+                  </thead>
+                  <tbody id="referenceCheckResultsBody"></tbody>
+                </table>
               </div>
             </div>
           </section>
