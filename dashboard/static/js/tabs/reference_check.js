@@ -890,7 +890,7 @@
         const workCanvas = document.createElement("canvas");
         workCanvas.width = size;
         workCanvas.height = size;
-        const workCtx = workCanvas.getContext("2d");
+        const workCtx = workCanvas.getContext("2d", { willReadFrequently: true });
         if (!workCtx) {
           showDiffHeatmapUnavailable();
           return;
@@ -1162,23 +1162,26 @@
 
     function renderOverlayRegions(canvas, image, drawBox, regions, width, height) {
       if (!canvas || !image) return;
-      const rect = image.getBoundingClientRect();
-      const displayWidth = image.clientWidth || rect.width || image.naturalWidth || 1;
-      const displayHeight = image.clientHeight || rect.height || image.naturalHeight || 1;
+      const stage = image.closest(".reference-check-modal__stage");
+      const frame = getContainedImageFrame(stage, image);
+      if (!frame) {
+        clearOverlayCanvas(canvas);
+        return;
+      }
       const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.round(displayWidth * dpr);
-      canvas.height = Math.round(displayHeight * dpr);
-      canvas.style.width = `${displayWidth}px`;
-      canvas.style.height = `${displayHeight}px`;
+      canvas.width = Math.round(frame.stageWidth * dpr);
+      canvas.height = Math.round(frame.stageHeight * dpr);
+      canvas.style.width = `${frame.stageWidth}px`;
+      canvas.style.height = `${frame.stageHeight}px`;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, displayWidth, displayHeight);
-      const scaleX = displayWidth / drawBox.width;
-      const scaleY = displayHeight / drawBox.height;
+      ctx.clearRect(0, 0, frame.stageWidth, frame.stageHeight);
+      const scaleX = frame.displayWidth / drawBox.width;
+      const scaleY = frame.displayHeight / drawBox.height;
       regions.forEach((region, index) => {
-        const x = (region.x - drawBox.x) * scaleX;
-        const y = (region.y - drawBox.y) * scaleY;
+        const x = frame.offsetX + (region.x - drawBox.x) * scaleX;
+        const y = frame.offsetY + (region.y - drawBox.y) * scaleY;
         const boxWidth = region.width * scaleX;
         const boxHeight = region.height * scaleY;
         ctx.fillStyle = "rgba(239, 68, 68, 0.18)";
@@ -1192,6 +1195,26 @@
         ctx.font = "12px sans-serif";
         ctx.fillText(String(index + 1), x + 12, Math.max(14, y - 10));
       });
+    }
+
+    function getContainedImageFrame(stage, image) {
+      if (!stage || !image) return null;
+      const stageWidth = stage.clientWidth || stage.getBoundingClientRect().width || 0;
+      const stageHeight = stage.clientHeight || stage.getBoundingClientRect().height || 0;
+      const naturalWidth = image.naturalWidth || 0;
+      const naturalHeight = image.naturalHeight || 0;
+      if (!stageWidth || !stageHeight || !naturalWidth || !naturalHeight) return null;
+      const ratio = Math.min(stageWidth / naturalWidth, stageHeight / naturalHeight);
+      const displayWidth = naturalWidth * ratio;
+      const displayHeight = naturalHeight * ratio;
+      return {
+        stageWidth,
+        stageHeight,
+        displayWidth,
+        displayHeight,
+        offsetX: (stageWidth - displayWidth) / 2,
+        offsetY: (stageHeight - displayHeight) / 2,
+      };
     }
 
     function clearOverlayCanvas(canvas) {

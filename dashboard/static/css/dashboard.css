@@ -6500,8 +6500,12 @@ body.reference-check-tab #activeFilterChips .filter-chip[data-key="reel_id"] {
   width: 100%;
   height: 100%;
   display: block;
-  object-fit: cover;
   border-radius: 14px;
+}
+
+.reference-check-modal__stage img {
+  object-fit: contain;
+  object-position: center;
 }
 
 .reference-check-modal__stage canvas {
