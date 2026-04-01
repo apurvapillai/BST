@@ -21,6 +21,8 @@
       modalImages: [],
       modalImageIndex: 0,
       modalBaselineImage: null,
+      modalReelGroups: [],
+      modalReelIndex: -1,
       lastLoggedDebugRefImageId: null,
     };
 
@@ -51,6 +53,7 @@
       elements.modal = Utils.qs("#referenceCheckModal");
       elements.modalClose = Utils.qs("#referenceCheckModalClose");
       elements.modalDismiss = Utils.qs("#referenceCheckModalDismiss");
+      elements.modalNextReel = Utils.qs("#referenceCheckModalNextReel");
       elements.modalBaseline = Utils.qs("#referenceCheckModalBaseline");
       elements.modalComparison = Utils.qs("#referenceCheckModalComparison");
       elements.modalBaselinePanel = Utils.qs("#referenceCheckModalBaselinePanel");
@@ -95,6 +98,9 @@
             applyBaseline(state.modalRefImageId);
           }
         });
+      }
+      if (elements.modalNextReel) {
+        elements.modalNextReel.addEventListener("click", openNextReelInModal);
       }
       if (elements.modalPrev) {
         elements.modalPrev.addEventListener("click", () => cycleModalImage(-1));
@@ -767,7 +773,7 @@
       if (!card) return;
       const refImageId = Number(card.dataset.refImageId);
       if (!Number.isFinite(refImageId)) return;
-      openModal(refImageId);
+      openGalleryModal(refImageId);
     }
 
     function handleResultsClick(event) {
@@ -786,6 +792,34 @@
       state.modalImages = [item];
       state.modalImageIndex = 0;
       state.modalBaselineImage = baseline;
+      state.modalReelGroups = [];
+      state.modalReelIndex = -1;
+      state.modalRefImageId = refImageId;
+      state.modalOverlaysVisible = true;
+      updateModalState();
+      document.body.classList.add("reference-check-modal-open");
+      elements.modal.classList.remove("hidden");
+    }
+
+    function openGalleryModal(refImageId) {
+      const item = findReference(refImageId);
+      if (!item || !elements.modal) return;
+      const groups = getGalleryReelGroups();
+      const reelId = Number(item.reel_id);
+      const reelIndex = groups.findIndex((group) =>
+        group.some((entry) => Number(entry.ref_image_id) === refImageId)
+      );
+      const images = reelIndex >= 0 ? groups[reelIndex] : [item];
+      const imageIndex = Math.max(
+        0,
+        images.findIndex((entry) => Number(entry.ref_image_id) === refImageId)
+      );
+      const baseline = payload && payload.baseline ? payload.baseline : null;
+      state.modalImages = images;
+      state.modalImageIndex = imageIndex >= 0 ? imageIndex : 0;
+      state.modalBaselineImage = baseline;
+      state.modalReelGroups = groups;
+      state.modalReelIndex = reelIndex >= 0 ? reelIndex : (Number.isFinite(reelId) ? 0 : -1);
       state.modalRefImageId = refImageId;
       state.modalOverlaysVisible = true;
       updateModalState();
@@ -802,6 +836,8 @@
       state.modalImages = actualImages;
       state.modalImageIndex = Math.max(0, Math.min(actualImages.length - 1, Number(imageIndex) || 0));
       state.modalBaselineImage = row.baseline_image || (payload && payload.baseline) || null;
+      state.modalReelGroups = [];
+      state.modalReelIndex = -1;
       state.modalRefImageId = Number(actualImages[state.modalImageIndex].ref_image_id) || null;
       state.modalOverlaysVisible = true;
       updateModalState();
@@ -868,18 +904,26 @@
         elements.modalBaseline.textContent = item.is_baseline ? "Active Baseline" : "Set as Baseline";
       }
       if (elements.modalPrev) {
-        const hideNav = state.modalImages.length <= 1 || !comparisonMode;
+        const hideNav = state.modalImages.length <= 1;
         elements.modalPrev.disabled = hideNav;
         elements.modalPrev.classList.toggle("hidden", hideNav);
       }
       if (elements.modalNext) {
-        const hideNav = state.modalImages.length <= 1 || !comparisonMode;
+        const hideNav = state.modalImages.length <= 1;
         elements.modalNext.disabled = hideNav;
         elements.modalNext.classList.toggle("hidden", hideNav);
       }
       if (elements.modalImageCounter) {
         elements.modalImageCounter.textContent =
-          comparisonMode && state.modalImages.length > 1 ? `${state.modalImageIndex + 1} of ${state.modalImages.length}` : "";
+          state.modalImages.length > 1 ? `${state.modalImageIndex + 1} of ${state.modalImages.length}` : "";
+      }
+      if (elements.modalNextReel) {
+        const hasNextReel =
+          Array.isArray(state.modalReelGroups) &&
+          state.modalReelIndex >= 0 &&
+          state.modalReelIndex < state.modalReelGroups.length - 1;
+        elements.modalNextReel.classList.toggle("hidden", !hasNextReel);
+        elements.modalNextReel.disabled = !hasNextReel;
       }
     }
 
@@ -887,6 +931,19 @@
       if (!state.modalImages.length) return;
       const total = state.modalImages.length;
       state.modalImageIndex = (state.modalImageIndex + direction + total) % total;
+      updateModalState();
+    }
+
+    function openNextReelInModal() {
+      if (!Array.isArray(state.modalReelGroups) || state.modalReelIndex < 0) return;
+      const nextIndex = state.modalReelIndex + 1;
+      if (nextIndex >= state.modalReelGroups.length) return;
+      const nextImages = state.modalReelGroups[nextIndex] || [];
+      if (!nextImages.length) return;
+      state.modalReelIndex = nextIndex;
+      state.modalImages = nextImages;
+      state.modalImageIndex = 0;
+      state.modalRefImageId = Number(nextImages[0].ref_image_id) || null;
       updateModalState();
     }
 
@@ -1327,6 +1384,8 @@
       state.modalImages = [];
       state.modalImageIndex = 0;
       state.modalBaselineImage = null;
+      state.modalReelGroups = [];
+      state.modalReelIndex = -1;
       state.modalRefImageId = null;
       state.lastLoggedDebugRefImageId = null;
       clearOverlayCanvas(elements.modalBaselineOverlay);
@@ -1359,10 +1418,16 @@
           gradient_ssim_pct: debug.gradient_ssim_pct ?? null,
           edge_overlap_pct: debug.edge_overlap_pct ?? null,
           normalized_gray_corr_pct: debug.normalized_gray_corr_pct ?? null,
+          normalized_gray_ssim_pct: debug.normalized_gray_ssim_pct ?? null,
           masked_lab_delta: debug.masked_lab_delta ?? null,
           global_lab_delta: debug.global_lab_delta ?? null,
+          lab_lightness_delta: debug.lab_lightness_delta ?? null,
+          lab_chroma_similarity_pct: debug.lab_chroma_similarity_pct ?? null,
           brightness_delta_pct: debug.brightness_delta_pct ?? null,
           alignment_offset: debug.alignment_offset ?? null,
+          content_inputs: debug.content_inputs ?? null,
+          color_inputs: debug.color_inputs ?? null,
+          rule_inputs: debug.rule_inputs ?? null,
         },
       });
       console.groupEnd();
@@ -1380,6 +1445,24 @@
     function findReference(refImageId) {
       if (!payload || !Array.isArray(payload.gallery)) return null;
       return payload.gallery.find((item) => Number(item.ref_image_id) === Number(refImageId)) || null;
+    }
+
+    function getGalleryReelGroups() {
+      const gallery = payload && Array.isArray(payload.gallery) ? payload.gallery : [];
+      const grouped = [];
+      const byReel = new Map();
+      gallery.forEach((item) => {
+        const key = Number(item.reel_id) || `ref-${Number(item.ref_image_id) || Math.random()}`;
+        if (!byReel.has(key)) {
+          byReel.set(key, []);
+          grouped.push(byReel.get(key));
+        }
+        byReel.get(key).push(item);
+      });
+      grouped.forEach((group) =>
+        group.sort((a, b) => compareNumber(a.reference_index, b.reference_index) || compareNumber(a.ref_image_id, b.ref_image_id))
+      );
+      return grouped;
     }
 
     function buildThumbnail(item, className) {

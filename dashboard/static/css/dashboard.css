@@ -6773,6 +6773,7 @@ body.reference-check-modal-open {
   margin-top: 20px;
   padding-top: 18px;
   border-top: 1px solid rgba(148, 163, 184, 0.16);
+  justify-content: flex-end;
 }
 
 @media (max-width: 1080px) {
