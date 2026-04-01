@@ -1187,10 +1187,6 @@
                     <strong id="referenceCheckModalCompareLabel">Selected</strong>
                     <small id="referenceCheckModalImageCounter"></small>
                   </div>
-                  <div class="reference-check-modal__nav">
-                    <button type="button" class="button-secondary" id="referenceCheckModalPrev">Prev</button>
-                    <button type="button" class="button-secondary" id="referenceCheckModalNext">Next</button>
-                  </div>
                 </div>
                 <div class="reference-check-modal__stage">
                   <img id="referenceCheckModalCompareImage" alt="Selected reference preview" loading="lazy" decoding="async">
@@ -1199,7 +1195,13 @@
               </div>
             </div>
             <div class="reference-check-modal__body">
-              <h3 id="referenceCheckModalTitle">Reference Preview</h3>
+              <div class="reference-check-modal__title-row">
+                <h3 id="referenceCheckModalTitle">Reference Preview</h3>
+                <div class="reference-check-modal__nav">
+                  <button type="button" class="button-secondary" id="referenceCheckModalPrev">Prev</button>
+                  <button type="button" class="button-secondary" id="referenceCheckModalNext">Next</button>
+                </div>
+              </div>
               <p id="referenceCheckModalSubtitle"></p>
               <dl class="reference-check-modal__meta" id="referenceCheckModalMeta"></dl>
               <div class="reference-check-modal__score-grid" id="referenceCheckModalScores"></div>

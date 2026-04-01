@@ -6585,6 +6585,17 @@ body.reference-check-tab #activeFilterChips .filter-chip[data-key="reel_id"] {
   gap: 8px;
 }
 
+.reference-check-modal__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.reference-check-modal__title-row h3 {
+  margin: 0;
+}
+
 .reference-check-modal__nav small {
   color: var(--text-secondary);
 }
