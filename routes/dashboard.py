@@ -3635,6 +3635,13 @@ def _reference_check_change_windows(rows: List[Dict[str, object]]) -> List[Dict[
     return payload
 
 
+def _reference_check_defect_type_payload(counter: Counter) -> Dict[str, int]:
+    payload: Dict[str, int] = {}
+    for defect_type in DRIVER_DEFECT_CLASSES:
+        payload[defect_type] = int(counter.get(defect_type, 0))
+    return payload
+
+
 @dashboard_bp.route("/api/defect-drivers")
 def api_defect_drivers():
     with SessionLocal() as session:
@@ -6503,7 +6510,11 @@ def api_reference_check():
         reels = (
             _apply_reel_filters(session.query(Reel), normalized_filters, include_reel_code=False)
             .filter(Reel.job_name == resolved_job)
-            .options(joinedload(Reel.machine), selectinload(Reel.reference_images))
+            .options(
+                joinedload(Reel.machine),
+                selectinload(Reel.reference_images),
+                selectinload(Reel.inspection_phases),
+            )
             .order_by(Reel.time_start.asc(), Reel.reel_id.asc())
             .all()
         )
@@ -6512,6 +6523,7 @@ def api_reference_check():
         defect_counts: Dict[int, int] = {}
         top_defect_by_reel: Dict[int, Optional[str]] = {}
         top_defect_count_by_reel: Dict[int, int] = {}
+        defect_breakdown_by_reel: Dict[int, Counter] = defaultdict(Counter)
         if reel_ids:
             defect_counts = {
                 reel_id: int(count or 0)
@@ -6539,9 +6551,12 @@ def api_reference_check():
                 count = int(getattr(row, "defect_count", 0) or 0)
                 if reel_id is None or not class_name:
                     continue
+                canonical = _canonical_sensitivity_class(class_name) or _normalize_defect_label(class_name) or ""
+                if canonical:
+                    defect_breakdown_by_reel[reel_id][canonical] += count
                 existing_count = int(top_defect_count_by_reel.get(reel_id, -1))
                 if count > existing_count:
-                    top_defect_by_reel[reel_id] = class_name
+                    top_defect_by_reel[reel_id] = _driver_class_label(class_name)
                     top_defect_count_by_reel[reel_id] = count
 
         gallery: List[Dict[str, object]] = []
@@ -6582,6 +6597,7 @@ def api_reference_check():
         )
         baseline_payload = None
         comparison_rows: List[Dict[str, object]] = []
+        reel_comparison_rows: List[Dict[str, object]] = []
         first_major_change_point = None
         lowest_match_references: List[Dict[str, object]] = []
         stable_streaks = {"longest_strong_match_streak": 0}
@@ -6627,6 +6643,74 @@ def api_reference_check():
                     comparison["similarity_cluster_label"] = "Baseline"
                 enriched_gallery.append(comparison)
             gallery = enriched_gallery
+
+            gallery_by_reel: Dict[int, List[Dict[str, object]]] = defaultdict(list)
+            for row in comparison_rows:
+                reel_id = row.get("reel_id")
+                if reel_id is None:
+                    continue
+                gallery_by_reel[int(reel_id)].append(row)
+
+            for reel in reels:
+                reel_id = reel.reel_id
+                if reel_id is None:
+                    continue
+                actual_images = sorted(
+                    gallery_by_reel.get(reel_id, []),
+                    key=lambda row: (
+                        row.get("captured_at") or "",
+                        int(row.get("reference_index") or 0),
+                        int(row.get("ref_image_id") or 0),
+                    ),
+                )
+                if not actual_images:
+                    continue
+                match_values_for_reel = [
+                    _to_float(row.get("match_pct"))
+                    for row in actual_images
+                    if _to_float(row.get("match_pct")) is not None
+                ]
+                total_feet = _reel_length_feet(reel)
+                bst_active_pct = 0.0
+                phase_intervals = reel.inspection_phases or []
+                if phase_intervals:
+                    total_phase_seconds = 0.0
+                    active_seconds = 0.0
+                    for phase in phase_intervals:
+                        start_time = phase.start_time
+                        end_time = phase.end_time
+                        if not start_time or not end_time or end_time <= start_time:
+                            continue
+                        seconds = (end_time - start_time).total_seconds()
+                        total_phase_seconds += seconds
+                        if (phase.phase or "").strip().lower() == "active":
+                            active_seconds += seconds
+                    if total_phase_seconds > 0:
+                        bst_active_pct = round((active_seconds / total_phase_seconds) * 100.0, 1)
+                total_defects = int(defect_counts.get(reel_id, 0))
+                defects_per_1000ft = _rate_per_1000ft(total_defects, total_feet)
+                adjusted_defects_per_1000ft = _driver_adjusted_rate(total_defects, total_feet, bst_active_pct)
+                reel_comparison_rows.append(
+                    {
+                        "reel_id": reel_id,
+                        "reel_code": reel.reel_code,
+                        "job_name": reel.job_name,
+                        "order_number": reel.order_number,
+                        "machine_name": reel.machine.name if reel.machine else None,
+                        "captured_at": _iso(reel.time_end or reel.time_start),
+                        "match_pct": round(min(match_values_for_reel), 1) if match_values_for_reel else None,
+                        "bst_active_pct": bst_active_pct,
+                        "total_feet": total_feet,
+                        "defect_count": total_defects,
+                        "defects_per_1000ft": defects_per_1000ft,
+                        "adjusted_defects_per_1000ft": adjusted_defects_per_1000ft,
+                        "defect_breakdown": _reference_check_defect_type_payload(
+                            defect_breakdown_by_reel.get(reel_id, Counter())
+                        ),
+                        "baseline_image": baseline_payload,
+                        "actual_images": actual_images,
+                    }
+                )
 
             change_group = 0
             in_change_group = False
@@ -6686,6 +6770,7 @@ def api_reference_check():
             cluster_summary = {"clusters": [], "dominant_cluster": None}
             change_windows = []
             largest_drop = None
+            reel_comparison_rows = []
 
         job_context = {
             "job_name": resolved_job,
@@ -6705,6 +6790,13 @@ def api_reference_check():
             }
             for row in comparison_rows
         ]
+        trend.sort(
+            key=lambda row: (
+                row.get("captured_at") or "",
+                row.get("reel_code") or "",
+                int(row.get("ref_image_id") or 0),
+            )
+        )
 
         return jsonify(
             {
@@ -6716,6 +6808,11 @@ def api_reference_check():
                 "baseline": baseline_payload,
                 "summary": summary,
                 "comparisons": comparison_rows,
+                "reel_comparisons": reel_comparison_rows,
+                "defect_types": [
+                    {"key": defect_type, "label": _driver_class_label(defect_type)}
+                    for defect_type in DRIVER_DEFECT_CLASSES
+                ],
                 "trend": trend,
                 "insights": {
                     "first_major_change_point": first_major_change_point,

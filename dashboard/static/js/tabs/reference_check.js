@@ -12,6 +12,10 @@
       sort: "captured_at_desc",
       modalRefImageId: null,
       modalDiffRenderId: 0,
+      modalOverlaysVisible: true,
+      modalImages: [],
+      modalImageIndex: 0,
+      modalBaselineImage: null,
     };
 
     const elements = {};
@@ -31,8 +35,8 @@
       elements.baselineSummary = Utils.qs("#referenceCheckBaselineSummary");
       elements.resultsSection = Utils.qs("#referenceCheckResultsSection");
       elements.resultsTableSection = Utils.qs("#referenceCheckResultsTableSection");
+      elements.resultsHead = Utils.qs("#referenceCheckResultsHead");
       elements.resultsBody = Utils.qs("#referenceCheckResultsBody");
-      elements.sortSelect = Utils.qs("#referenceCheckSortSelect");
       elements.chart = Utils.qs("#referenceCheckTrendChart");
       elements.insightsSection = Utils.qs("#referenceCheckInsightsSection");
       elements.insights = Utils.qs("#referenceCheckInsights");
@@ -40,22 +44,22 @@
       elements.modalClose = Utils.qs("#referenceCheckModalClose");
       elements.modalDismiss = Utils.qs("#referenceCheckModalDismiss");
       elements.modalBaseline = Utils.qs("#referenceCheckModalBaseline");
-      elements.modalImage = Utils.qs("#referenceCheckModalImage");
-      elements.modalCompare = Utils.qs("#referenceCheckModalCompare");
       elements.modalBaselineImage = Utils.qs("#referenceCheckModalBaselineImage");
       elements.modalCompareImage = Utils.qs("#referenceCheckModalCompareImage");
+      elements.modalBaselineOverlay = Utils.qs("#referenceCheckModalBaselineOverlay");
+      elements.modalCompareOverlay = Utils.qs("#referenceCheckModalCompareOverlay");
       elements.modalDiffCanvas = Utils.qs("#referenceCheckModalDiffCanvas");
       elements.modalDiffEmpty = Utils.qs("#referenceCheckModalDiffEmpty");
+      elements.modalAnalysis = Utils.qs("#referenceCheckModalAnalysis");
+      elements.modalSummaryText = Utils.qs("#referenceCheckModalSummaryText");
+      elements.modalSummaryList = Utils.qs("#referenceCheckModalSummaryList");
+      elements.modalOverlayToggle = Utils.qs("#referenceCheckModalOverlayToggle");
+      elements.modalPrev = Utils.qs("#referenceCheckModalPrev");
+      elements.modalNext = Utils.qs("#referenceCheckModalNext");
+      elements.modalImageCounter = Utils.qs("#referenceCheckModalImageCounter");
       elements.modalTitle = Utils.qs("#referenceCheckModalTitle");
       elements.modalSubtitle = Utils.qs("#referenceCheckModalSubtitle");
       elements.modalMeta = Utils.qs("#referenceCheckModalMeta");
-
-      if (elements.sortSelect) {
-        elements.sortSelect.addEventListener("change", () => {
-          state.sort = elements.sortSelect.value || "captured_at_desc";
-          renderResults();
-        });
-      }
 
       if (elements.gallery) {
         elements.gallery.addEventListener("click", handleGalleryClick);
@@ -78,6 +82,18 @@
           }
         });
       }
+      if (elements.modalOverlayToggle) {
+        elements.modalOverlayToggle.addEventListener("click", () => {
+          state.modalOverlaysVisible = !state.modalOverlaysVisible;
+          updateOverlayVisibility();
+        });
+      }
+      if (elements.modalPrev) {
+        elements.modalPrev.addEventListener("click", () => cycleModalImage(-1));
+      }
+      if (elements.modalNext) {
+        elements.modalNext.addEventListener("click", () => cycleModalImage(1));
+      }
       if (elements.modal) {
         elements.modal.addEventListener("click", (event) => {
           if (event.target === elements.modal) {
@@ -93,6 +109,12 @@
       window.addEventListener("resize", () => {
         if (!active) return;
         resizeTrendChart();
+        if (elements.modal && !elements.modal.classList.contains("hidden") && state.modalRefImageId != null) {
+          const currentItem = state.modalImages[state.modalImageIndex] || findReference(state.modalRefImageId);
+          if (currentItem) {
+            renderModalComparison(currentItem);
+          }
+        }
       });
     }
 
@@ -297,10 +319,13 @@
             </div>
           `;
         }
+        if (elements.resultsHead) {
+          elements.resultsHead.innerHTML = "";
+        }
         if (elements.resultsBody) {
           elements.resultsBody.innerHTML = `
             <tr>
-              <td colspan="8" class="reference-check-table__empty">Choose a baseline reference image to compute comparisons.</td>
+              <td class="reference-check-table__empty">Choose a baseline reference image to compute comparisons.</td>
             </tr>
           `;
         }
@@ -313,8 +338,9 @@
 
       renderBaselineSummary();
       const comparisons = sortComparisons(payload.comparisons || []);
-      renderResultsTable(comparisons);
-      renderTrendChart(comparisons);
+      const trendPoints = sortTrendPoints(payload.trend || []);
+      renderResultsTable(payload.reel_comparisons || [], payload.defect_types || []);
+      renderTrendChart(trendPoints);
       renderInsights();
     }
 
@@ -355,47 +381,126 @@
       }
     }
 
-    function renderResultsTable(comparisons) {
+    function renderResultsTable(rows, defectTypes) {
       if (!elements.resultsBody) return;
-      if (!comparisons.length) {
+      const reelRows = Array.isArray(rows) ? rows.slice() : [];
+      const defectColumns = Array.isArray(defectTypes) ? defectTypes : [];
+      reelRows.sort((a, b) => compareDate(b.captured_at, a.captured_at));
+      if (elements.resultsHead) {
+        const defectHeaders = defectColumns
+          .map((entry) => `<th>${Utils.escapeHtml(entry.label || entry.key || "Defect")}</th>`)
+          .join("");
+        elements.resultsHead.innerHTML = `
+          <tr>
+            <th>Reel</th>
+            <th>Timestamp</th>
+            <th>Images</th>
+            <th>Match %</th>
+            <th>BST Active %</th>
+            <th>Total Feet</th>
+            <th>Defects</th>
+            <th>Defects / 1k ft</th>
+            <th>Adj Defects / 1k ft</th>
+            ${defectHeaders}
+          </tr>
+        `;
+      }
+      if (!reelRows.length) {
         elements.resultsBody.innerHTML = `
           <tr>
-            <td colspan="8" class="reference-check-table__empty">No non-baseline references were available for comparison.</td>
+            <td colspan="${9 + defectColumns.length}" class="reference-check-table__empty">No non-baseline references were available for comparison.</td>
           </tr>
         `;
         return;
       }
-      elements.resultsBody.innerHTML = comparisons
+      elements.resultsBody.innerHTML = reelRows
         .map((item) => {
+          const iconMarkup = renderResultsImageCell(item);
+          const defectCells = defectColumns
+            .map((entry) => {
+              const breakdown = item.defect_breakdown || {};
+              return `<td>${Utils.formatNumber(breakdown[entry.key] || 0)}</td>`;
+            })
+            .join("");
           return `
             <tr>
               <td>${Utils.escapeHtml(item.reel_code || "—")}</td>
               <td>${Utils.escapeHtml(formatTime(item.captured_at, "—"))}</td>
-              <td>
-                <button type="button" class="reference-check-thumb-btn" data-ref-preview="${Number(item.ref_image_id) || ""}">
-                  ${buildThumbnail(item, "reference-check-thumb-btn__image")}
-                </button>
-              </td>
+              <td>${iconMarkup}</td>
               <td>${formatPercent(item.match_pct)}</td>
-              <td><span class="reference-check-status reference-check-status--${Utils.escapeHtml(item.status_key || "unscored")}">${Utils.escapeHtml(item.status_band || "Not compared")}</span></td>
-              <td>${item.likely_changed ? `<span class="reference-check-flag">Group ${Utils.formatNumber(item.change_group || 0)}</span>` : '<span class="reference-check-muted">Stable</span>'}</td>
+              <td>${formatPercent(item.bst_active_pct)}</td>
+              <td>${formatFeet(item.total_feet)}</td>
               <td>${Utils.formatNumber(item.defect_count || 0)}</td>
-              <td>${Utils.escapeHtml(item.top_defect_type || "—")}</td>
+              <td>${formatRate(item.defects_per_1000ft)}</td>
+              <td>${formatRate(item.adjusted_defects_per_1000ft)}</td>
+              ${defectCells}
             </tr>
           `;
         })
         .join("");
     }
 
-    function renderTrendChart(comparisons) {
+    function renderResultsImageCell(row) {
+      const reelId = Number(row.reel_id) || "";
+      const baselineButton = row.baseline_image
+        ? `
+          <button
+            type="button"
+            class="reference-check-icon-btn reference-check-icon-btn--baseline"
+            data-reel-preview="${reelId}"
+            data-image-index="0"
+            title="Open baseline vs selected reference comparison"
+            aria-label="Open baseline comparison for ${Utils.escapeHtml(row.reel_code || "reel")}"
+          >
+            ${buildThumbnail(row.baseline_image, "reference-check-icon-btn__image")}
+          </button>
+        `
+        : '<span class="reference-check-icon-btn reference-check-icon-btn--placeholder">—</span>';
+      const actualImages = Array.isArray(row.actual_images) ? row.actual_images : [];
+      const actualButtons = actualImages.length
+        ? actualImages
+            .map((image, index) => {
+              const label = image.reference_index ? `Ref ${image.reference_index}` : `Ref ${index + 1}`;
+              const timestamp = formatTime(image.captured_at, "");
+              return `
+                <button
+                  type="button"
+                  class="reference-check-icon-btn"
+                  data-reel-preview="${reelId}"
+                  data-image-index="${index}"
+                  title="${Utils.escapeHtml([label, timestamp].filter(Boolean).join(" · "))}"
+                  aria-label="Open ${Utils.escapeHtml(label)} for ${Utils.escapeHtml(row.reel_code || "reel")}"
+                >
+                  ${buildThumbnail(image, "reference-check-icon-btn__image")}
+                </button>
+              `;
+            })
+            .join("")
+        : '<span class="reference-check-icon-btn reference-check-icon-btn--placeholder">—</span>';
+
+      return `
+        <div class="reference-check-image-cell" data-reel-preview="${reelId}" data-image-index="0">
+          <div class="reference-check-image-lane">
+            <span class="reference-check-image-lane__label">Base</span>
+            <div class="reference-check-icon-stack">${baselineButton}</div>
+          </div>
+          <div class="reference-check-image-lane">
+            <span class="reference-check-image-lane__label">Actual</span>
+            <div class="reference-check-icon-stack">${actualButtons}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderTrendChart(points) {
       if (!elements.chart) return;
-      if (!comparisons.length || !window.Plotly) {
+      if (!points.length || !window.Plotly) {
         elements.chart.innerHTML = "";
         return;
       }
-      const x = comparisons.map((item) => formatTime(item.captured_at, item.reel_code || "Reference"));
-      const y = comparisons.map((item) => item.match_pct);
-      const markerColors = comparisons.map((item) => {
+      const x = points.map((item) => item.captured_at);
+      const y = points.map((item) => item.match_pct);
+      const markerColors = points.map((item) => {
         if (item.likely_changed) return "#dc2626";
         if ((item.match_pct || 0) >= 95) return "#059669";
         if ((item.match_pct || 0) >= 90) return "#0284c7";
@@ -405,8 +510,10 @@
         ? withResponsiveLayout({
             autosize: true,
             margin: { l: 44, r: 18, t: 20, b: 96 },
+            hovermode: "closest",
             xaxis: {
               title: "Timestamp",
+              type: "date",
               tickangle: -45,
               automargin: true,
               nticks: 10,
@@ -420,8 +527,10 @@
         : {
             autosize: true,
             margin: { l: 44, r: 18, t: 20, b: 96 },
+            hovermode: "closest",
             xaxis: {
               title: "Timestamp",
+              type: "date",
               tickangle: -45,
               automargin: true,
               nticks: 10,
@@ -445,9 +554,12 @@
             y,
             line: { color: "#1d4ed8", width: 2 },
             marker: { size: 10, color: markerColors, line: { color: "#ffffff", width: 1 } },
-            customdata: comparisons.map((item) => [item.reel_code || "—", item.status_band || "—"]),
+            customdata: points.map((item) => [
+              formatTime(item.captured_at, "—"),
+              item.reel_code || "—",
+            ]),
             hovertemplate:
-              "<b>%{customdata[0]}</b><br>Match: %{y:.1f}%<br>Status: %{customdata[1]}<extra></extra>",
+              "Time: %{customdata[0]}<br>Reel: %{customdata[1]}<br>Match: %{y:.1f}%<extra></extra>",
           },
         ],
         layout,
@@ -584,6 +696,18 @@
       return aNum - bNum;
     }
 
+    function sortTrendPoints(rows) {
+      const items = Array.isArray(rows) ? rows.slice() : [];
+      items.sort((a, b) => {
+        const timeCompare = compareDate(a && a.captured_at, b && b.captured_at);
+        if (timeCompare !== 0) return timeCompare;
+        const reelCompare = String((a && a.reel_code) || "").localeCompare(String((b && b.reel_code) || ""));
+        if (reelCompare !== 0) return reelCompare;
+        return compareNumber(a && a.ref_image_id, b && b.ref_image_id);
+      });
+      return items;
+    }
+
     function handleGalleryClick(event) {
       const card = event.target.closest("[data-ref-image-id]");
       if (!card) return;
@@ -593,65 +717,128 @@
     }
 
     function handleResultsClick(event) {
-      const previewButton = event.target.closest("[data-ref-preview]");
+      const previewButton = event.target.closest("[data-reel-preview]");
       if (!previewButton) return;
-      const refImageId = Number(previewButton.dataset.refPreview);
-      if (!Number.isFinite(refImageId)) return;
-      openModal(refImageId);
+      const reelId = Number(previewButton.dataset.reelPreview);
+      const imageIndex = Number(previewButton.dataset.imageIndex || 0);
+      if (!Number.isFinite(reelId)) return;
+      openReelModal(reelId, imageIndex);
     }
 
     function openModal(refImageId) {
       const item = findReference(refImageId);
       if (!item || !elements.modal) return;
+      const baseline = payload && payload.baseline ? payload.baseline : null;
+      state.modalImages = [item];
+      state.modalImageIndex = 0;
+      state.modalBaselineImage = baseline;
       state.modalRefImageId = refImageId;
+      state.modalOverlaysVisible = true;
+      updateModalState();
+      elements.modal.classList.remove("hidden");
+    }
+
+    function openReelModal(reelId, imageIndex = 0) {
+      if (!payload || !Array.isArray(payload.reel_comparisons) || !elements.modal) return;
+      const row = payload.reel_comparisons.find((entry) => Number(entry.reel_id) === Number(reelId));
+      if (!row) return;
+      const actualImages = Array.isArray(row.actual_images) ? row.actual_images : [];
+      if (!actualImages.length) return;
+      state.modalImages = actualImages;
+      state.modalImageIndex = Math.max(0, Math.min(actualImages.length - 1, Number(imageIndex) || 0));
+      state.modalBaselineImage = row.baseline_image || (payload && payload.baseline) || null;
+      state.modalRefImageId = Number(actualImages[state.modalImageIndex].ref_image_id) || null;
+      state.modalOverlaysVisible = true;
+      updateModalState();
+      elements.modal.classList.remove("hidden");
+    }
+
+    function updateModalState() {
+      const item = state.modalImages[state.modalImageIndex];
+      if (!item || !elements.modal) return;
+      state.modalRefImageId = Number(item.ref_image_id) || state.modalRefImageId;
       if (elements.modalTitle) {
         elements.modalTitle.textContent = item.reel_code || item.filename || "Reference Preview";
       }
       if (elements.modalSubtitle) {
-        elements.modalSubtitle.textContent = formatTime(item.captured_at, "Timestamp unavailable");
-      }
-      if (elements.modalImage) {
-        const src = item.image_src ? urlForStatic(item.image_src) : "";
-        elements.modalImage.src = src;
-        elements.modalImage.alt = item.reel_code || item.filename || "Reference preview";
+        const subtitleParts = [formatTime(item.captured_at, "Timestamp unavailable")];
+        if (state.modalImages.length > 1) {
+          subtitleParts.push(`Reference ${state.modalImageIndex + 1} of ${state.modalImages.length}`);
+        }
+        elements.modalSubtitle.textContent = subtitleParts.join(" · ");
       }
       renderModalComparison(item);
       if (elements.modalMeta) {
         elements.modalMeta.innerHTML = [
           metaRow("Job", item.job_name || "—"),
-          metaRow("Order", item.order_number || "—"),
+          metaRow("Reel", item.reel_code || "—"),
+          metaRow("Timestamp", formatTime(item.captured_at, "—")),
           metaRow("Machine", item.machine_name || "—"),
           metaRow("Match", formatPercent(item.match_pct)),
-          metaRow("Status", item.status_band || "Not compared"),
-          metaRow("Defects", Utils.formatNumber(item.defect_count || 0)),
-          metaRow("Top Defect", item.top_defect_type || "—"),
         ].join("");
       }
       if (elements.modalBaseline) {
         elements.modalBaseline.disabled = Boolean(item.is_baseline);
         elements.modalBaseline.textContent = item.is_baseline ? "Active Baseline" : "Set as Baseline";
       }
-      elements.modal.classList.remove("hidden");
+      if (elements.modalPrev) {
+        elements.modalPrev.disabled = state.modalImages.length <= 1;
+        elements.modalPrev.classList.toggle("hidden", state.modalImages.length <= 1);
+      }
+      if (elements.modalNext) {
+        elements.modalNext.disabled = state.modalImages.length <= 1;
+        elements.modalNext.classList.toggle("hidden", state.modalImages.length <= 1);
+      }
+      if (elements.modalImageCounter) {
+        elements.modalImageCounter.textContent =
+          state.modalImages.length > 1 ? `${state.modalImageIndex + 1} of ${state.modalImages.length}` : "";
+      }
+    }
+
+    function cycleModalImage(direction) {
+      if (!state.modalImages.length) return;
+      const total = state.modalImages.length;
+      state.modalImageIndex = (state.modalImageIndex + direction + total) % total;
+      updateModalState();
     }
 
     function renderModalComparison(item) {
-      const baseline = payload && payload.baseline ? payload.baseline : null;
-      if (!elements.modalCompare || !elements.modalBaselineImage || !elements.modalCompareImage) return;
-      if (!baseline || !baseline.image_src || !item.image_src || Number(baseline.ref_image_id) === Number(item.ref_image_id)) {
-        elements.modalCompare.classList.add("hidden");
-        if (elements.modalDiffEmpty) {
-          elements.modalDiffEmpty.classList.add("hidden");
-        }
+      const baseline = state.modalBaselineImage || (payload && payload.baseline ? payload.baseline : null);
+      if (!elements.modalBaselineImage || !elements.modalCompareImage) return;
+      if (elements.modalAnalysis) {
+        elements.modalAnalysis.classList.add("hidden");
+      }
+      if (!baseline || !baseline.image_src || !item.image_src) {
+        clearOverlayCanvas(elements.modalBaselineOverlay);
+        clearOverlayCanvas(elements.modalCompareOverlay);
         return;
       }
-      elements.modalCompare.classList.remove("hidden");
       const baselineSrc = urlForStatic(baseline.image_src);
       const compareSrc = urlForStatic(item.image_src);
       elements.modalBaselineImage.src = baselineSrc;
       elements.modalBaselineImage.alt = baseline.reel_code || "Baseline preview";
       elements.modalCompareImage.src = compareSrc;
       elements.modalCompareImage.alt = item.reel_code || "Selected preview";
+      if (Number(baseline.ref_image_id) === Number(item.ref_image_id)) {
+        clearOverlayCanvas(elements.modalBaselineOverlay);
+        clearOverlayCanvas(elements.modalCompareOverlay);
+        if (elements.modalSummaryText) {
+          elements.modalSummaryText.textContent = "This reference is the active baseline. No comparison regions to highlight.";
+        }
+        if (elements.modalSummaryList) {
+          elements.modalSummaryList.innerHTML = "";
+        }
+        if (elements.modalAnalysis) {
+          elements.modalAnalysis.classList.add("hidden");
+        }
+        updateOverlayVisibility();
+        return;
+      }
+      if (elements.modalAnalysis) {
+        elements.modalAnalysis.classList.remove("hidden");
+      }
       drawDiffHeatmap(baselineSrc, compareSrc);
+      updateOverlayVisibility();
     }
 
     async function drawDiffHeatmap(baselineSrc, compareSrc) {
@@ -673,12 +860,14 @@
           showDiffHeatmapUnavailable();
           return;
         }
-        const baselineData = sampleImageToData(workCtx, baselineImage, size);
-        const comparisonData = sampleImageToData(workCtx, comparisonImage, size);
-        if (!baselineData || !comparisonData) {
+        const baselineSample = sampleImageToData(workCtx, baselineImage, size);
+        const comparisonSample = sampleImageToData(workCtx, comparisonImage, size);
+        if (!baselineSample || !comparisonSample) {
           showDiffHeatmapUnavailable();
           return;
         }
+        const baselineData = baselineSample.data;
+        const comparisonData = comparisonSample.data;
         const ctx = canvas.getContext("2d");
         if (!ctx) {
           showDiffHeatmapUnavailable();
@@ -689,16 +878,37 @@
         canvas.style.width = "100%";
         canvas.style.height = "auto";
         const imageData = ctx.createImageData(size, size);
+        const diffStrength = new Float32Array(size * size);
         for (let i = 0; i < baselineData.length; i += 4) {
           const baseGray = normalizeGray(baselineData[i], baselineData[i + 1], baselineData[i + 2]);
           const compGray = normalizeGray(comparisonData[i], comparisonData[i + 1], comparisonData[i + 2]);
           const diff = Math.min(255, Math.abs(baseGray - compGray) * 3.2);
+          diffStrength[i / 4] = diff;
           imageData.data[i] = diff;
           imageData.data[i + 1] = Math.max(0, 210 - diff * 0.45);
           imageData.data[i + 2] = Math.max(0, 120 - diff * 0.7);
           imageData.data[i + 3] = 255;
         }
         ctx.putImageData(imageData, 0, 0);
+        const regions = detectChangeRegions(diffStrength, size, size);
+        renderChangeRegionSummary(regions, size, size);
+        renderOverlayRegions(
+          elements.modalBaselineOverlay,
+          baselineImage,
+          baselineSample.drawBox,
+          regions,
+          size,
+          size
+        );
+        renderOverlayRegions(
+          elements.modalCompareOverlay,
+          comparisonImage,
+          comparisonSample.drawBox,
+          regions,
+          size,
+          size
+        );
+        updateOverlayVisibility();
         if (elements.modalDiffEmpty) {
           elements.modalDiffEmpty.classList.add("hidden");
         }
@@ -718,7 +928,10 @@
       const offsetX = (size - drawWidth) / 2;
       const offsetY = (size - drawHeight) / 2;
       ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
-      return ctx.getImageData(0, 0, size, size).data;
+      return {
+        data: ctx.getImageData(0, 0, size, size).data,
+        drawBox: { x: offsetX, y: offsetY, width: drawWidth, height: drawHeight },
+      };
     }
 
     function normalizeGray(r, g, b) {
@@ -729,11 +942,239 @@
       if (elements.modalDiffEmpty) {
         elements.modalDiffEmpty.classList.remove("hidden");
       }
+      clearOverlayCanvas(elements.modalBaselineOverlay);
+      clearOverlayCanvas(elements.modalCompareOverlay);
+      if (elements.modalSummaryText) {
+        elements.modalSummaryText.textContent = "Grouped change analysis is unavailable for this comparison.";
+      }
+      if (elements.modalSummaryList) {
+        elements.modalSummaryList.innerHTML = "";
+      }
       if (elements.modalDiffCanvas) {
         const ctx = elements.modalDiffCanvas.getContext("2d");
         if (ctx) {
           ctx.clearRect(0, 0, elements.modalDiffCanvas.width, elements.modalDiffCanvas.height);
         }
+      }
+    }
+
+    function detectChangeRegions(diffStrength, width, height) {
+      const threshold = 52;
+      const minArea = 120;
+      const mask = new Uint8Array(width * height);
+      for (let i = 0; i < diffStrength.length; i += 1) {
+        if (diffStrength[i] >= threshold) {
+          mask[i] = 1;
+        }
+      }
+      const cleaned = suppressNoise(mask, width, height);
+      const components = connectedComponents(cleaned, diffStrength, width, height, minArea);
+      return mergeNearbyRegions(components, width, height)
+        .sort((a, b) => (b.area || 0) - (a.area || 0))
+        .slice(0, 6)
+        .map((region, index) => ({
+          ...region,
+          label: describeRegion(region, width, height),
+          rank: index + 1,
+        }));
+    }
+
+    function suppressNoise(mask, width, height) {
+      const cleaned = new Uint8Array(mask.length);
+      for (let y = 1; y < height - 1; y += 1) {
+        for (let x = 1; x < width - 1; x += 1) {
+          const index = y * width + x;
+          if (!mask[index]) continue;
+          let neighbors = 0;
+          for (let yy = -1; yy <= 1; yy += 1) {
+            for (let xx = -1; xx <= 1; xx += 1) {
+              if (mask[(y + yy) * width + (x + xx)]) {
+                neighbors += 1;
+              }
+            }
+          }
+          if (neighbors >= 4) {
+            cleaned[index] = 1;
+          }
+        }
+      }
+      return cleaned;
+    }
+
+    function connectedComponents(mask, diffStrength, width, height, minArea) {
+      const visited = new Uint8Array(mask.length);
+      const regions = [];
+      const queueX = [];
+      const queueY = [];
+      for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+          const startIndex = y * width + x;
+          if (!mask[startIndex] || visited[startIndex]) continue;
+          let minX = x;
+          let maxX = x;
+          let minY = y;
+          let maxY = y;
+          let area = 0;
+          let intensitySum = 0;
+          queueX.length = 0;
+          queueY.length = 0;
+          queueX.push(x);
+          queueY.push(y);
+          visited[startIndex] = 1;
+          for (let cursor = 0; cursor < queueX.length; cursor += 1) {
+            const currentX = queueX[cursor];
+            const currentY = queueY[cursor];
+            const currentIndex = currentY * width + currentX;
+            area += 1;
+            intensitySum += diffStrength[currentIndex] || 0;
+            if (currentX < minX) minX = currentX;
+            if (currentX > maxX) maxX = currentX;
+            if (currentY < minY) minY = currentY;
+            if (currentY > maxY) maxY = currentY;
+            const neighbors = [
+              [currentX - 1, currentY],
+              [currentX + 1, currentY],
+              [currentX, currentY - 1],
+              [currentX, currentY + 1],
+            ];
+            neighbors.forEach(([nextX, nextY]) => {
+              if (nextX < 0 || nextX >= width || nextY < 0 || nextY >= height) return;
+              const nextIndex = nextY * width + nextX;
+              if (!mask[nextIndex] || visited[nextIndex]) return;
+              visited[nextIndex] = 1;
+              queueX.push(nextX);
+              queueY.push(nextY);
+            });
+          }
+          if (area < minArea) continue;
+          regions.push({
+            x: minX,
+            y: minY,
+            width: maxX - minX + 1,
+            height: maxY - minY + 1,
+            area,
+            avgIntensity: area ? intensitySum / area : 0,
+          });
+        }
+      }
+      return regions;
+    }
+
+    function mergeNearbyRegions(regions, width, height) {
+      const merged = [];
+      const padding = Math.max(10, Math.round(Math.min(width, height) * 0.03));
+      regions.forEach((region) => {
+        let target = null;
+        for (let index = 0; index < merged.length; index += 1) {
+          const existing = merged[index];
+          const overlapsX = region.x <= existing.x + existing.width + padding && region.x + region.width >= existing.x - padding;
+          const overlapsY = region.y <= existing.y + existing.height + padding && region.y + region.height >= existing.y - padding;
+          if (overlapsX && overlapsY) {
+            target = existing;
+            break;
+          }
+        }
+        if (!target) {
+          merged.push({ ...region });
+          return;
+        }
+        const minX = Math.min(target.x, region.x);
+        const minY = Math.min(target.y, region.y);
+        const maxX = Math.max(target.x + target.width, region.x + region.width);
+        const maxY = Math.max(target.y + target.height, region.y + region.height);
+        target.x = minX;
+        target.y = minY;
+        target.width = maxX - minX;
+        target.height = maxY - minY;
+        target.area += region.area;
+        target.avgIntensity = Math.max(target.avgIntensity, region.avgIntensity);
+      });
+      return merged;
+    }
+
+    function describeRegion(region, width, height) {
+      const centerX = region.x + region.width / 2;
+      const centerY = region.y + region.height / 2;
+      const horizontal = centerX < width / 3 ? "left" : centerX > (width * 2) / 3 ? "right" : "center";
+      const vertical = centerY < height / 3 ? "upper" : centerY > (height * 2) / 3 ? "lower" : "middle";
+      return `${vertical} ${horizontal} area`;
+    }
+
+    function renderChangeRegionSummary(regions, width, height) {
+      if (!elements.modalSummaryText || !elements.modalSummaryList) return;
+      if (!regions.length) {
+        elements.modalSummaryText.textContent = "No major grouped change regions were detected. Minor background noise was suppressed.";
+        elements.modalSummaryList.innerHTML = "";
+        return;
+      }
+      const topLabels = regions.slice(0, 3).map((region) => region.label);
+      elements.modalSummaryText.textContent = `Detected ${regions.length} major changed region${regions.length === 1 ? "" : "s"}. Largest changes appear in ${topLabels.join(", ")}. Minor background noise was suppressed.`;
+      elements.modalSummaryList.innerHTML = regions
+        .map((region) => {
+          const areaPct = ((region.area / (width * height)) * 100).toFixed(1);
+          return `
+            <div class="reference-check-modal__summary-item">
+              <span class="reference-check-modal__summary-chip">Region ${region.rank}</span>
+              <div>
+                <strong>${Utils.escapeHtml(region.label)}</strong>
+                <p>${areaPct}% of normalized frame · strength ${Utils.formatNumber(region.avgIntensity || 0, 0)}</p>
+              </div>
+            </div>
+          `;
+        })
+        .join("");
+    }
+
+    function renderOverlayRegions(canvas, image, drawBox, regions, width, height) {
+      if (!canvas || !image) return;
+      const rect = image.getBoundingClientRect();
+      const displayWidth = image.clientWidth || rect.width || image.naturalWidth || 1;
+      const displayHeight = image.clientHeight || rect.height || image.naturalHeight || 1;
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.round(displayWidth * dpr);
+      canvas.height = Math.round(displayHeight * dpr);
+      canvas.style.width = `${displayWidth}px`;
+      canvas.style.height = `${displayHeight}px`;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, displayWidth, displayHeight);
+      const scaleX = displayWidth / drawBox.width;
+      const scaleY = displayHeight / drawBox.height;
+      regions.forEach((region, index) => {
+        const x = (region.x - drawBox.x) * scaleX;
+        const y = (region.y - drawBox.y) * scaleY;
+        const boxWidth = region.width * scaleX;
+        const boxHeight = region.height * scaleY;
+        ctx.fillStyle = "rgba(239, 68, 68, 0.18)";
+        ctx.strokeStyle = "rgba(220, 38, 38, 0.95)";
+        ctx.lineWidth = 2;
+        ctx.fillRect(x, y, boxWidth, boxHeight);
+        ctx.strokeRect(x, y, boxWidth, boxHeight);
+        ctx.fillStyle = "rgba(15, 23, 42, 0.82)";
+        ctx.fillRect(x, Math.max(0, y - 24), 34, 20);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "12px sans-serif";
+        ctx.fillText(String(index + 1), x + 12, Math.max(14, y - 10));
+      });
+    }
+
+    function clearOverlayCanvas(canvas) {
+      if (!canvas) return;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+
+    function updateOverlayVisibility() {
+      const visible = state.modalOverlaysVisible;
+      [elements.modalBaselineOverlay, elements.modalCompareOverlay].forEach((canvas) => {
+        if (!canvas) return;
+        canvas.classList.toggle("hidden", !visible);
+      });
+      if (elements.modalOverlayToggle) {
+        elements.modalOverlayToggle.textContent = visible ? "Hide Highlights" : "Show Highlights";
       }
     }
 
@@ -756,6 +1197,12 @@
       if (!elements.modal) return;
       elements.modal.classList.add("hidden");
       state.modalDiffRenderId += 1;
+      state.modalImages = [];
+      state.modalImageIndex = 0;
+      state.modalBaselineImage = null;
+      state.modalRefImageId = null;
+      clearOverlayCanvas(elements.modalBaselineOverlay);
+      clearOverlayCanvas(elements.modalCompareOverlay);
     }
 
     function applyBaseline(refImageId) {
@@ -801,6 +1248,16 @@
     function formatPercent(value) {
       if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
       return `${Utils.formatNumber(value, 1)}%`;
+    }
+
+    function formatFeet(value) {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
+      return `${Utils.formatNumber(value, 1)} ft`;
+    }
+
+    function formatRate(value) {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
+      return Utils.formatNumber(value, 2);
     }
 
     function formatNumberOrDash(value) {
