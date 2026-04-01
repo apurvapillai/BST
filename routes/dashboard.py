@@ -3,13 +3,16 @@ from __future__ import annotations
 import copy
 import json
 import math
+import os
 import time
 from collections import Counter, defaultdict, namedtuple
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
+import numpy as np
 from flask import Blueprint, current_app, jsonify, render_template, request
+from PIL import Image, ImageOps
 from sqlalchemy import and_, case, collate, exists, false, func, literal, or_, text
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -57,6 +60,10 @@ VALID_REEL_CLASSIFICATIONS = {
     "splice",
     "scrap",
 }
+REFERENCE_CHECK_IMAGE_SIZE = (128, 128)
+REFERENCE_CHECK_CHANGE_THRESHOLD = 80.0
+REFERENCE_CHECK_MINOR_THRESHOLD = 90.0
+REFERENCE_CHECK_STRONG_THRESHOLD = 95.0
 
 dashboard_bp = Blueprint("dashboard", __name__)
 dashboard_live_service = DashboardLiveService()
@@ -3354,6 +3361,280 @@ def _serialize_reference_detail(
     }
 
 
+def _reference_check_status_band(match_pct: Optional[float]) -> str:
+    if match_pct is None:
+        return "Not compared"
+    if match_pct >= REFERENCE_CHECK_STRONG_THRESHOLD:
+        return "Strong match"
+    if match_pct >= REFERENCE_CHECK_MINOR_THRESHOLD:
+        return "Minor variation"
+    if match_pct >= REFERENCE_CHECK_CHANGE_THRESHOLD:
+        return "Noticeable variation"
+    return "Likely changed"
+
+
+def _reference_check_status_key(match_pct: Optional[float]) -> str:
+    if match_pct is None:
+        return "unscored"
+    if match_pct >= REFERENCE_CHECK_STRONG_THRESHOLD:
+        return "strong_match"
+    if match_pct >= REFERENCE_CHECK_MINOR_THRESHOLD:
+        return "minor_variation"
+    if match_pct >= REFERENCE_CHECK_CHANGE_THRESHOLD:
+        return "noticeable_variation"
+    return "likely_changed"
+
+
+def _reference_check_similarity_cluster(match_pct: Optional[float]) -> Dict[str, str]:
+    if match_pct is None:
+        return {"key": "unscored", "label": "Unscored"}
+    if match_pct >= 97.0:
+        return {"key": "strong_core", "label": "Strong Core"}
+    if match_pct >= 93.0:
+        return {"key": "near_match", "label": "Near Match"}
+    if match_pct >= 88.0:
+        return {"key": "mild_shift", "label": "Mild Shift"}
+    if match_pct >= REFERENCE_CHECK_CHANGE_THRESHOLD:
+        return {"key": "moderate_shift", "label": "Moderate Shift"}
+    return {"key": "major_change", "label": "Major Change"}
+
+
+def _reference_check_base_filters(filters: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(filters)
+    normalized["order"] = None
+    normalized["reel_code"] = None
+    normalized["reel_codes"] = []
+    normalized["reel_ids"] = []
+    return normalized
+
+
+def _resolve_reference_check_job(session: Session, filters: Dict[str, Any]) -> Optional[str]:
+    normalized = _reference_check_base_filters(filters)
+    if normalized.get("job"):
+        return normalized["job"]
+
+    query = (
+        _apply_reel_filters(session.query(Reel), normalized, include_reel_code=False)
+        .filter(Reel.job_name.isnot(None))
+        .filter(Reel.job_name != "")
+    )
+    latest_job = query.order_by(Reel.time_end.desc(), Reel.reel_id.desc()).with_entities(Reel.job_name).limit(1).scalar()
+    if latest_job:
+        return latest_job
+
+    fallback = (
+        session.query(Reel.job_name)
+        .filter(Reel.machine_id == normalized["machine_id"])
+        .filter(Reel.job_name.isnot(None))
+        .filter(Reel.job_name != "")
+        .order_by(Reel.time_end.desc(), Reel.reel_id.desc())
+        .limit(1)
+        .scalar()
+    )
+    return fallback
+
+
+def _resolve_reference_asset_path(image_src: Optional[str]) -> Optional[str]:
+    if not image_src or not current_app.static_folder:
+        return None
+    normalized = str(image_src).strip().replace("\\", "/")
+    if not normalized:
+        return None
+    if normalized.startswith(("http://", "https://", "data:")):
+        return None
+    if normalized.startswith("/static/"):
+        normalized = normalized[len("/static/") :]
+    elif normalized.startswith("static/"):
+        normalized = normalized[len("static/") :]
+    normalized = normalized.lstrip("/")
+    static_root = os.path.abspath(current_app.static_folder)
+    candidate = os.path.abspath(os.path.join(static_root, normalized))
+    if candidate != static_root and not candidate.startswith(f"{static_root}{os.sep}"):
+        return None
+    if not os.path.exists(candidate):
+        return None
+    return candidate
+
+
+def _reference_check_image_array(image_src: Optional[str]) -> Optional[np.ndarray]:
+    asset_path = _resolve_reference_asset_path(image_src)
+    if not asset_path:
+        return None
+    try:
+        with Image.open(asset_path) as image:
+            normalized = ImageOps.exif_transpose(image).convert("L")
+            normalized = ImageOps.autocontrast(normalized)
+            normalized = normalized.resize(REFERENCE_CHECK_IMAGE_SIZE, Image.Resampling.BILINEAR)
+            return np.asarray(normalized, dtype=np.float32) / 255.0
+    except (FileNotFoundError, OSError, ValueError):
+        return None
+
+
+def _reference_check_similarity_percent(
+    baseline_array: Optional[np.ndarray],
+    comparison_array: Optional[np.ndarray],
+) -> Optional[float]:
+    if baseline_array is None or comparison_array is None:
+        return None
+    if baseline_array.shape != comparison_array.shape:
+        return None
+    base = baseline_array.astype(np.float32)
+    comp = comparison_array.astype(np.float32)
+    mu_base = float(base.mean())
+    mu_comp = float(comp.mean())
+    var_base = float(base.var())
+    var_comp = float(comp.var())
+    covariance = float(((base - mu_base) * (comp - mu_comp)).mean())
+    c1 = 0.01 ** 2
+    c2 = 0.03 ** 2
+    denominator = (mu_base * mu_base + mu_comp * mu_comp + c1) * (var_base + var_comp + c2)
+    if denominator <= 0:
+        similarity = 1.0 if np.allclose(base, comp) else 0.0
+    else:
+        similarity = ((2 * mu_base * mu_comp + c1) * (2 * covariance + c2)) / denominator
+    similarity = max(0.0, min(1.0, similarity))
+    return round(similarity * 100.0, 1)
+
+
+def _reference_check_average(values: Iterable[Optional[float]]) -> Optional[float]:
+    numbers = [float(value) for value in values if value is not None]
+    if not numbers:
+        return None
+    return round(sum(numbers) / len(numbers), 1)
+
+
+def _reference_check_streaks(rows: List[Dict[str, object]]) -> Dict[str, object]:
+    longest_strong = 0
+    current_strong = 0
+    unstable_periods: List[Dict[str, object]] = []
+    unstable_start: Optional[Dict[str, object]] = None
+    unstable_rows: List[Dict[str, object]] = []
+
+    for row in rows:
+        match_pct = row.get("match_pct")
+        if isinstance(match_pct, (int, float)) and match_pct >= REFERENCE_CHECK_STRONG_THRESHOLD:
+            current_strong += 1
+            longest_strong = max(longest_strong, current_strong)
+        else:
+            current_strong = 0
+
+        if row.get("likely_changed"):
+            if unstable_start is None:
+                unstable_start = row
+                unstable_rows = [row]
+            else:
+                unstable_rows.append(row)
+        elif unstable_start is not None:
+            unstable_periods.append(
+                {
+                    "start_ref_image_id": unstable_start.get("ref_image_id"),
+                    "start_reel_code": unstable_start.get("reel_code"),
+                    "start_timestamp": unstable_start.get("captured_at"),
+                    "count": len(unstable_rows),
+                }
+            )
+            unstable_start = None
+            unstable_rows = []
+
+    if unstable_start is not None:
+        unstable_periods.append(
+            {
+                "start_ref_image_id": unstable_start.get("ref_image_id"),
+                "start_reel_code": unstable_start.get("reel_code"),
+                "start_timestamp": unstable_start.get("captured_at"),
+                "count": len(unstable_rows),
+            }
+        )
+
+    return {
+        "longest_strong_match_streak": longest_strong,
+        "unstable_periods": unstable_periods,
+    }
+
+
+def _reference_check_defect_association(rows: List[Dict[str, object]]) -> Dict[str, object]:
+    low_match_rows = [
+        row for row in rows if row.get("likely_changed") and isinstance(row.get("defect_count"), int)
+    ]
+    strong_match_rows = [
+        row
+        for row in rows
+        if isinstance(row.get("match_pct"), (int, float))
+        and row["match_pct"] >= REFERENCE_CHECK_STRONG_THRESHOLD
+        and isinstance(row.get("defect_count"), int)
+    ]
+    low_avg = _reference_check_average([row.get("defect_count") for row in low_match_rows])
+    strong_avg = _reference_check_average([row.get("defect_count") for row in strong_match_rows])
+    interpretation = "Insufficient defect data"
+    if low_avg is not None and strong_avg is not None:
+        if low_avg > strong_avg:
+            interpretation = "Lower-match references coincide with higher average defect counts"
+        elif low_avg < strong_avg:
+            interpretation = "Lower-match references do not show higher average defect counts"
+        else:
+            interpretation = "Lower-match and strong-match references show similar defect counts"
+    return {
+        "low_match_reference_count": len(low_match_rows),
+        "strong_match_reference_count": len(strong_match_rows),
+        "avg_defects_low_match": low_avg,
+        "avg_defects_strong_match": strong_avg,
+        "interpretation": interpretation,
+    }
+
+
+def _reference_check_cluster_summary(rows: List[Dict[str, object]]) -> Dict[str, object]:
+    cluster_counts: Counter[str] = Counter()
+    cluster_labels: Dict[str, str] = {}
+    for row in rows:
+        cluster_key = str(row.get("similarity_cluster_key") or "unscored")
+        cluster_label = str(row.get("similarity_cluster_label") or "Unscored")
+        cluster_counts[cluster_key] += 1
+        cluster_labels[cluster_key] = cluster_label
+    clusters = [
+        {
+            "key": key,
+            "label": cluster_labels.get(key, key.replace("_", " ").title()),
+            "count": int(count),
+        }
+        for key, count in cluster_counts.most_common()
+    ]
+    dominant = clusters[0] if clusters else None
+    return {
+        "clusters": clusters,
+        "dominant_cluster": dominant,
+    }
+
+
+def _reference_check_change_windows(rows: List[Dict[str, object]]) -> List[Dict[str, object]]:
+    windows: List[Dict[str, object]] = []
+    current: List[Dict[str, object]] = []
+    for row in rows:
+        if row.get("likely_changed"):
+            current.append(row)
+            continue
+        if current:
+            windows.append(current)
+            current = []
+    if current:
+        windows.append(current)
+    payload: List[Dict[str, object]] = []
+    for index, window in enumerate(windows, start=1):
+        match_values = [row.get("match_pct") for row in window if isinstance(row.get("match_pct"), (int, float))]
+        payload.append(
+            {
+                "window_id": index,
+                "count": len(window),
+                "start_reel_code": window[0].get("reel_code"),
+                "end_reel_code": window[-1].get("reel_code"),
+                "start_timestamp": window[0].get("captured_at"),
+                "end_timestamp": window[-1].get("captured_at"),
+                "avg_match_pct": _reference_check_average(match_values),
+                "min_match_pct": round(min(match_values), 1) if match_values else None,
+            }
+        )
+    return payload
+
+
 @dashboard_bp.route("/api/defect-drivers")
 def api_defect_drivers():
     with SessionLocal() as session:
@@ -6169,6 +6450,287 @@ def api_job_explorer():
                     "page_size": page_size,
                     "total": total,
                     "total_pages": total_pages or 1,
+                },
+            }
+        )
+
+
+@dashboard_bp.route("/api/reference-check")
+def api_reference_check():
+    with SessionLocal() as session:
+        try:
+            filters = _validate_filters(session)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        requested_job = (filters.get("job") or "").strip()
+        resolved_job = _resolve_reference_check_job(session, filters)
+        if not resolved_job:
+            return jsonify(
+                {
+                    "resolved_job": None,
+                    "requested_job": requested_job or None,
+                    "auto_selected_job": False,
+                    "job_context": None,
+                    "gallery": [],
+                    "baseline": None,
+                    "summary": None,
+                    "comparisons": [],
+                    "trend": [],
+                    "insights": {
+                        "first_major_change_point": None,
+                        "lowest_match_references": [],
+                        "stable_streaks": {"longest_strong_match_streak": 0},
+                        "unstable_periods": [],
+                        "defect_association": {
+                            "low_match_reference_count": 0,
+                            "strong_match_reference_count": 0,
+                            "avg_defects_low_match": None,
+                            "avg_defects_strong_match": None,
+                            "interpretation": "No job found in the current machine or window",
+                        },
+                    },
+                    "thresholds": {
+                        "strong_match_min": REFERENCE_CHECK_STRONG_THRESHOLD,
+                        "minor_variation_min": REFERENCE_CHECK_MINOR_THRESHOLD,
+                        "noticeable_variation_min": REFERENCE_CHECK_CHANGE_THRESHOLD,
+                    },
+                }
+            )
+
+        normalized_filters = _reference_check_base_filters(filters)
+        normalized_filters["job"] = resolved_job
+        reels = (
+            _apply_reel_filters(session.query(Reel), normalized_filters, include_reel_code=False)
+            .filter(Reel.job_name == resolved_job)
+            .options(joinedload(Reel.machine), selectinload(Reel.reference_images))
+            .order_by(Reel.time_start.asc(), Reel.reel_id.asc())
+            .all()
+        )
+
+        reel_ids = [reel.reel_id for reel in reels if reel.reel_id is not None]
+        defect_counts: Dict[int, int] = {}
+        top_defect_by_reel: Dict[int, Optional[str]] = {}
+        top_defect_count_by_reel: Dict[int, int] = {}
+        if reel_ids:
+            defect_counts = {
+                reel_id: int(count or 0)
+                for reel_id, count in (
+                    session.query(Defect.reel_id, func.count(Defect.defect_id))
+                    .filter(Defect.reel_id.in_(reel_ids))
+                    .group_by(Defect.reel_id)
+                    .all()
+                )
+            }
+            top_defect_rows = (
+                session.query(
+                    Defect.reel_id,
+                    Defect.class_name,
+                    func.count(Defect.defect_id).label("defect_count"),
+                )
+                .filter(Defect.reel_id.in_(reel_ids))
+                .filter(Defect.class_name.isnot(None))
+                .group_by(Defect.reel_id, Defect.class_name)
+                .all()
+            )
+            for row in top_defect_rows:
+                reel_id = getattr(row, "reel_id", None)
+                class_name = getattr(row, "class_name", None)
+                count = int(getattr(row, "defect_count", 0) or 0)
+                if reel_id is None or not class_name:
+                    continue
+                existing_count = int(top_defect_count_by_reel.get(reel_id, -1))
+                if count > existing_count:
+                    top_defect_by_reel[reel_id] = class_name
+                    top_defect_count_by_reel[reel_id] = count
+
+        gallery: List[Dict[str, object]] = []
+        for reel in reels:
+            captured_at = _iso(reel.time_end or reel.time_start)
+            ordered_images = _ordered_reference_images(reel.reference_images)
+            for image_index, image in enumerate(ordered_images, start=1):
+                gallery.append(
+                    {
+                        "ref_image_id": image.ref_image_id,
+                        "reel_id": reel.reel_id,
+                        "reel_code": reel.reel_code,
+                        "job_name": reel.job_name,
+                        "order_number": reel.order_number,
+                        "machine_name": reel.machine.name if reel.machine else None,
+                        "captured_at": captured_at,
+                        "image_src": (image.image_src or "").replace("\\", "/"),
+                        "filename": image.filename,
+                        "reference_index": image_index,
+                        "defect_count": int(defect_counts.get(reel.reel_id, 0)),
+                        "top_defect_type": top_defect_by_reel.get(reel.reel_id),
+                    }
+                )
+
+        gallery.sort(
+            key=lambda row: (
+                row.get("captured_at") or "",
+                row.get("reel_code") or "",
+                int(row.get("reference_index") or 0),
+                int(row.get("ref_image_id") or 0),
+            )
+        )
+
+        requested_baseline_id = request.args.get("baseline_ref_image_id", type=int)
+        baseline_row = next(
+            (row for row in gallery if row.get("ref_image_id") == requested_baseline_id),
+            None,
+        )
+        baseline_payload = None
+        comparison_rows: List[Dict[str, object]] = []
+        first_major_change_point = None
+        lowest_match_references: List[Dict[str, object]] = []
+        stable_streaks = {"longest_strong_match_streak": 0}
+        unstable_periods: List[Dict[str, object]] = []
+        defect_association = {
+            "low_match_reference_count": 0,
+            "strong_match_reference_count": 0,
+            "avg_defects_low_match": None,
+            "avg_defects_strong_match": None,
+            "interpretation": "Select a baseline to compare the job",
+        }
+        summary = None
+
+        if baseline_row:
+            baseline_array = _reference_check_image_array(baseline_row.get("image_src"))
+            baseline_payload = {**baseline_row, "is_baseline": True}
+            enriched_gallery: List[Dict[str, object]] = []
+            for row in gallery:
+                comparison = dict(row)
+                comparison["is_baseline"] = comparison.get("ref_image_id") == baseline_row.get("ref_image_id")
+                if comparison["is_baseline"]:
+                    comparison["match_pct"] = 100.0
+                    comparison["status_band"] = "Baseline"
+                    comparison["status_key"] = "baseline"
+                    comparison["likely_changed"] = False
+                    comparison["change_group"] = None
+                else:
+                    comparison_array = _reference_check_image_array(comparison.get("image_src"))
+                    match_pct = _reference_check_similarity_percent(baseline_array, comparison_array)
+                    cluster = _reference_check_similarity_cluster(match_pct)
+                    comparison["match_pct"] = match_pct
+                    comparison["status_band"] = _reference_check_status_band(match_pct)
+                    comparison["status_key"] = _reference_check_status_key(match_pct)
+                    comparison["similarity_cluster_key"] = cluster["key"]
+                    comparison["similarity_cluster_label"] = cluster["label"]
+                    comparison["likely_changed"] = bool(
+                        match_pct is not None and match_pct < REFERENCE_CHECK_CHANGE_THRESHOLD
+                    )
+                    comparison["change_group"] = None
+                    comparison_rows.append(comparison)
+                if comparison["is_baseline"]:
+                    comparison["similarity_cluster_key"] = "baseline"
+                    comparison["similarity_cluster_label"] = "Baseline"
+                enriched_gallery.append(comparison)
+            gallery = enriched_gallery
+
+            change_group = 0
+            in_change_group = False
+            for row in comparison_rows:
+                if row.get("likely_changed"):
+                    if not in_change_group:
+                        change_group += 1
+                        in_change_group = True
+                    row["change_group"] = change_group
+                else:
+                    in_change_group = False
+
+            match_values = [row.get("match_pct") for row in comparison_rows if row.get("match_pct") is not None]
+            first_major_change_point = next((row for row in comparison_rows if row.get("likely_changed")), None)
+            lowest_match_references = sorted(
+                [row for row in comparison_rows if row.get("match_pct") is not None],
+                key=lambda row: (row.get("match_pct"), row.get("captured_at") or ""),
+            )[:5]
+            streak_data = _reference_check_streaks(comparison_rows)
+            stable_streaks = {
+                "longest_strong_match_streak": int(streak_data.get("longest_strong_match_streak") or 0)
+            }
+            unstable_periods = streak_data.get("unstable_periods") or []
+            defect_association = _reference_check_defect_association(comparison_rows)
+            cluster_summary = _reference_check_cluster_summary(comparison_rows)
+            change_windows = _reference_check_change_windows(comparison_rows)
+            largest_drop = None
+            if match_values:
+                sorted_by_time = sorted(
+                    [row for row in comparison_rows if isinstance(row.get("match_pct"), (int, float))],
+                    key=lambda row: row.get("captured_at") or "",
+                )
+                previous_row = None
+                largest_delta = None
+                for row in sorted_by_time:
+                    if previous_row is not None:
+                        delta = float(row["match_pct"]) - float(previous_row["match_pct"])
+                        if largest_delta is None or delta < largest_delta:
+                            largest_delta = delta
+                            largest_drop = {
+                                "from_reel_code": previous_row.get("reel_code"),
+                                "to_reel_code": row.get("reel_code"),
+                                "from_timestamp": previous_row.get("captured_at"),
+                                "to_timestamp": row.get("captured_at"),
+                                "delta_match_pct": round(delta, 1),
+                            }
+                    previous_row = row
+            summary = {
+                "compared_references": len(comparison_rows),
+                "average_match_pct": _reference_check_average(match_values),
+                "min_match_pct": round(min(match_values), 1) if match_values else None,
+                "max_match_pct": round(max(match_values), 1) if match_values else None,
+                "below_threshold_count": sum(1 for row in comparison_rows if row.get("likely_changed")),
+                "likely_change_event_count": change_group,
+            }
+        else:
+            cluster_summary = {"clusters": [], "dominant_cluster": None}
+            change_windows = []
+            largest_drop = None
+
+        job_context = {
+            "job_name": resolved_job,
+            "total_reels": len(reels),
+            "total_references": len(gallery),
+            "window_start": _iso(filters.get("start")),
+            "window_end": _iso(filters.get("end")),
+        }
+        trend = [
+            {
+                "ref_image_id": row.get("ref_image_id"),
+                "reel_code": row.get("reel_code"),
+                "captured_at": row.get("captured_at"),
+                "match_pct": row.get("match_pct"),
+                "status_key": row.get("status_key"),
+                "likely_changed": row.get("likely_changed"),
+            }
+            for row in comparison_rows
+        ]
+
+        return jsonify(
+            {
+                "requested_job": requested_job or None,
+                "resolved_job": resolved_job,
+                "auto_selected_job": not requested_job and bool(resolved_job),
+                "job_context": job_context,
+                "gallery": gallery,
+                "baseline": baseline_payload,
+                "summary": summary,
+                "comparisons": comparison_rows,
+                "trend": trend,
+                "insights": {
+                    "first_major_change_point": first_major_change_point,
+                    "lowest_match_references": lowest_match_references,
+                    "stable_streaks": stable_streaks,
+                    "unstable_periods": unstable_periods,
+                    "defect_association": defect_association,
+                    "cluster_summary": cluster_summary,
+                    "change_windows": change_windows,
+                    "largest_match_drop": largest_drop,
+                },
+                "thresholds": {
+                    "strong_match_min": REFERENCE_CHECK_STRONG_THRESHOLD,
+                    "minor_variation_min": REFERENCE_CHECK_MINOR_THRESHOLD,
+                    "noticeable_variation_min": REFERENCE_CHECK_CHANGE_THRESHOLD,
                 },
             }
         )

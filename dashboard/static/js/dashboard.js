@@ -10,6 +10,7 @@
     "defect-drivers": { path: "/static/js/tabs/defect_drivers.js", exportName: "DefectDriversTab" },
     "qc-review": { path: "/static/js/tabs/qc_review.js", exportName: "QcReviewTab" },
     heatmap: { path: "/static/js/tabs/heatmap.js", exportName: "HeatmapTab" },
+    "reference-check": { path: "/static/js/tabs/reference_check.js", exportName: "ReferenceCheckTab" },
   };
   const tabModuleCache = {};
 
@@ -25,6 +26,7 @@
   function setRequiresJobClass(tabName) {
     const shouldRequire = guardedTabs.has(tabName);
     document.body.classList.toggle("requires-job-tab", shouldRequire);
+    document.body.classList.toggle("reference-check-tab", tabName === "reference-check");
   }
 
   // normalizeDashboardUrl() disabled to allow deep links (previously stripped ? and # from /dashboard)
@@ -144,6 +146,7 @@
     Router.register("defect-drivers", createLazyTab("defect-drivers"));
     Router.register("qc-review", createLazyTab("qc-review"));
     Router.register("heatmap", createLazyTab("heatmap"));
+    Router.register("reference-check", createLazyTab("reference-check"));
     Router.init();
     resolveDeferredTab();
     const initialTab = typeof Router.current === "function" ? Router.current() : "overview";
