@@ -23,7 +23,6 @@
       modalBaselineImage: null,
       modalReelGroups: [],
       modalReelIndex: -1,
-      lastLoggedDebugRefImageId: null,
     };
 
     const elements = {};
@@ -873,7 +872,6 @@
       if (elements.modalCompareLabel) {
         elements.modalCompareLabel.textContent = comparisonMode ? "Selected" : "Preview";
       }
-      logComparisonDebug(item, comparisonMode);
       renderModalComparison(item);
       if (elements.modalMeta) {
         elements.modalMeta.innerHTML = [
@@ -1387,57 +1385,8 @@
       state.modalReelGroups = [];
       state.modalReelIndex = -1;
       state.modalRefImageId = null;
-      state.lastLoggedDebugRefImageId = null;
       clearOverlayCanvas(elements.modalBaselineOverlay);
       clearOverlayCanvas(elements.modalCompareOverlay);
-    }
-
-    function logComparisonDebug(item, comparisonMode) {
-      if (!comparisonMode || !item) return;
-      const refImageId = Number(item.ref_image_id);
-      if (!Number.isFinite(refImageId)) return;
-      if (state.lastLoggedDebugRefImageId === refImageId) return;
-      state.lastLoggedDebugRefImageId = refImageId;
-      const debug = item.debug_metrics || {};
-      console.groupCollapsed(
-        `[Reference Check Debug] ${item.reel_code || "Reference"} · ref_image_id=${refImageId}`
-      );
-      console.log({
-        baseline_ref_image_id:
-          state.modalBaselineImage && Number.isFinite(Number(state.modalBaselineImage.ref_image_id))
-            ? Number(state.modalBaselineImage.ref_image_id)
-            : null,
-        comparison_ref_image_id: refImageId,
-        reel_code: item.reel_code || null,
-        captured_at: item.captured_at || null,
-        content_match_pct: item.content_match_pct ?? null,
-        color_match_pct: item.color_match_pct ?? null,
-        alignment_match_pct: item.alignment_match_pct ?? null,
-        overall_match_pct: item.overall_match_pct ?? null,
-        best_vertical_wrap_dy_px: item.best_vertical_wrap_dy_px ?? null,
-        best_horizontal_dx_px: item.best_horizontal_dx_px ?? null,
-        alignment_confidence: item.alignment_confidence ?? null,
-        content_presence_pct: item.content_presence_pct ?? null,
-        coarse_presence_pct: item.coarse_presence_pct ?? null,
-        coarse_missing_region_count: Array.isArray(item.coarse_missing_regions) ? item.coarse_missing_regions.length : 0,
-        debug_metrics: {
-          gradient_ssim_pct: debug.gradient_ssim_pct ?? null,
-          gradient_corr_pct: debug.gradient_corr_pct ?? null,
-          edge_overlap_pct: debug.edge_overlap_pct ?? null,
-          normalized_gray_corr_pct: debug.normalized_gray_corr_pct ?? null,
-          normalized_gray_ssim_pct: debug.normalized_gray_ssim_pct ?? null,
-          masked_lab_delta: debug.masked_lab_delta ?? null,
-          global_lab_delta: debug.global_lab_delta ?? null,
-          lab_lightness_delta: debug.lab_lightness_delta ?? null,
-          lab_chroma_similarity_pct: debug.lab_chroma_similarity_pct ?? null,
-          brightness_delta_pct: debug.brightness_delta_pct ?? null,
-          alignment_offset: debug.alignment_offset ?? null,
-          content_inputs: debug.content_inputs ?? null,
-          color_inputs: debug.color_inputs ?? null,
-          rule_inputs: debug.rule_inputs ?? null,
-        },
-      });
-      console.groupEnd();
     }
 
     function applyBaseline(refImageId) {

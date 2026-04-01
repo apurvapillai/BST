@@ -3778,15 +3778,17 @@ def _reference_check_find_best_alignment(
     best = candidate_results[0]
     second_score = float(candidate_results[1]["score"]) if len(candidate_results) > 1 else float(best["score"] or 0.0)
     score_margin = max(float(best["score"] or 0.0) - second_score, 0.0)
-    dx_similarity = max(
-        0.0,
-        100.0 - ((abs(int(best["dx"])) / max(REFERENCE_CHECK_MAX_HORIZONTAL_SHIFT_PX, 1)) * 25.0),
-    )
+    composite_score = float(best["score"] or 0.0)
+    gradient_corr = float(best.get("gradient_corr_pct") or 0.0)
+    structure_corr = float(best.get("normalized_gray_corr_pct") or 0.0)
+    edge_overlap = float(best.get("edge_overlap_pct") or 0.0)
+    dx_similarity = max(0.0, 100.0 - ((abs(int(best["dx"])) / max(REFERENCE_CHECK_MAX_HORIZONTAL_SHIFT_PX, 1)) * 8.0))
+    base_confidence = (gradient_corr * 0.58) + (edge_overlap * 0.22) + (structure_corr * 0.12) + (composite_score * 0.08)
     confidence = min(
         100.0,
         max(
             0.0,
-            (float(best["score"] or 0.0) * 0.78) + (score_margin * 0.17) + (dx_similarity * 0.05),
+            (base_confidence * 0.93) + (min(score_margin, 12.0) * 0.05) + (dx_similarity * 0.02),
         ),
     )
     return {
@@ -3797,6 +3799,8 @@ def _reference_check_find_best_alignment(
         "gradient_corr_pct": best.get("gradient_corr_pct"),
         "normalized_gray_corr_pct": best.get("normalized_gray_corr_pct"),
         "edge_overlap_pct": best.get("edge_overlap_pct"),
+        "dx_similarity_pct": round(dx_similarity, 1),
+        "score_margin_pct": round(score_margin, 1),
     }
 
 
@@ -4003,12 +4007,12 @@ def _reference_check_difference_profile(
             1,
         )
     alignment_confidence = alignment.get("confidence")
-    dx_similarity = max(
+    dx_similarity = float(alignment.get("dx_similarity_pct") or max(
         0.0,
-        100.0 - ((abs(dx) / max(REFERENCE_CHECK_MAX_HORIZONTAL_SHIFT_PX, 1)) * 20.0),
-    )
+        100.0 - ((abs(dx) / max(REFERENCE_CHECK_MAX_HORIZONTAL_SHIFT_PX, 1)) * 8.0),
+    ))
     alignment_match = (
-        round(((float(alignment_confidence or 0.0) * 0.82) + (dx_similarity * 0.18)), 1)
+        round(((float(alignment_confidence or 0.0) * 0.92) + (dx_similarity * 0.08)), 1)
         if alignment_confidence is not None
         else None
     )
@@ -4111,6 +4115,13 @@ def _reference_check_difference_profile(
         "brightness_delta_pct": brightness_delta_pct,
         "alignment_match_pct": alignment_match,
         "alignment_offset": alignment_offset,
+        "alignment_inputs": {
+            "alignment_confidence": alignment_confidence,
+            "dx_similarity_pct": dx_similarity,
+            "best_vertical_wrap_dy_px": signed_dy,
+            "best_horizontal_dx_px": dx,
+            "score_margin_pct": alignment.get("score_margin_pct"),
+        },
         "content_inputs": {
             "content_presence_pct": content_presence_pct,
             "coarse_presence_pct": coarse_presence_pct,
@@ -4134,6 +4145,8 @@ def _reference_check_difference_profile(
             "content_presence_pct": content_presence_pct,
             "coarse_presence_pct": coarse_presence_pct,
             "coarse_missing_region_count": len(coarse_missing_regions),
+            "alignment_confidence": alignment_confidence,
+            "dx_similarity_pct": dx_similarity,
         },
     }
     return {
