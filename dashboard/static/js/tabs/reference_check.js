@@ -44,6 +44,10 @@
       elements.modalClose = Utils.qs("#referenceCheckModalClose");
       elements.modalDismiss = Utils.qs("#referenceCheckModalDismiss");
       elements.modalBaseline = Utils.qs("#referenceCheckModalBaseline");
+      elements.modalComparison = Utils.qs("#referenceCheckModalComparison");
+      elements.modalBaselinePanel = Utils.qs("#referenceCheckModalBaselinePanel");
+      elements.modalComparePanel = Utils.qs("#referenceCheckModalComparePanel");
+      elements.modalCompareLabel = Utils.qs("#referenceCheckModalCompareLabel");
       elements.modalBaselineImage = Utils.qs("#referenceCheckModalBaselineImage");
       elements.modalCompareImage = Utils.qs("#referenceCheckModalCompareImage");
       elements.modalBaselineOverlay = Utils.qs("#referenceCheckModalBaselineOverlay");
@@ -735,6 +739,7 @@
       state.modalRefImageId = refImageId;
       state.modalOverlaysVisible = true;
       updateModalState();
+      document.body.classList.add("reference-check-modal-open");
       elements.modal.classList.remove("hidden");
     }
 
@@ -750,22 +755,37 @@
       state.modalRefImageId = Number(actualImages[state.modalImageIndex].ref_image_id) || null;
       state.modalOverlaysVisible = true;
       updateModalState();
+      document.body.classList.add("reference-check-modal-open");
       elements.modal.classList.remove("hidden");
     }
 
     function updateModalState() {
       const item = state.modalImages[state.modalImageIndex];
       if (!item || !elements.modal) return;
+      const comparisonMode = isComparisonMode(item);
       state.modalRefImageId = Number(item.ref_image_id) || state.modalRefImageId;
       if (elements.modalTitle) {
-        elements.modalTitle.textContent = item.reel_code || item.filename || "Reference Preview";
+        elements.modalTitle.textContent = comparisonMode
+          ? (item.reel_code || item.filename || "Reference Comparison")
+          : (item.reel_code || item.filename || "Reference Preview");
       }
       if (elements.modalSubtitle) {
         const subtitleParts = [formatTime(item.captured_at, "Timestamp unavailable")];
+        if (comparisonMode) {
+          subtitleParts.unshift("Baseline vs selected reference");
+        } else {
+          subtitleParts.unshift("Candidate reference preview");
+        }
         if (state.modalImages.length > 1) {
           subtitleParts.push(`Reference ${state.modalImageIndex + 1} of ${state.modalImages.length}`);
         }
         elements.modalSubtitle.textContent = subtitleParts.join(" · ");
+      }
+      if (elements.modalComparison) {
+        elements.modalComparison.classList.toggle("is-preview-mode", !comparisonMode);
+      }
+      if (elements.modalCompareLabel) {
+        elements.modalCompareLabel.textContent = comparisonMode ? "Selected" : "Preview";
       }
       renderModalComparison(item);
       if (elements.modalMeta) {
@@ -782,16 +802,18 @@
         elements.modalBaseline.textContent = item.is_baseline ? "Active Baseline" : "Set as Baseline";
       }
       if (elements.modalPrev) {
-        elements.modalPrev.disabled = state.modalImages.length <= 1;
-        elements.modalPrev.classList.toggle("hidden", state.modalImages.length <= 1);
+        const hideNav = state.modalImages.length <= 1 || !comparisonMode;
+        elements.modalPrev.disabled = hideNav;
+        elements.modalPrev.classList.toggle("hidden", hideNav);
       }
       if (elements.modalNext) {
-        elements.modalNext.disabled = state.modalImages.length <= 1;
-        elements.modalNext.classList.toggle("hidden", state.modalImages.length <= 1);
+        const hideNav = state.modalImages.length <= 1 || !comparisonMode;
+        elements.modalNext.disabled = hideNav;
+        elements.modalNext.classList.toggle("hidden", hideNav);
       }
       if (elements.modalImageCounter) {
         elements.modalImageCounter.textContent =
-          state.modalImages.length > 1 ? `${state.modalImageIndex + 1} of ${state.modalImages.length}` : "";
+          comparisonMode && state.modalImages.length > 1 ? `${state.modalImageIndex + 1} of ${state.modalImages.length}` : "";
       }
     }
 
@@ -804,36 +826,49 @@
 
     function renderModalComparison(item) {
       const baseline = state.modalBaselineImage || (payload && payload.baseline ? payload.baseline : null);
+      const comparisonMode =
+        Boolean(baseline && baseline.image_src) &&
+        Number(baseline.ref_image_id) !== Number(item.ref_image_id);
       if (!elements.modalBaselineImage || !elements.modalCompareImage) return;
       if (elements.modalAnalysis) {
         elements.modalAnalysis.classList.add("hidden");
       }
-      if (!baseline || !baseline.image_src || !item.image_src) {
+      if (!item.image_src) {
+        elements.modalCompareImage.removeAttribute("src");
+        elements.modalCompareImage.alt = "Reference preview unavailable";
+        elements.modalBaselineImage.removeAttribute("src");
         clearOverlayCanvas(elements.modalBaselineOverlay);
         clearOverlayCanvas(elements.modalCompareOverlay);
         return;
       }
-      const baselineSrc = urlForStatic(baseline.image_src);
       const compareSrc = urlForStatic(item.image_src);
-      elements.modalBaselineImage.src = baselineSrc;
-      elements.modalBaselineImage.alt = baseline.reel_code || "Baseline preview";
       elements.modalCompareImage.src = compareSrc;
       elements.modalCompareImage.alt = item.reel_code || "Selected preview";
-      if (Number(baseline.ref_image_id) === Number(item.ref_image_id)) {
+      if (!comparisonMode) {
+        elements.modalBaselineImage.removeAttribute("src");
         clearOverlayCanvas(elements.modalBaselineOverlay);
         clearOverlayCanvas(elements.modalCompareOverlay);
+        if (elements.modalDiffEmpty) {
+          elements.modalDiffEmpty.classList.add("hidden");
+        }
+        if (elements.modalDiffCanvas) {
+          const ctx = elements.modalDiffCanvas.getContext("2d");
+          if (ctx) {
+            ctx.clearRect(0, 0, elements.modalDiffCanvas.width, elements.modalDiffCanvas.height);
+          }
+        }
         if (elements.modalSummaryText) {
-          elements.modalSummaryText.textContent = "This reference is the active baseline. No comparison regions to highlight.";
+          elements.modalSummaryText.textContent = "Select this reference as the baseline to unlock comparison analysis across the job.";
         }
         if (elements.modalSummaryList) {
           elements.modalSummaryList.innerHTML = "";
         }
-        if (elements.modalAnalysis) {
-          elements.modalAnalysis.classList.add("hidden");
-        }
         updateOverlayVisibility();
         return;
       }
+      const baselineSrc = urlForStatic(baseline.image_src);
+      elements.modalBaselineImage.src = baselineSrc;
+      elements.modalBaselineImage.alt = baseline.reel_code || "Baseline preview";
       if (elements.modalAnalysis) {
         elements.modalAnalysis.classList.remove("hidden");
       }
@@ -1178,6 +1213,12 @@
       }
     }
 
+    function isComparisonMode(item) {
+      const baseline = state.modalBaselineImage || (payload && payload.baseline ? payload.baseline : null);
+      if (!baseline || !baseline.image_src || !item) return false;
+      return Number(baseline.ref_image_id) !== Number(item.ref_image_id);
+    }
+
     function loadImage(src) {
       return new Promise((resolve, reject) => {
         if (!src) {
@@ -1196,6 +1237,7 @@
     function closeModal() {
       if (!elements.modal) return;
       elements.modal.classList.add("hidden");
+      document.body.classList.remove("reference-check-modal-open");
       state.modalDiffRenderId += 1;
       state.modalImages = [];
       state.modalImageIndex = 0;

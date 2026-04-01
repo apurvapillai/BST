@@ -1167,72 +1167,74 @@
     <div class="modal-overlay hidden" id="referenceCheckModal" role="dialog" aria-modal="true" aria-labelledby="referenceCheckModalTitle">
       <div class="modal-dialog reference-check-modal">
         <button type="button" class="modal-close-btn" id="referenceCheckModalClose" aria-label="Close">&times;</button>
-        <div class="reference-check-modal__content">
-          <div class="reference-check-modal__comparison">
-            <div class="reference-check-modal__panel">
-              <div class="reference-check-modal__panel-header">
-                <strong>Baseline</strong>
-              </div>
-              <div class="reference-check-modal__stage">
-                <img id="referenceCheckModalBaselineImage" alt="Baseline preview" loading="lazy" decoding="async">
-                <canvas id="referenceCheckModalBaselineOverlay" aria-label="Baseline change regions overlay"></canvas>
-              </div>
-            </div>
-            <div class="reference-check-modal__panel">
-              <div class="reference-check-modal__panel-header">
-                <div>
-                  <strong>Selected</strong>
-                  <small id="referenceCheckModalImageCounter"></small>
+        <div class="reference-check-modal__scroll">
+          <div class="reference-check-modal__content">
+            <div class="reference-check-modal__comparison" id="referenceCheckModalComparison">
+              <div class="reference-check-modal__panel" id="referenceCheckModalBaselinePanel">
+                <div class="reference-check-modal__panel-header">
+                  <strong>Baseline</strong>
                 </div>
-                <div class="reference-check-modal__nav">
-                  <button type="button" class="button-secondary" id="referenceCheckModalPrev">Prev</button>
-                  <button type="button" class="button-secondary" id="referenceCheckModalNext">Next</button>
+                <div class="reference-check-modal__stage">
+                  <img id="referenceCheckModalBaselineImage" alt="Baseline preview" loading="lazy" decoding="async">
+                  <canvas id="referenceCheckModalBaselineOverlay" aria-label="Baseline change regions overlay"></canvas>
                 </div>
               </div>
-              <div class="reference-check-modal__stage">
-                <img id="referenceCheckModalCompareImage" alt="Selected reference preview" loading="lazy" decoding="async">
-                <canvas id="referenceCheckModalCompareOverlay" aria-label="Selected change regions overlay"></canvas>
-              </div>
-            </div>
-          </div>
-          <div class="reference-check-modal__body">
-            <h3 id="referenceCheckModalTitle">Reference Preview</h3>
-            <p id="referenceCheckModalSubtitle"></p>
-            <dl class="reference-check-modal__meta" id="referenceCheckModalMeta"></dl>
-            <div class="reference-check-modal__analysis hidden" id="referenceCheckModalAnalysis">
-              <div class="reference-check-modal__analysis-header">
-                <div>
-                  <strong>Change Analysis</strong>
-                  <small>Grouped difference regions are highlighted directly on both images.</small>
-                </div>
-                <button type="button" class="button-secondary" id="referenceCheckModalOverlayToggle">Hide Highlights</button>
-              </div>
-              <div class="reference-check-modal__analysis-grid">
-                <div class="reference-check-modal__heatmap">
-                  <div class="reference-check-modal__heatmap-header">
-                    <strong>Diff Heatmap</strong>
-                    <small>Raw normalized difference intensity for the selected comparison.</small>
+              <div class="reference-check-modal__panel" id="referenceCheckModalComparePanel">
+                <div class="reference-check-modal__panel-header">
+                  <div>
+                    <strong id="referenceCheckModalCompareLabel">Selected</strong>
+                    <small id="referenceCheckModalImageCounter"></small>
                   </div>
-                  <canvas id="referenceCheckModalDiffCanvas" aria-label="Reference difference heatmap"></canvas>
-                  <div class="reference-check-modal__heatmap-empty hidden" id="referenceCheckModalDiffEmpty">
-                    Diff heatmap unavailable for this comparison.
+                  <div class="reference-check-modal__nav">
+                    <button type="button" class="button-secondary" id="referenceCheckModalPrev">Prev</button>
+                    <button type="button" class="button-secondary" id="referenceCheckModalNext">Next</button>
                   </div>
                 </div>
-                <div class="reference-check-modal__summary">
-                  <div class="reference-check-modal__summary-header">
-                    <strong>Detected Change Regions</strong>
-                    <small>Small background noise is suppressed so the main changes stand out.</small>
-                  </div>
-                  <p class="reference-check-modal__summary-text" id="referenceCheckModalSummaryText">
-                    No change summary available.
-                  </p>
-                  <div class="reference-check-modal__summary-list" id="referenceCheckModalSummaryList"></div>
+                <div class="reference-check-modal__stage">
+                  <img id="referenceCheckModalCompareImage" alt="Selected reference preview" loading="lazy" decoding="async">
+                  <canvas id="referenceCheckModalCompareOverlay" aria-label="Selected change regions overlay"></canvas>
                 </div>
               </div>
             </div>
-            <div class="modal-actions">
-              <button type="button" class="button-secondary" id="referenceCheckModalDismiss">Close</button>
-              <button type="button" class="button-primary" id="referenceCheckModalBaseline">Set as Baseline</button>
+            <div class="reference-check-modal__body">
+              <h3 id="referenceCheckModalTitle">Reference Preview</h3>
+              <p id="referenceCheckModalSubtitle"></p>
+              <dl class="reference-check-modal__meta" id="referenceCheckModalMeta"></dl>
+              <div class="reference-check-modal__analysis hidden" id="referenceCheckModalAnalysis">
+                <div class="reference-check-modal__analysis-header">
+                  <div>
+                    <strong>Change Analysis</strong>
+                    <small>Grouped difference regions are highlighted directly on both images.</small>
+                  </div>
+                  <button type="button" class="button-secondary" id="referenceCheckModalOverlayToggle">Hide Highlights</button>
+                </div>
+                <div class="reference-check-modal__analysis-grid">
+                  <div class="reference-check-modal__heatmap">
+                    <div class="reference-check-modal__heatmap-header">
+                      <strong>Diff Heatmap</strong>
+                      <small>Raw normalized difference intensity for the selected comparison.</small>
+                    </div>
+                    <canvas id="referenceCheckModalDiffCanvas" aria-label="Reference difference heatmap"></canvas>
+                    <div class="reference-check-modal__heatmap-empty hidden" id="referenceCheckModalDiffEmpty">
+                      Diff heatmap unavailable for this comparison.
+                    </div>
+                  </div>
+                  <div class="reference-check-modal__summary">
+                    <div class="reference-check-modal__summary-header">
+                      <strong>Detected Change Regions</strong>
+                      <small>Small background noise is suppressed so the main changes stand out.</small>
+                    </div>
+                    <p class="reference-check-modal__summary-text" id="referenceCheckModalSummaryText">
+                      No change summary available.
+                    </p>
+                    <div class="reference-check-modal__summary-list" id="referenceCheckModalSummaryList"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="modal-actions">
+                <button type="button" class="button-secondary" id="referenceCheckModalDismiss">Close</button>
+                <button type="button" class="button-primary" id="referenceCheckModalBaseline">Set as Baseline</button>
+              </div>
             </div>
           </div>
         </div>

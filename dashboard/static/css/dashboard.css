@@ -6402,13 +6402,26 @@ body.reference-check-tab #activeFilterChips .filter-chip[data-key="reel_id"] {
 
 .reference-check-modal {
   width: min(1380px, 96vw);
-  padding: 24px;
+  max-height: min(90vh, 980px);
+  padding: 20px 20px 18px;
   text-align: left;
   border-radius: 24px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background:
     radial-gradient(circle at top left, rgba(14,165,233,0.08), transparent 28%),
     radial-gradient(circle at top right, rgba(16,185,129,0.08), transparent 24%),
     var(--surface);
+}
+
+.reference-check-modal__scroll {
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 6px;
 }
 
 .reference-check-modal__content {
@@ -6416,6 +6429,8 @@ body.reference-check-tab #activeFilterChips .filter-chip[data-key="reel_id"] {
   flex-direction: column;
   gap: 20px;
   align-items: start;
+  width: 100%;
+  min-height: 0;
 }
 
 .reference-check-modal__comparison {
@@ -6423,6 +6438,18 @@ body.reference-check-tab #activeFilterChips .filter-chip[data-key="reel_id"] {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 20px;
   width: 100%;
+}
+
+.reference-check-modal__comparison.is-preview-mode {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.reference-check-modal__comparison.is-preview-mode #referenceCheckModalBaselinePanel {
+  display: none;
+}
+
+.reference-check-modal__comparison.is-preview-mode #referenceCheckModalComparePanel {
+  max-width: none;
 }
 
 .reference-check-modal__panel {
@@ -6461,7 +6488,8 @@ body.reference-check-tab #activeFilterChips .filter-chip[data-key="reel_id"] {
 
 .reference-check-modal__stage {
   aspect-ratio: 16 / 10;
-  min-height: 360px;
+  min-height: clamp(220px, 34vh, 360px);
+  max-height: 38vh;
   overflow: hidden;
 }
 
@@ -6578,6 +6606,19 @@ body.reference-check-tab #activeFilterChips .filter-chip[data-key="reel_id"] {
   border-top: 1px solid rgba(148, 163, 184, 0.16);
 }
 
+.reference-check-modal .modal-close-btn {
+  position: relative;
+  top: auto;
+  right: auto;
+  align-self: flex-end;
+  margin: 0 0 10px;
+  z-index: 2;
+}
+
+body.reference-check-modal-open {
+  overflow: hidden;
+}
+
 .reference-check-modal__meta {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -6633,7 +6674,8 @@ body.reference-check-tab #activeFilterChips .filter-chip[data-key="reel_id"] {
 
   .reference-check-modal {
     width: min(96vw, 96vw);
-    padding: 18px;
+    max-height: 92vh;
+    padding: 16px;
   }
 
   .reference-check-modal__meta {
@@ -6642,5 +6684,6 @@ body.reference-check-tab #activeFilterChips .filter-chip[data-key="reel_id"] {
 
   .reference-check-modal__stage {
     min-height: 220px;
+    max-height: 32vh;
   }
 }
