@@ -1139,6 +1139,25 @@
       </div>
     </section>
 
+    <div class="modal-overlay hidden" id="driversReferenceViewerModal" role="dialog" aria-modal="true" aria-labelledby="driversReferenceViewerTitle">
+      <div class="modal-dialog drivers-reference-viewer">
+        <button type="button" class="modal-close-btn" id="driversReferenceViewerClose" aria-label="Close">&times;</button>
+        <div class="drivers-reference-viewer__header">
+          <div>
+            <h3 id="driversReferenceViewerTitle">Reference Images</h3>
+            <p id="driversReferenceViewerSubtitle"></p>
+          </div>
+          <span class="drivers-reference-viewer__count" id="driversReferenceViewerCount"></span>
+        </div>
+        <div class="drivers-reference-viewer__body">
+          <div class="drivers-reference-viewer__grid" id="driversReferenceViewerGrid"></div>
+        </div>
+        <div class="modal-actions drivers-reference-viewer__actions">
+          <button type="button" class="button-secondary" id="driversReferenceViewerDismiss">Close</button>
+        </div>
+      </div>
+    </div>
+
     <div class="modal-overlay hidden" id="jobSelectModal" role="dialog" aria-modal="true">
       <div class="modal-dialog job-select-dialog">
         <button type="button" class="modal-close-btn" id="jobSelectModalClose" aria-label="Close">&times;</button>

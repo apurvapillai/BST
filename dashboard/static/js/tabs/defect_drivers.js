@@ -10,6 +10,8 @@
     let selectedTimelineEventKey = "";
     let selectedEventFilters = new Set();
     let bstTimeExpanded = false;
+    let activeReferenceDetail = null;
+    let referenceViewerState = null;
     const FEET_TO_METERS = 0.3048;
     const METERS_TO_FEET = 3.28084;
     const DEFAULT_MIN_REEL_LENGTH_FEET = 4000;
@@ -108,6 +110,7 @@
 
     function renderTimelineDetailEmpty() {
       if (!els.timelineDetail) return;
+      activeReferenceDetail = null;
       els.timelineDetail.innerHTML = `
         <div class="drivers-detail-empty">
           <p class="kpi-section__title">Event Detail</p>
@@ -1371,10 +1374,15 @@
         ? `
           <div class="drivers-detail-gallery">
             ${images
-              .map((image) => {
+              .map((image, index) => {
                 const src = image.image_src ? urlForStatic(image.image_src) : "";
                 return `
-                  <article class="drivers-detail-image-card">
+                  <button
+                    type="button"
+                    class="drivers-detail-image-card drivers-detail-image-card--interactive"
+                    data-reference-viewer-open="true"
+                    data-reference-viewer-index="${index}"
+                  >
                     <div class="drivers-detail-image-frame">
                       ${src
                         ? `<img src="${Utils.escapeHtml(src)}" alt="${Utils.escapeHtml(image.filename || `Reference ${image.order_index || ""}`)}" loading="lazy" decoding="async">`
@@ -1385,7 +1393,7 @@
                       <span>${Utils.escapeHtml(`Order ${formatNumber(image.order_index || 0)}`)}</span>
                       <span>${Utils.escapeHtml(formatTime(image.captured_at))}</span>
                     </div>
-                  </article>
+                  </button>
                 `;
               })
               .join("")}
@@ -1394,8 +1402,15 @@
         : `<div class="drivers-empty placeholder">No reference images attached to this event.</div>`;
       return `
         <div class="drivers-detail-block">
-          <p class="kpi-section__title">Reference Change</p>
-          <small>${Utils.escapeHtml((detail.job || "Unassigned") + " · " + (detail.order || "No order") + " · " + (detail.reel_code || "Reel"))}</small>
+          <div class="drivers-detail-header">
+            <div>
+              <p class="kpi-section__title">Reference Change</p>
+              <small>${Utils.escapeHtml((detail.job || "Unassigned") + " · " + (detail.order || "No order") + " · " + (detail.reel_code || "Reel"))}</small>
+            </div>
+            ${images.length
+              ? `<button type="button" class="button-secondary drivers-detail-expand-btn" data-reference-viewer-open="true" data-reference-viewer-index="0" aria-label="Open reference comparison viewer">Expand</button>`
+              : ""}
+          </div>
           <div class="drivers-detail-metrics">
             <span>${Utils.escapeHtml(`Reel ID ${formatNumber(detail.reel_id || 0)}`)}</span>
             <span>${Utils.escapeHtml(`${formatNumber(detail.reference_count || 0)} reference images`)}</span>
@@ -1624,6 +1639,15 @@
         return;
       }
       const detail = event.detail || {};
+      activeReferenceDetail =
+        event.type === "reference_change"
+          ? {
+              title: event.label || "Reference Change",
+              subtitle: (detail.job || "Unassigned") + " · " + (detail.order || "No order") + " · " + (detail.reel_code || "Reel"),
+              reelCode: detail.reel_code || "Reel",
+              images: Array.isArray(detail.reference_images) ? detail.reference_images : [],
+            }
+          : null;
       let body = `
         <div class="drivers-detail-empty">
           <p class="kpi-section__title">${Utils.escapeHtml(event.label || "Event Detail")}</p>
@@ -1646,6 +1670,68 @@
       els.timelineDetail.innerHTML = body;
     }
 
+    function closeReferenceViewer() {
+      referenceViewerState = null;
+      if (els.referenceViewerModal) {
+        els.referenceViewerModal.classList.add("hidden");
+      }
+      document.body.classList.remove("drivers-reference-viewer-open");
+    }
+
+    function renderReferenceViewer() {
+      if (!els.referenceViewerModal || !els.referenceViewerGrid || !referenceViewerState) return;
+      const images = Array.isArray(referenceViewerState.images) ? referenceViewerState.images : [];
+      const count = images.length;
+      const currentIndex = Math.max(0, Math.min(referenceViewerState.index || 0, Math.max(0, count - 1)));
+      if (els.referenceViewerTitle) {
+        els.referenceViewerTitle.textContent = referenceViewerState.title || "Reference Images";
+      }
+      if (els.referenceViewerSubtitle) {
+        const reelLabel = referenceViewerState.reelCode || "Reel";
+        els.referenceViewerSubtitle.textContent = `${referenceViewerState.subtitle || reelLabel} · ${count} image${count === 1 ? "" : "s"}`;
+      }
+      els.referenceViewerGrid.dataset.imageCount = String(count);
+      els.referenceViewerGrid.innerHTML = images
+        .map((image, index) => {
+          const src = image.image_src ? urlForStatic(image.image_src) : "";
+          const isActive = index === currentIndex;
+          return `
+            <article class="drivers-reference-viewer__card${isActive ? " is-active" : ""}">
+              <div class="drivers-reference-viewer__frame">
+                ${src
+                  ? `<img src="${Utils.escapeHtml(src)}" alt="${Utils.escapeHtml(image.filename || `Reference ${image.order_index || index + 1}`)}" loading="lazy" decoding="async">`
+                  : `<div class="drivers-empty placeholder">No preview</div>`}
+              </div>
+              <div class="drivers-reference-viewer__meta">
+                <strong>${Utils.escapeHtml(image.filename || `Reference ${image.order_index || index + 1}`)}</strong>
+                <span>${Utils.escapeHtml(`Order ${formatNumber(image.order_index || 0)}`)}</span>
+                <span>${Utils.escapeHtml(formatTime(image.captured_at))}</span>
+              </div>
+            </article>
+          `;
+        })
+        .join("");
+      if (els.referenceViewerCount) {
+        els.referenceViewerCount.textContent = count ? `${currentIndex + 1} of ${count}` : "";
+      }
+    }
+
+    function openReferenceViewer(index = 0) {
+      if (!activeReferenceDetail || !Array.isArray(activeReferenceDetail.images) || !activeReferenceDetail.images.length) return;
+      referenceViewerState = {
+        title: activeReferenceDetail.title,
+        subtitle: activeReferenceDetail.subtitle,
+        reelCode: activeReferenceDetail.reelCode,
+        images: activeReferenceDetail.images,
+        index: Number.isInteger(index) ? index : Number(index) || 0,
+      };
+      renderReferenceViewer();
+      if (els.referenceViewerModal) {
+        els.referenceViewerModal.classList.remove("hidden");
+      }
+      document.body.classList.add("drivers-reference-viewer-open");
+    }
+
     function handleTimelineClick(event) {
       const button = event.target.closest("[data-timeline-row][data-timeline-event]");
       if (!button) return;
@@ -1655,6 +1741,13 @@
       selectedTimelineEventKey = `${rowIndex}:${eventIndex}`;
       renderTimeline(rawTimelineRows);
       renderTimelineDetailForEvent(rowIndex, eventIndex);
+    }
+
+    function handleTimelineDetailClick(event) {
+      const openButton = event.target.closest("[data-reference-viewer-open]");
+      if (!openButton) return;
+      const index = Number(openButton.dataset.referenceViewerIndex);
+      openReferenceViewer(Number.isInteger(index) ? index : 0);
     }
 
     function handleDriverFilterClick(event) {
@@ -1774,13 +1867,41 @@
       els.reference = document.getElementById("defectDriversReference");
       els.speed = document.getElementById("defectDriversSpeed");
       els.length = document.getElementById("defectDriversLength");
+      els.referenceViewerModal = document.getElementById("driversReferenceViewerModal");
+      els.referenceViewerTitle = document.getElementById("driversReferenceViewerTitle");
+      els.referenceViewerSubtitle = document.getElementById("driversReferenceViewerSubtitle");
+      els.referenceViewerCount = document.getElementById("driversReferenceViewerCount");
+      els.referenceViewerGrid = document.getElementById("driversReferenceViewerGrid");
+      els.referenceViewerClose = document.getElementById("driversReferenceViewerClose");
+      els.referenceViewerDismiss = document.getElementById("driversReferenceViewerDismiss");
       setupMinReelLengthControls();
       if (els.timeline) {
         els.timeline.addEventListener("click", handleTimelineClick);
       }
+      if (els.timelineDetail) {
+        els.timelineDetail.addEventListener("click", handleTimelineDetailClick);
+      }
       if (els.eventFilters) {
         els.eventFilters.addEventListener("click", handleDriverFilterClick);
       }
+      if (els.referenceViewerModal) {
+        els.referenceViewerModal.addEventListener("click", (event) => {
+          if (event.target === els.referenceViewerModal) {
+            closeReferenceViewer();
+          }
+        });
+      }
+      if (els.referenceViewerClose) {
+        els.referenceViewerClose.addEventListener("click", closeReferenceViewer);
+      }
+      if (els.referenceViewerDismiss) {
+        els.referenceViewerDismiss.addEventListener("click", closeReferenceViewer);
+      }
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && referenceViewerState) {
+          closeReferenceViewer();
+        }
+      });
       renderDriverFilterBar();
       renderTimelineDetailEmpty();
     }
