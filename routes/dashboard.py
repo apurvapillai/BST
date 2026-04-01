@@ -4360,6 +4360,7 @@ def api_defect_drivers():
         reels = (
             _apply_reel_filters(session.query(Reel), filters, include_reel_code=False)
             .options(
+                selectinload(Reel.defects),
                 selectinload(Reel.inspection_phases),
                 selectinload(Reel.sensitivity_sets),
                 selectinload(Reel.masks),
@@ -4422,6 +4423,25 @@ def api_defect_drivers():
             )
 
         reel_ids = [reel.reel_id for reel in reels if reel.reel_id is not None]
+        filtered_reels_subq = _apply_reel_filters(
+            session.query(Reel.reel_id.label("reel_id")),
+            filters,
+            include_reel_code=False,
+        ).subquery()
+
+        kpi_defect_summary = session.query(
+            func.count(Defect.defect_id).label("total_defects"),
+            func.avg(Defect.severity_value).label("avg_severity"),
+            func.avg(Defect.magnitude_value).label("avg_magnitude"),
+        ).join(
+            filtered_reels_subq,
+            Defect.reel_id == filtered_reels_subq.c.reel_id,
+        ).one()
+        kpi_total_defects = int(getattr(kpi_defect_summary, "total_defects", 0) or 0)
+        kpi_avg_size, kpi_avg_size_basis = _resolve_size_metric(
+            getattr(kpi_defect_summary, "avg_severity", None),
+            getattr(kpi_defect_summary, "avg_magnitude", None),
+        )
 
         defect_rows = (
             session.query(
@@ -4432,8 +4452,6 @@ def api_defect_drivers():
                 func.avg(Defect.magnitude_value).label("avg_magnitude"),
             )
             .filter(Defect.reel_id.in_(reel_ids))
-            .filter(Defect.defect_time >= window_start)
-            .filter(Defect.defect_time <= window_end)
             .group_by(Defect.reel_id, Defect.class_name)
             .all()
         )
@@ -4445,8 +4463,6 @@ def api_defect_drivers():
                 func.avg(Defect.magnitude_value).label("avg_magnitude"),
             )
             .filter(Defect.reel_id.in_(reel_ids))
-            .filter(Defect.defect_time >= window_start)
-            .filter(Defect.defect_time <= window_end)
             .group_by(Defect.reel_id)
             .all()
         )
@@ -4515,6 +4531,31 @@ def api_defect_drivers():
                 if min_speed is not None and max_speed is not None
                 else None,
             }
+        speed_trend_by_reel: Dict[int, List[Dict[str, Optional[object]]]] = defaultdict(list)
+        speed_trend_rows = (
+            session.query(
+                RLMMonitoring.reel_id,
+                RLMMonitoring.timestamp,
+                RLMMonitoring.webspeed,
+            )
+            .filter(RLMMonitoring.reel_id.in_(reel_ids))
+            .filter(RLMMonitoring.timestamp >= window_start)
+            .filter(RLMMonitoring.timestamp <= window_end)
+            .order_by(RLMMonitoring.reel_id.asc(), RLMMonitoring.timestamp.asc(), RLMMonitoring.monitor_id.asc())
+            .all()
+        )
+        for row in speed_trend_rows:
+            reel_id = getattr(row, "reel_id", None)
+            timestamp = getattr(row, "timestamp", None)
+            webspeed = _to_float(getattr(row, "webspeed", None))
+            if reel_id is None or timestamp is None or webspeed is None:
+                continue
+            speed_trend_by_reel[reel_id].append(
+                {
+                    "timestamp": _iso(timestamp),
+                    "webspeed": webspeed,
+                }
+            )
 
         reel_records: List[Dict[str, object]] = []
         grouped_records: Dict[Tuple[str, str], List[Dict[str, object]]] = defaultdict(list)
@@ -4530,12 +4571,32 @@ def api_defect_drivers():
             reel_id = reel.reel_id
             if reel_id is None:
                 continue
+            reel_defects = list(reel.defects or [])
             length_ft = _reel_length_feet(reel)
             defect_entry = defect_stats_by_reel.get(reel_id, {})
             class_counter = class_counts_by_reel.get(reel_id, Counter())
             total_defects_reel = int(defect_entry.get("count", 0) or 0)
             avg_size = _to_float(defect_entry.get("avg_size"))
             avg_size_basis = defect_entry.get("avg_size_basis")
+            if reel_defects:
+                total_defects_reel = len(reel_defects)
+                class_counter = Counter()
+                severity_values: List[float] = []
+                magnitude_values: List[float] = []
+                for defect in reel_defects:
+                    canonical = _canonical_sensitivity_class(getattr(defect, "class_name", None))
+                    if canonical in DRIVER_DEFECT_CLASSES:
+                        class_counter[canonical] += 1
+                    severity_value = _to_float(getattr(defect, "severity_value", None))
+                    magnitude_value = _to_float(getattr(defect, "magnitude_value", None))
+                    if severity_value is not None:
+                        severity_values.append(severity_value)
+                    if magnitude_value is not None:
+                        magnitude_values.append(magnitude_value)
+                avg_size, avg_size_basis = _resolve_size_metric(
+                    (sum(severity_values) / len(severity_values)) if severity_values else None,
+                    (sum(magnitude_values) / len(magnitude_values)) if magnitude_values else None,
+                )
             speed_entry = speed_by_reel.get(reel_id, {})
             total_footage += length_ft
             total_defects += total_defects_reel
@@ -4629,6 +4690,7 @@ def api_defect_drivers():
                 "speed_max": _to_float(speed_entry.get("max_speed")),
                 "speed_range": _to_float(speed_entry.get("speed_range")),
                 "speed_samples": int(speed_entry.get("sample_count", 0) or 0),
+                "speed_points": speed_trend_by_reel.get(reel_id, []),
                 "events": [],
                 "instability_score": 0,
                 "has_mask_change": False,
@@ -5176,6 +5238,8 @@ def api_defect_drivers():
                         "detail": {
                             "reel_id": record.get("reel_id"),
                             "reel_code": record.get("reel_code"),
+                            "previous_reel_id": previous_record.get("reel_id"),
+                            "previous_reel_code": previous_record.get("reel_code"),
                             "job": record.get("job"),
                             "order": record.get("order"),
                             "time": record.get("time"),
@@ -5189,6 +5253,8 @@ def api_defect_drivers():
                                 if speed_bucket_changed
                                 else "Material average speed change exceeded threshold"
                             ),
+                            "previous_speed_trend": previous_record.get("speed_points") or [],
+                            "current_speed_trend": record.get("speed_points") or [],
                         },
                     }
                     record["events"].append(event)
@@ -5284,14 +5350,21 @@ def api_defect_drivers():
                         "detail": {
                             "reel_id": record.get("reel_id"),
                             "reel_code": record.get("reel_code"),
+                            "previous_reel_id": previous_record.get("reel_id") if previous_record else None,
+                            "previous_reel_code": previous_record.get("reel_code") if previous_record else None,
                             "job": record.get("job"),
                             "order": record.get("order"),
                             "time": record.get("time"),
                             "current_rate_per_1000ft": record.get("defects_per_1000ft"),
                             "current_defect_count": record.get("total_defects"),
                             "current_avg_defect_size": record.get("avg_defect_size"),
+                            "current_length_ft": record.get("length_ft"),
+                            "current_bst_active_pct": ((record.get("bst_coverage") or {}).get("active_pct")),
                             "previous_reel_rate_per_1000ft": previous_rate,
                             "previous_reel_count": previous_record.get("total_defects") if previous_record else None,
+                            "previous_reel_avg_defect_size": previous_record.get("avg_defect_size") if previous_record else None,
+                            "previous_length_ft": previous_record.get("length_ft") if previous_record else None,
+                            "previous_bst_active_pct": ((previous_record.get("bst_coverage") or {}).get("active_pct")) if previous_record else None,
                             "rolling_rate_per_1000ft": rolling_rate,
                             "rolling_reel_count": rolling_count,
                             "baseline_rate_per_1000ft": baseline_rate,
@@ -5333,6 +5406,7 @@ def api_defect_drivers():
                     "type_breakdown": record["type_breakdown"],
                     "top_defect_type": record["top_defect_type"],
                     "speed_avg": record["speed_avg"],
+                    "bst_active_pct": _to_float((record.get("bst_coverage") or {}).get("active_pct")),
                     "speed_bucket": record["speed_bucket"],
                     "length_bucket": record["length_bucket"],
                     "events": record["events"],
@@ -6438,13 +6512,13 @@ def api_defect_drivers():
             "kpis": {
                 "reels_analyzed": len(reel_records),
                 "total_footage": round(total_footage, 2),
-                "defects_per_1000ft": _rate_per_1000ft(total_defects, total_footage),
-                "average_defect_size": round(avg_size_sum / sized_reels, 3) if sized_reels else None,
-                "avg_size_basis": overall_avg_basis,
+                "defects_per_1000ft": _rate_per_1000ft(kpi_total_defects, total_footage),
+                "average_defect_size": kpi_avg_size,
+                "avg_size_basis": kpi_avg_size_basis or overall_avg_basis,
                 "top_defect_type": top_type_name,
                 "top_defect_type_label": _driver_class_label(top_type_name) if top_type_name else None,
                 "top_defect_type_count": int(top_type_count or 0),
-                "total_defects": int(total_defects),
+                "total_defects": int(kpi_total_defects),
             },
             "event_counts": {key: int(value) for key, value in event_counts.items()},
             "timeline": timeline,

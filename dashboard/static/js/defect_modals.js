@@ -191,6 +191,32 @@
     modal.classList.add("show");
   }
 
+  function openFootprintModalContent(contentNode, title) {
+    if (!contentNode) return;
+    closeFootprintModal();
+    const modal = document.getElementById("footprintModal");
+    const canvas = document.getElementById("footprintModalCanvas");
+    const titleEl = document.getElementById("footprintModalTitle");
+    if (!modal || !canvas) return;
+
+    const stage = document.createElement("div");
+    stage.className = "footprint-modal-stage";
+    stage.appendChild(contentNode);
+
+    canvas.innerHTML = "";
+    canvas.appendChild(stage);
+
+    footprintModalState.source = null;
+    footprintModalState.placeholder = null;
+    footprintModalState.stage = stage;
+    resetFootprintModalScale();
+
+    if (titleEl) {
+      titleEl.textContent = title || "Footprint Preview";
+    }
+    modal.classList.add("show");
+  }
+
   function closeFootprintModal() {
     const modal = document.getElementById("footprintModal");
     if (modal) {
@@ -344,6 +370,7 @@
   window.syncModalMetaBarVisibility = syncModalMetaBarVisibility;
   window.showImageModal = showImageModal;
   window.closeModal = closeModal;
+  window.openFootprintModalContent = openFootprintModalContent;
   window.closeFootprintModal = closeFootprintModal;
   window.saveDefectLabel = saveDefectLabel;
 })();

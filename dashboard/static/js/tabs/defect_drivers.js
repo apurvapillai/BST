@@ -11,6 +11,9 @@
     let selectedEventFilters = new Set();
     let bstTimeExpanded = false;
     let activeReferenceDetail = null;
+    let activeMaskDetail = null;
+    let activeSpeedDetail = null;
+    let activeSpikeDetail = null;
     let referenceViewerState = null;
     const FEET_TO_METERS = 0.3048;
     const METERS_TO_FEET = 3.28084;
@@ -111,6 +114,9 @@
     function renderTimelineDetailEmpty() {
       if (!els.timelineDetail) return;
       activeReferenceDetail = null;
+      activeMaskDetail = null;
+      activeSpeedDetail = null;
+      activeSpikeDetail = null;
       els.timelineDetail.innerHTML = `
         <div class="drivers-detail-empty">
           <p class="kpi-section__title">Event Detail</p>
@@ -328,7 +334,7 @@
             `Rate ${formatRate(row.defects_per_1000ft)}`,
             `Avg size ${formatAvgSize(row.avg_defect_size, row.avg_defect_size_basis)}`,
             `Speed ${row.speed_avg !== null && row.speed_avg !== undefined ? formatNumber(row.speed_avg, 1) : "--"}`,
-            row.speed_bucket || "",
+            `BST active ${formatPercent(row.bst_active_pct, 1)}`,
           ]
             .filter(Boolean)
             .map((item) => `<span>${Utils.escapeHtml(item)}</span>`)
@@ -1424,18 +1430,23 @@
     function renderSpeedDetail(detail = {}) {
       return `
         <div class="drivers-detail-block">
-          <p class="kpi-section__title">Speed Shift</p>
-          <small>${Utils.escapeHtml((detail.job || "Unassigned") + " · " + (detail.order || "No order") + " · " + (detail.reel_code || "Reel"))}</small>
+          <div class="drivers-detail-header">
+            <div>
+              <p class="kpi-section__title">Speed Shift</p>
+              <small>${Utils.escapeHtml((detail.job || "Unassigned") + " · " + (detail.order || "No order") + " · " + (detail.reel_code || "Reel"))}</small>
+            </div>
+            <button type="button" class="button-secondary drivers-detail-expand-btn" data-speed-viewer-open="true" aria-label="Open speed shift comparison">Expand</button>
+          </div>
           <div class="drivers-mini-grid">
             <article class="drivers-mini-card">
               <span>Previous Avg Speed</span>
               <strong>${Utils.escapeHtml(formatNumber(detail.previous_speed_avg, 1))}</strong>
-              <small>${Utils.escapeHtml(detail.previous_speed_bucket || "--")}</small>
+              <small>${Utils.escapeHtml((detail.previous_reel_code || "Previous reel") + " · " + (detail.previous_speed_bucket || "--"))}</small>
             </article>
             <article class="drivers-mini-card">
               <span>Current Avg Speed</span>
               <strong>${Utils.escapeHtml(formatNumber(detail.current_speed_avg, 1))}</strong>
-              <small>${Utils.escapeHtml(detail.current_speed_bucket || "--")}</small>
+              <small>${Utils.escapeHtml((detail.reel_code || "Current reel") + " · " + (detail.current_speed_bucket || "--"))}</small>
             </article>
             <article class="drivers-mini-card">
               <span>Delta</span>
@@ -1482,8 +1493,13 @@
         : "no mask geometry change";
       return `
         <div class="drivers-detail-block">
-          <p class="kpi-section__title">Mask Change</p>
-          <small>${Utils.escapeHtml((detail.job || "Unassigned") + " · " + (detail.order || "No order") + " · " + (detail.reel_code || "Reel"))}</small>
+          <div class="drivers-detail-header">
+            <div>
+              <p class="kpi-section__title">Mask Change</p>
+              <small>${Utils.escapeHtml((detail.job || "Unassigned") + " · " + (detail.order || "No order") + " · " + (detail.reel_code || "Reel"))}</small>
+            </div>
+            <button type="button" class="button-secondary drivers-detail-expand-btn" data-mask-viewer-open="true" aria-label="Open mask footprint comparison">Expand</button>
+          </div>
           <div class="drivers-detail-metrics">
             <span>${Utils.escapeHtml(`Before ${formatNumber(detail.before_mask_count || 0)} masks`)}</span>
             <span>${Utils.escapeHtml(`After ${formatNumber(detail.after_mask_count || 0)} masks`)}</span>
@@ -1556,50 +1572,15 @@
     }
 
     function renderSpikeDetail(detail = {}) {
-      const rows = detail.type_breakdown || [];
-      const table = rows.length
-        ? `
-          <div class="drivers-table drivers-table--summary">
-            <table>
-              <thead>
-                <tr>
-                  <th>Defect Type</th>
-                  <th>Current Count</th>
-                  <th>Current /1k ft</th>
-                  <th>Baseline Count</th>
-                  <th>Baseline /1k ft</th>
-                  <th>Delta /1k ft</th>
-                  <th>Avg Size</th>
-                  <th>Baseline Used</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${rows
-                  .map(
-                    (row) => `
-                      <tr>
-                        <td><strong>${Utils.escapeHtml(row.label || row.name || "--")}</strong></td>
-                        <td>${Utils.escapeHtml(formatNumber(row.current_count || 0))}</td>
-                        <td>${Utils.escapeHtml(formatRate(row.current_rate_per_1000ft))}</td>
-                        <td>${Utils.escapeHtml(formatNumber(row.baseline_count || 0, 2))}</td>
-                        <td>${Utils.escapeHtml(formatRate(row.baseline_rate_per_1000ft))}</td>
-                        <td>${Utils.escapeHtml(formatDelta(row.delta_rate_per_1000ft, 2, "/1k ft"))}</td>
-                        <td>${Utils.escapeHtml(formatAvgSize(row.avg_defect_size, row.avg_size_basis))}</td>
-                        <td>${Utils.escapeHtml(baselineLabel(row.baseline_source, detail.baseline_reel_count))}</td>
-                      </tr>
-                    `
-                  )
-                  .join("")}
-              </tbody>
-            </table>
-          </div>
-        `
-        : `<div class="drivers-empty placeholder">No per-type spike detail is available.</div>`;
-
       return `
         <div class="drivers-detail-block">
-          <p class="kpi-section__title">Defect Spike</p>
-          <small>${Utils.escapeHtml((detail.job || "Unassigned") + " · " + (detail.order || "No order") + " · " + (detail.reel_code || "Reel"))}</small>
+          <div class="drivers-detail-header">
+            <div>
+              <p class="kpi-section__title">Defect Spike</p>
+              <small>${Utils.escapeHtml((detail.job || "Unassigned") + " · " + (detail.order || "No order") + " · " + (detail.reel_code || "Reel"))}</small>
+            </div>
+            <button type="button" class="button-secondary drivers-detail-expand-btn" data-spike-viewer-open="true" aria-label="Open defect spike comparison">Expand</button>
+          </div>
           <div class="drivers-mini-grid">
             <article class="drivers-mini-card">
               <span>Current Reel Rate</span>
@@ -1616,15 +1597,6 @@
               <strong>${Utils.escapeHtml(formatRate(detail.rolling_rate_per_1000ft))}</strong>
               <small>${Utils.escapeHtml(`${formatNumber(detail.rolling_reel_count || 0)} reel baseline`)}</small>
             </article>
-            <article class="drivers-mini-card">
-              <span>Triggered By</span>
-              <strong>${Utils.escapeHtml(baselineLabel(detail.triggered_by, detail.baseline_reel_count))}</strong>
-              <small>${Utils.escapeHtml(`Baseline ${formatRate(detail.baseline_rate_per_1000ft)}`)}</small>
-            </article>
-          </div>
-          <div class="drivers-subsection">
-            <div class="drivers-subsection__title">Per-Defect-Type Spike Breakdown</div>
-            ${table}
           </div>
         </div>
       `;
@@ -1646,6 +1618,52 @@
               subtitle: (detail.job || "Unassigned") + " · " + (detail.order || "No order") + " · " + (detail.reel_code || "Reel"),
               reelCode: detail.reel_code || "Reel",
               images: Array.isArray(detail.reference_images) ? detail.reference_images : [],
+            }
+          : null;
+      activeMaskDetail =
+        event.type === "mask_change"
+          ? {
+              title: event.label || "Mask Change",
+              subtitle: (detail.job || "Unassigned") + " · " + (detail.order || "No order") + " · " + (detail.reel_code || "Reel"),
+              reel: {
+                reel_id: `drivers-mask-${detail.reel_id || detail.reel_code || "reel"}`,
+                format_width: Number(detail.format_width) || null,
+                format_length: Number(detail.format_length) || null,
+              },
+              beforeMasks: Array.isArray(detail.before_masks) ? detail.before_masks : [],
+              afterMasks: Array.isArray(detail.after_masks) ? detail.after_masks : [],
+            }
+          : null;
+      activeSpeedDetail =
+        event.type === "speed_shift"
+          ? {
+              title: event.label || "Speed Shift",
+              subtitle: (detail.job || "Unassigned") + " · " + (detail.order || "No order") + " · " + (detail.reel_code || "Reel"),
+              currentReelCode: detail.reel_code || "Current reel",
+              previousReelCode: detail.previous_reel_code || "Previous reel",
+              previousTrend: Array.isArray(detail.previous_speed_trend) ? detail.previous_speed_trend : [],
+              currentTrend: Array.isArray(detail.current_speed_trend) ? detail.current_speed_trend : [],
+            }
+          : null;
+      activeSpikeDetail =
+        event.type === "defect_spike"
+          ? {
+              title: event.label || "Defect Spike",
+              subtitle: (detail.job || "Unassigned") + " · " + (detail.order || "No order") + " · " + (detail.reel_code || "Reel"),
+              currentReelCode: detail.reel_code || "Current reel",
+              previousReelCode: detail.previous_reel_code || "Previous reel",
+              currentRate: detail.current_rate_per_1000ft,
+              currentDefects: detail.current_defect_count,
+              currentBstActivePct: detail.current_bst_active_pct,
+              currentAvgSize: detail.current_avg_defect_size,
+              currentLengthFt: detail.current_length_ft,
+              previousRate: detail.previous_reel_rate_per_1000ft,
+              previousDefects: detail.previous_reel_count,
+              previousBstActivePct: detail.previous_bst_active_pct,
+              previousAvgSize: detail.previous_reel_avg_defect_size,
+              previousLengthFt: detail.previous_length_ft,
+              typeBreakdown: Array.isArray(detail.type_breakdown) ? detail.type_breakdown : [],
+              rollingCount: detail.rolling_reel_count,
             }
           : null;
       let body = `
@@ -1745,9 +1763,355 @@
 
     function handleTimelineDetailClick(event) {
       const openButton = event.target.closest("[data-reference-viewer-open]");
-      if (!openButton) return;
-      const index = Number(openButton.dataset.referenceViewerIndex);
-      openReferenceViewer(Number.isInteger(index) ? index : 0);
+      if (openButton) {
+        const index = Number(openButton.dataset.referenceViewerIndex);
+        openReferenceViewer(Number.isInteger(index) ? index : 0);
+        return;
+      }
+      const maskButton = event.target.closest("[data-mask-viewer-open]");
+      if (maskButton) {
+        openMaskViewer();
+        return;
+      }
+      const speedButton = event.target.closest("[data-speed-viewer-open]");
+      if (speedButton) {
+        openSpeedViewer();
+        return;
+      }
+      const spikeButton = event.target.closest("[data-spike-viewer-open]");
+      if (spikeButton) {
+        openSpikeViewer();
+      }
+    }
+
+    function renderSpikeSummaryCard(label, detail) {
+      return `
+        <article class="drivers-spike-viewer__card">
+          <span>${Utils.escapeHtml(label)}</span>
+          <strong>${Utils.escapeHtml(detail.reelCode || "Reel")}</strong>
+          <small>${Utils.escapeHtml(`Rate ${formatRate(detail.ratePer1k)}`)}</small>
+          <small>${Utils.escapeHtml(`Defects ${formatNumber(detail.defects || 0)}`)}</small>
+          <small>${Utils.escapeHtml(`BST inspection ${formatPercent(detail.bstActivePct, 1)}`)}</small>
+          <small>${Utils.escapeHtml(`Avg size ${formatAvgSize(detail.avgSize)}`)}</small>
+          <small>${Utils.escapeHtml(`Feet ${formatFeet(detail.lengthFt || 0, 0)}`)}</small>
+        </article>
+      `;
+    }
+
+    function renderSpikeBreakdownTable(rows = [], rollingCount = 0) {
+      if (!rows.length) {
+        return `<div class="drivers-empty placeholder">No per-type spike detail is available.</div>`;
+      }
+      return `
+        <div class="drivers-table drivers-table--summary">
+          <table>
+            <thead>
+              <tr>
+                <th>Defect Type</th>
+                <th>Current Count</th>
+                <th>Current /1k ft</th>
+                <th>Baseline Count</th>
+                <th>Baseline /1k ft</th>
+                <th>Delta /1k ft</th>
+                <th>Avg Size</th>
+                <th>Baseline Used</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows
+                .map(
+                  (row) => `
+                    <tr>
+                      <td><strong>${Utils.escapeHtml(row.label || row.name || "--")}</strong></td>
+                      <td>${Utils.escapeHtml(formatNumber(row.current_count || 0))}</td>
+                      <td>${Utils.escapeHtml(formatRate(row.current_rate_per_1000ft))}</td>
+                      <td>${Utils.escapeHtml(formatNumber(row.baseline_count || 0, 2))}</td>
+                      <td>${Utils.escapeHtml(formatRate(row.baseline_rate_per_1000ft))}</td>
+                      <td>${Utils.escapeHtml(formatDelta(row.delta_rate_per_1000ft, 2, "/1k ft"))}</td>
+                      <td>${Utils.escapeHtml(formatAvgSize(row.avg_defect_size, row.avg_size_basis))}</td>
+                      <td>${Utils.escapeHtml(baselineLabel(row.baseline_source, rollingCount))}</td>
+                    </tr>
+                  `
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function openSpikeViewer() {
+      if (!activeSpikeDetail || typeof window.openFootprintModalContent !== "function") return;
+      const content = document.createElement("div");
+      content.className = "drivers-spike-viewer";
+      content.innerHTML = `
+        <div class="drivers-spike-viewer__summary">
+          ${renderSpikeSummaryCard("Previous Reel", {
+            reelCode: activeSpikeDetail.previousReelCode,
+            ratePer1k: activeSpikeDetail.previousRate,
+            defects: activeSpikeDetail.previousDefects,
+            bstActivePct: activeSpikeDetail.previousBstActivePct,
+            avgSize: activeSpikeDetail.previousAvgSize,
+            lengthFt: activeSpikeDetail.previousLengthFt,
+          })}
+          ${renderSpikeSummaryCard("Current Reel", {
+            reelCode: activeSpikeDetail.currentReelCode,
+            ratePer1k: activeSpikeDetail.currentRate,
+            defects: activeSpikeDetail.currentDefects,
+            bstActivePct: activeSpikeDetail.currentBstActivePct,
+            avgSize: activeSpikeDetail.currentAvgSize,
+            lengthFt: activeSpikeDetail.currentLengthFt,
+          })}
+        </div>
+        <div class="drivers-spike-viewer__table">
+          <div class="drivers-subsection__title">Per-Defect-Type Spike Breakdown</div>
+          ${renderSpikeBreakdownTable(activeSpikeDetail.typeBreakdown, activeSpikeDetail.rollingCount)}
+        </div>
+      `;
+      window.openFootprintModalContent(content, activeSpikeDetail.title || "Defect Spike");
+    }
+
+    function buildSpeedViewerPanel(title, reelCode, suffix) {
+      const host = document.createElement("article");
+      host.className = "drivers-speed-viewer__panel";
+      host.innerHTML = `
+        <div class="drivers-speed-viewer__panel-header">
+          <div>
+            <strong>${Utils.escapeHtml(title)}</strong>
+            <small>${Utils.escapeHtml(reelCode || "Reel")}</small>
+          </div>
+        </div>
+        <div class="drivers-speed-viewer__chart" id="drivers-speed-viewer-${suffix}"></div>
+      `;
+      return {
+        host,
+        chartId: `drivers-speed-viewer-${suffix}`,
+        title,
+      };
+    }
+
+    function parseSpeedTrend(points = []) {
+      return (Array.isArray(points) ? points : [])
+        .map((point) => {
+          const timestamp = point && point.timestamp ? new Date(point.timestamp) : null;
+          const speed = Number(point && point.webspeed);
+          if (!(timestamp instanceof Date) || Number.isNaN(timestamp.getTime()) || !Number.isFinite(speed)) {
+            return null;
+          }
+          return { timestamp, speed };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.timestamp - b.timestamp);
+    }
+
+    function renderSpeedViewerChart(host, title, points, yRange) {
+      if (!host) return;
+      if (!points.length) {
+        host.innerHTML = "<div class='drivers-empty placeholder'>No speed trend data available.</div>";
+        return;
+      }
+      if (!window.Plotly) {
+        host.innerHTML = "<div class='drivers-empty placeholder'>Plotly unavailable.</div>";
+        return;
+      }
+      const x = points.map((point) => point.timestamp);
+      const y = points.map((point) => point.speed);
+      const trace = {
+        x,
+        y,
+        mode: "lines+markers",
+        name: title,
+        line: { color: "#16a34a", width: 2.5, shape: "linear" },
+        marker: { size: 6, color: "#16a34a" },
+        hovertemplate: "Time: %{x}<br>Speed: %{y:.2f}<extra></extra>",
+      };
+      const layout = {
+        title: "",
+        autosize: true,
+        margin: { t: 16, r: 18, l: 54, b: 76 },
+        paper_bgcolor: "transparent",
+        plot_bgcolor: "transparent",
+        xaxis: {
+          title: "Timestamp",
+          type: "date",
+          tickangle: -30,
+          automargin: true,
+        },
+        yaxis: {
+          title: "Speed",
+          automargin: true,
+          range: yRange,
+        },
+        showlegend: false,
+      };
+      window.Plotly.react(host, [trace], layout, { responsive: true, displayModeBar: false });
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          if (window.Plotly && host && host.offsetWidth) {
+            window.Plotly.Plots.resize(host);
+          }
+        });
+      });
+    }
+
+    function buildSharedSpeedRange(seriesList = []) {
+      const values = seriesList.flat().map((point) => point.speed).filter((value) => Number.isFinite(value));
+      if (!values.length) return null;
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      if (min === max) {
+        const pad = Math.max(Math.abs(min) * 0.08, 1);
+        return [min - pad, max + pad];
+      }
+      const pad = Math.max((max - min) * 0.08, 0.5);
+      return [min - pad, max + pad];
+    }
+
+    function openSpeedViewer() {
+      if (!activeSpeedDetail || typeof window.openFootprintModalContent !== "function") return;
+      const content = document.createElement("div");
+      content.className = "drivers-speed-viewer";
+      const grid = document.createElement("div");
+      grid.className = "drivers-speed-viewer__grid";
+      const previous = buildSpeedViewerPanel("Previous Reel Trend", activeSpeedDetail.previousReelCode, "previous");
+      const current = buildSpeedViewerPanel("Current Reel Trend", activeSpeedDetail.currentReelCode, "current");
+      grid.appendChild(previous.host);
+      grid.appendChild(current.host);
+      content.appendChild(grid);
+      window.openFootprintModalContent(content, activeSpeedDetail.title || "Speed Shift");
+      window.requestAnimationFrame(() => {
+        const previousPoints = parseSpeedTrend(activeSpeedDetail.previousTrend);
+        const currentPoints = parseSpeedTrend(activeSpeedDetail.currentTrend);
+        const sharedRange = buildSharedSpeedRange([previousPoints, currentPoints]);
+        renderSpeedViewerChart(content.querySelector(`#${previous.chartId}`), previous.title, previousPoints, sharedRange);
+        renderSpeedViewerChart(content.querySelector(`#${current.chartId}`), current.title, currentPoints, sharedRange);
+      });
+    }
+
+    function buildMaskViewerColumn(title, reel, masks, suffix) {
+      const host = document.createElement("div");
+      host.className = "defect-footprint";
+      const reelId = `drivers-mask-compare-${suffix}`;
+      const heatmapId =
+        typeof MaskHeatmap === "object" && typeof MaskHeatmap.domId === "function"
+          ? MaskHeatmap.domId({ reel_id: reelId })
+          : `mask-heatmap-${reelId}`;
+      host.innerHTML = `
+        <div class="defect-footprint-header">
+          <h4>${Utils.escapeHtml(title)}</h4>
+          <span class="badge">${Utils.escapeHtml(`${formatNumber((masks || []).length)} mask${(masks || []).length === 1 ? "" : "s"}`)}</span>
+        </div>
+        <div class="heatmap-wrapper heatmap-empty" id="${Utils.escapeHtml(heatmapId)}">
+          <span class="badge">${Utils.escapeHtml((masks || []).length ? "Loading mask footprints…" : "No masks")}</span>
+        </div>
+      `;
+      return {
+        host,
+        heatmapId,
+        title,
+        summary: {
+          reel: {
+            reel_id: reelId,
+            format_width: reel && reel.format_width !== undefined ? reel.format_width : null,
+            format_length: reel && reel.format_length !== undefined ? reel.format_length : null,
+          },
+          masks: Array.isArray(masks) ? masks : [],
+        },
+      };
+    }
+
+    function finalizeMaskViewerColumn(content, column, state, error) {
+      const container = content.querySelector(`#${column.heatmapId}`);
+      if (!container) {
+        console.error("[Defect Drivers][Mask Modal] container lookup failed", {
+          panel: column.title,
+          heatmapId: column.heatmapId,
+        });
+        return;
+      }
+      if (state === "error") {
+        container.classList.add("heatmap-empty");
+        container.innerHTML = "<span class='badge'>Unable to render mask footprints</span>";
+        if (error) {
+          console.error("[Defect Drivers][Mask Modal] draw failed", {
+            panel: column.title,
+            heatmapId: column.heatmapId,
+            error,
+          });
+        }
+      } else if (state === "empty") {
+        container.classList.add("heatmap-empty");
+        container.innerHTML = "<span class='badge'>No masks</span>";
+      }
+    }
+
+    function renderMaskViewerColumn(content, column) {
+      const masks = Array.isArray(column.summary && column.summary.masks) ? column.summary.masks : [];
+      const masksWithCoords = masks.filter((mask) => mask && mask.coords).length;
+      const container = content.querySelector(`#${column.heatmapId}`);
+      console.log("[Defect Drivers][Mask Modal] panel render starting", {
+        panel: column.title,
+        masksCount: masks.length,
+        masksWithCoords,
+        heatmapId: column.heatmapId,
+        containerFound: Boolean(container),
+      });
+      if (!container) {
+        finalizeMaskViewerColumn(content, column, "error", new Error("Missing mask heatmap container"));
+        return;
+      }
+      if (!masks.length) {
+        console.log("[Defect Drivers][Mask Modal] no masks for panel", { panel: column.title });
+        finalizeMaskViewerColumn(content, column, "empty");
+        return;
+      }
+      try {
+        console.log("[Defect Drivers][Mask Modal] draw started", { panel: column.title });
+        if (typeof MaskHeatmap !== "object" || typeof MaskHeatmap.attach !== "function") {
+          throw new Error("MaskHeatmap renderer unavailable");
+        }
+        MaskHeatmap.attach(content, column.summary);
+        window.setTimeout(() => {
+          const current = content.querySelector(`#${column.heatmapId}`);
+          const text = current ? String(current.textContent || "").trim() : "";
+          if (!current) {
+            finalizeMaskViewerColumn(content, column, "error", new Error("Mask heatmap container disappeared"));
+            return;
+          }
+          if (text.includes("Loading mask footprints")) {
+            finalizeMaskViewerColumn(content, column, "error", new Error("Renderer did not replace loading state"));
+            return;
+          }
+          console.log("[Defect Drivers][Mask Modal] draw finished", {
+            panel: column.title,
+            rendered: Boolean(current.querySelector("canvas")),
+            text,
+          });
+        }, 200);
+      } catch (error) {
+        finalizeMaskViewerColumn(content, column, "error", error);
+      }
+    }
+
+    function openMaskViewer() {
+      if (!activeMaskDetail || typeof window.openFootprintModalContent !== "function") return;
+      console.log("[Defect Drivers][Mask Modal] modal opened", {
+        beforeMasks: Array.isArray(activeMaskDetail.beforeMasks) ? activeMaskDetail.beforeMasks.length : 0,
+        afterMasks: Array.isArray(activeMaskDetail.afterMasks) ? activeMaskDetail.afterMasks.length : 0,
+      });
+      const content = document.createElement("div");
+      content.className = "defect-footprints-inline drivers-mask-footprint-compare";
+      const before = buildMaskViewerColumn("Before", activeMaskDetail.reel, activeMaskDetail.beforeMasks, "before");
+      const after = buildMaskViewerColumn("After", activeMaskDetail.reel, activeMaskDetail.afterMasks, "after");
+      content.appendChild(before.host);
+      content.appendChild(after.host);
+      window.openFootprintModalContent(content, `${activeMaskDetail.title} · ${activeMaskDetail.subtitle}`);
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          renderMaskViewerColumn(content, before);
+          renderMaskViewerColumn(content, after);
+        });
+      });
     }
 
     function handleDriverFilterClick(event) {
