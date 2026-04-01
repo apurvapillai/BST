@@ -318,6 +318,11 @@
       renderGallery();
       renderResults();
       setViewState("content");
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          resizeTrendChart();
+        });
+      });
     }
 
     function renderJobMeta() {
@@ -640,8 +645,18 @@
     function renderTrendChart(points) {
       if (!elements.chart) return;
       if (!points.length || !window.Plotly) {
+        if (window.Plotly && elements.chart.data) {
+          try {
+            window.Plotly.purge(elements.chart);
+          } catch (err) {
+            // ignore purge errors during teardown
+          }
+        }
         elements.chart.innerHTML = "";
         return;
+      }
+      if (window.Plotly && !elements.chart.offsetWidth) {
+        elements.chart.innerHTML = "";
       }
       const x = points.map((item) => item.captured_at);
       const y = points.map((item) => item.match_pct);
@@ -711,7 +726,9 @@
         config
       );
       window.requestAnimationFrame(() => {
-        resizeTrendChart();
+        window.requestAnimationFrame(() => {
+          resizeTrendChart();
+        });
       });
     }
 
