@@ -68,6 +68,10 @@ REFERENCE_CHECK_ALIGNMENT_MAX_SHIFT_RATIO = 0.18
 REFERENCE_CHECK_OVERALL_WEIGHT = 0.5
 REFERENCE_CHECK_COLOR_WEIGHT = 0.3
 REFERENCE_CHECK_ALIGNMENT_WEIGHT = 0.2
+REFERENCE_CHECK_MAX_HORIZONTAL_SHIFT_PX = 6
+REFERENCE_CHECK_CONTENT_WEIGHT = 0.72
+REFERENCE_CHECK_COLOR_DOMINANT_WEIGHT = 0.22
+REFERENCE_CHECK_ALIGNMENT_LIGHT_WEIGHT = 0.06
 
 dashboard_bp = Blueprint("dashboard", __name__)
 dashboard_live_service = DashboardLiveService()
@@ -3522,6 +3526,34 @@ def _reference_check_local_contrast_normalize(gray_array: np.ndarray, radius: in
     return normalized.astype(np.float32)
 
 
+def _reference_check_shift_array(array: np.ndarray, dy: int = 0, dx: int = 0) -> np.ndarray:
+    shifted = np.roll(array, int(dy), axis=0)
+    if dx == 0:
+        return shifted
+    width = shifted.shape[1]
+    if abs(dx) >= width:
+        return np.repeat(shifted[:, :1], width, axis=1)
+    if shifted.ndim == 2:
+        output = np.empty_like(shifted)
+        if dx > 0:
+            output[:, dx:] = shifted[:, :-dx]
+            output[:, :dx] = shifted[:, :1]
+        else:
+            dx_abs = abs(dx)
+            output[:, :-dx_abs] = shifted[:, dx_abs:]
+            output[:, -dx_abs:] = shifted[:, -1:]
+        return output
+    output = np.empty_like(shifted)
+    if dx > 0:
+        output[:, dx:, ...] = shifted[:, :-dx, ...]
+        output[:, :dx, ...] = shifted[:, :1, ...]
+    else:
+        dx_abs = abs(dx)
+        output[:, :-dx_abs, ...] = shifted[:, dx_abs:, ...]
+        output[:, -dx_abs:, ...] = shifted[:, -1:, ...]
+    return output
+
+
 def _reference_check_ssim_percent(
     baseline_array: Optional[np.ndarray],
     comparison_array: Optional[np.ndarray],
@@ -3687,6 +3719,173 @@ def _reference_check_region_color_match(
     )
 
 
+def _reference_check_signed_vertical_shift(dy: int, height: int) -> int:
+    signed = int(dy)
+    if signed > height // 2:
+        signed -= height
+    return signed
+
+
+def _reference_check_find_best_alignment(
+    baseline_payload: Optional[Dict[str, np.ndarray]],
+    comparison_payload: Optional[Dict[str, np.ndarray]],
+) -> Dict[str, object]:
+    if not baseline_payload or not comparison_payload:
+        return {"dy": 0, "dx": 0, "confidence": None, "score": None}
+    base_norm = baseline_payload.get("normalized_gray")
+    comp_norm = comparison_payload.get("normalized_gray")
+    base_grad = baseline_payload.get("gradient")
+    comp_grad = comparison_payload.get("gradient")
+    base_edge = baseline_payload.get("edge")
+    comp_edge = comparison_payload.get("edge")
+    if base_norm is None or comp_norm is None or base_grad is None or comp_grad is None:
+        return {"dy": 0, "dx": 0, "confidence": None, "score": None}
+    height = base_norm.shape[0]
+    baseline_profile = base_grad.mean(axis=1).astype(np.float32)
+    comparison_profile = comp_grad.mean(axis=1).astype(np.float32)
+    dy_candidates: List[Tuple[float, int]] = []
+    for dy in range(height):
+        shifted_profile = np.roll(comparison_profile, dy)
+        profile_score = _reference_check_correlation_percent(
+            baseline_profile.reshape(-1, 1), shifted_profile.reshape(-1, 1)
+        )
+        dy_candidates.append((float(profile_score or 0.0), dy))
+    dy_candidates.sort(key=lambda item: item[0], reverse=True)
+    top_dys = sorted({0, *[dy for _, dy in dy_candidates[:8]]})
+    candidate_results: List[Dict[str, object]] = []
+    for dy in top_dys:
+        for dx in range(-REFERENCE_CHECK_MAX_HORIZONTAL_SHIFT_PX, REFERENCE_CHECK_MAX_HORIZONTAL_SHIFT_PX + 1):
+            shifted_norm = _reference_check_shift_array(comp_norm, dy=dy, dx=dx)
+            shifted_grad = _reference_check_shift_array(comp_grad, dy=dy, dx=dx)
+            shifted_edge = _reference_check_shift_array(comp_edge, dy=dy, dx=dx) if comp_edge is not None else None
+            gradient_corr = _reference_check_correlation_percent(base_grad, shifted_grad) or 0.0
+            structure_corr = _reference_check_correlation_percent(base_norm, shifted_norm) or 0.0
+            edge_overlap, _ = _reference_check_edge_overlap_percent(base_edge, shifted_edge)
+            composite_score = (gradient_corr * 0.55) + (structure_corr * 0.20) + ((edge_overlap or 0.0) * 0.25)
+            candidate_results.append(
+                {
+                    "dy": dy,
+                    "dx": dx,
+                    "score": round(composite_score, 3),
+                    "gradient_corr_pct": gradient_corr,
+                    "normalized_gray_corr_pct": structure_corr,
+                    "edge_overlap_pct": edge_overlap,
+                }
+            )
+    if not candidate_results:
+        return {"dy": 0, "dx": 0, "confidence": None, "score": None}
+    candidate_results.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
+    best = candidate_results[0]
+    second_score = float(candidate_results[1]["score"]) if len(candidate_results) > 1 else float(best["score"] or 0.0)
+    score_margin = max(float(best["score"] or 0.0) - second_score, 0.0)
+    dx_similarity = max(
+        0.0,
+        100.0 - ((abs(int(best["dx"])) / max(REFERENCE_CHECK_MAX_HORIZONTAL_SHIFT_PX, 1)) * 25.0),
+    )
+    confidence = min(
+        100.0,
+        max(
+            0.0,
+            (float(best["score"] or 0.0) * 0.78) + (score_margin * 0.17) + (dx_similarity * 0.05),
+        ),
+    )
+    return {
+        "dy": int(best["dy"]),
+        "dx": int(best["dx"]),
+        "confidence": round(confidence, 1),
+        "score": round(float(best["score"] or 0.0), 1),
+        "gradient_corr_pct": best.get("gradient_corr_pct"),
+        "normalized_gray_corr_pct": best.get("normalized_gray_corr_pct"),
+        "edge_overlap_pct": best.get("edge_overlap_pct"),
+    }
+
+
+def _reference_check_coarse_presence(
+    baseline_mask: Optional[np.ndarray],
+    comparison_mask: Optional[np.ndarray],
+    grid_x: int = 12,
+    grid_y: int = 8,
+) -> Dict[str, object]:
+    if baseline_mask is None or comparison_mask is None:
+        return {"content_presence_pct": None, "coarse_presence_pct": None, "missing_regions": []}
+    height, width = baseline_mask.shape
+    if comparison_mask.shape != baseline_mask.shape:
+        return {"content_presence_pct": None, "coarse_presence_pct": None, "missing_regions": []}
+    baseline_blocks = np.zeros((grid_y, grid_x), dtype=bool)
+    comparison_blocks = np.zeros((grid_y, grid_x), dtype=bool)
+    for gy in range(grid_y):
+        y0 = int(round((gy / grid_y) * height))
+        y1 = int(round(((gy + 1) / grid_y) * height))
+        for gx in range(grid_x):
+            x0 = int(round((gx / grid_x) * width))
+            x1 = int(round(((gx + 1) / grid_x) * width))
+            baseline_slice = baseline_mask[y0:y1, x0:x1]
+            comparison_slice = comparison_mask[y0:y1, x0:x1]
+            baseline_blocks[gy, gx] = bool(baseline_slice.size and float(baseline_slice.mean()) >= 0.22)
+            comparison_blocks[gy, gx] = bool(comparison_slice.size and float(comparison_slice.mean()) >= 0.22)
+    baseline_active = float(baseline_blocks.sum())
+    overlap = float(np.logical_and(baseline_blocks, comparison_blocks).sum())
+    comparison_active = float(comparison_blocks.sum())
+    content_presence_pct = round((overlap / baseline_active) * 100.0, 1) if baseline_active > 0 else 100.0
+    coarse_presence_pct = (
+        round(((2.0 * overlap) / (baseline_active + comparison_active)) * 100.0, 1)
+        if (baseline_active + comparison_active) > 0
+        else 100.0
+    )
+    missing_mask = np.logical_and(baseline_blocks, np.logical_not(comparison_blocks))
+    visited = np.zeros_like(missing_mask, dtype=bool)
+    regions: List[Dict[str, float]] = []
+    for gy in range(grid_y):
+        for gx in range(grid_x):
+            if not missing_mask[gy, gx] or visited[gy, gx]:
+                continue
+            stack = [(gy, gx)]
+            visited[gy, gx] = True
+            min_x = max_x = gx
+            min_y = max_y = gy
+            area = 0
+            while stack:
+                current_y, current_x = stack.pop()
+                area += 1
+                min_x = min(min_x, current_x)
+                max_x = max(max_x, current_x)
+                min_y = min(min_y, current_y)
+                max_y = max(max_y, current_y)
+                for next_y, next_x in (
+                    (current_y - 1, current_x),
+                    (current_y + 1, current_x),
+                    (current_y, current_x - 1),
+                    (current_y, current_x + 1),
+                ):
+                    if next_y < 0 or next_y >= grid_y or next_x < 0 or next_x >= grid_x:
+                        continue
+                    if visited[next_y, next_x] or not missing_mask[next_y, next_x]:
+                        continue
+                    visited[next_y, next_x] = True
+                    stack.append((next_y, next_x))
+            if area < 2:
+                continue
+            x0 = int(round((min_x / grid_x) * width))
+            y0 = int(round((min_y / grid_y) * height))
+            x1 = int(round(((max_x + 1) / grid_x) * width))
+            y1 = int(round(((max_y + 1) / grid_y) * height))
+            regions.append(
+                {
+                    "x": x0,
+                    "y": y0,
+                    "w": max(x1 - x0, 1),
+                    "h": max(y1 - y0, 1),
+                    "area": max(area, 1),
+                }
+            )
+    regions.sort(key=lambda region: float(region.get("area") or 0.0), reverse=True)
+    return {
+        "content_presence_pct": content_presence_pct,
+        "coarse_presence_pct": coarse_presence_pct,
+        "missing_regions": regions[:4],
+    }
+
+
 def _reference_check_alignment_match_percent(
     baseline_gray: Optional[np.ndarray],
     comparison_gray: Optional[np.ndarray],
@@ -3732,50 +3931,107 @@ def _reference_check_difference_profile(
             "difference_explanation": "Reference scoring is unavailable for this comparison.",
             "brightness_delta_pct": None,
             "alignment_offset": None,
+            "best_vertical_wrap_dy_px": None,
+            "best_horizontal_dx_px": None,
+            "alignment_confidence": None,
+            "content_presence_pct": None,
+            "coarse_presence_pct": None,
+            "gradient_corr_pct": None,
+            "edge_overlap_pct": None,
+            "lab_chroma_similarity_pct": None,
+            "lab_lightness_similarity_pct": None,
+            "coarse_missing_regions": [],
             "debug_metrics": {},
         }
     gray_base = baseline_payload.get("gray")
-    gray_comp = comparison_payload.get("gray")
-    normalized_gray_base = baseline_payload.get("normalized_gray")
-    normalized_gray_comp = comparison_payload.get("normalized_gray")
     rgb_base = baseline_payload.get("rgb")
-    rgb_comp = comparison_payload.get("rgb")
     edge_base = baseline_payload.get("edge")
-    edge_comp = comparison_payload.get("edge")
     gradient_base = baseline_payload.get("gradient")
-    gradient_comp = comparison_payload.get("gradient")
-    normalized_gray_score = _reference_check_correlation_percent(normalized_gray_base, normalized_gray_comp)
-    edge_overlap_score, print_region_coverage = _reference_check_edge_overlap_percent(edge_base, edge_comp)
-    gradient_score = _reference_check_ssim_percent(gradient_base, gradient_comp)
-    gray_ssim_score = _reference_check_ssim_percent(gray_base, gray_comp)
-    normalized_gray_ssim = _reference_check_ssim_percent(normalized_gray_base, normalized_gray_comp)
-    if normalized_gray_score is not None and edge_overlap_score is not None and gradient_score is not None:
+    alignment = _reference_check_find_best_alignment(baseline_payload, comparison_payload)
+    dy = int(alignment.get("dy") or 0)
+    dx = int(alignment.get("dx") or 0)
+    gray_comp_shifted = _reference_check_shift_array(comparison_payload.get("gray"), dy=dy, dx=dx)
+    normalized_gray_base = baseline_payload.get("normalized_gray")
+    normalized_gray_comp_shifted = _reference_check_shift_array(
+        comparison_payload.get("normalized_gray"), dy=dy, dx=dx
+    )
+    rgb_comp_shifted = _reference_check_shift_array(comparison_payload.get("rgb"), dy=dy, dx=dx)
+    edge_comp_shifted = _reference_check_shift_array(comparison_payload.get("edge"), dy=dy, dx=dx)
+    gradient_comp_shifted = _reference_check_shift_array(comparison_payload.get("gradient"), dy=dy, dx=dx)
+    normalized_gray_score = _reference_check_correlation_percent(normalized_gray_base, normalized_gray_comp_shifted)
+    edge_overlap_score, print_region_coverage = _reference_check_edge_overlap_percent(edge_base, edge_comp_shifted)
+    gradient_score = _reference_check_correlation_percent(gradient_base, gradient_comp_shifted)
+    gray_ssim_score = _reference_check_ssim_percent(gray_base, gray_comp_shifted)
+    normalized_gray_ssim = _reference_check_ssim_percent(normalized_gray_base, normalized_gray_comp_shifted)
+    baseline_region_mask = _reference_check_print_region_mask(rgb_base, edge_base)
+    comparison_region_mask = _reference_check_print_region_mask(rgb_comp_shifted, edge_comp_shifted)
+    presence = _reference_check_coarse_presence(baseline_region_mask, comparison_region_mask)
+    content_presence_pct = presence.get("content_presence_pct")
+    coarse_presence_pct = presence.get("coarse_presence_pct")
+    coarse_missing_regions = presence.get("missing_regions") or []
+    if (
+        content_presence_pct is not None
+        and gradient_score is not None
+        and edge_overlap_score is not None
+        and normalized_gray_score is not None
+    ):
         content_match = round(
-            (normalized_gray_score * 0.1) + (normalized_gray_ssim or 0.0) * 0.15 + (gradient_score * 0.4) + (edge_overlap_score * 0.35),
+            (float(content_presence_pct) * 0.46)
+            + (float(coarse_presence_pct or content_presence_pct) * 0.14)
+            + (float(gradient_score) * 0.24)
+            + (float(edge_overlap_score) * 0.12)
+            + (float(normalized_gray_score) * 0.04),
             1,
         )
     else:
-        content_match = gradient_score if gradient_score is not None else edge_overlap_score
-    region_mask = _reference_check_print_region_mask(rgb_base, edge_base)
-    region_coverage_pct = round(float(region_mask.mean()) * 100.0, 1) if region_mask is not None else None
+        content_match = content_presence_pct if content_presence_pct is not None else gradient_score
+    union_region_mask = None
+    if baseline_region_mask is not None and comparison_region_mask is not None:
+        union_region_mask = np.logical_or(baseline_region_mask, comparison_region_mask)
+    elif baseline_region_mask is not None:
+        union_region_mask = baseline_region_mask
+    elif comparison_region_mask is not None:
+        union_region_mask = comparison_region_mask
+    region_coverage_pct = round(float(union_region_mask.mean()) * 100.0, 1) if union_region_mask is not None else None
     color_match, masked_lab_delta, global_lab_delta, masked_lightness_delta, chroma_similarity_pct = _reference_check_region_color_match(
-        rgb_base, rgb_comp, region_mask
+        rgb_base, rgb_comp_shifted, union_region_mask
     )
-    alignment_match, alignment_offset = _reference_check_alignment_match_percent(gray_base, gray_comp)
+    lab_lightness_similarity_pct = None
+    if masked_lightness_delta is not None:
+        lab_lightness_similarity_pct = round(
+            max(0.0, min(1.0, 1.0 - (float(masked_lightness_delta) / 60.0))) * 100.0,
+            1,
+        )
+    alignment_confidence = alignment.get("confidence")
+    dx_similarity = max(
+        0.0,
+        100.0 - ((abs(dx) / max(REFERENCE_CHECK_MAX_HORIZONTAL_SHIFT_PX, 1)) * 20.0),
+    )
+    alignment_match = (
+        round(((float(alignment_confidence or 0.0) * 0.82) + (dx_similarity * 0.18)), 1)
+        if alignment_confidence is not None
+        else None
+    )
+    signed_dy = _reference_check_signed_vertical_shift(dy, gray_base.shape[0] if gray_base is not None else 0)
+    alignment_offset = {
+        "dx_px": float(dx),
+        "dy_px": float(signed_dy),
+        "shift_px": round(math.sqrt(float((dx * dx) + (signed_dy * signed_dy))), 2),
+    }
     brightness_delta_pct = None
-    if gray_base is not None and gray_comp is not None:
-        brightness_delta_pct = round(abs(float(gray_base.mean()) - float(gray_comp.mean())) * 100.0, 1)
+    if gray_base is not None and gray_comp_shifted is not None:
+        brightness_delta_pct = round(abs(float(gray_base.mean()) - float(gray_comp_shifted.mean())) * 100.0, 1)
     overall_components: List[float] = []
     overall_weights: List[float] = []
     if content_match is not None:
         overall_components.append(content_match)
-        overall_weights.append(REFERENCE_CHECK_OVERALL_WEIGHT)
+        overall_weights.append(REFERENCE_CHECK_CONTENT_WEIGHT)
     if color_match is not None:
         overall_components.append(color_match)
-        overall_weights.append(REFERENCE_CHECK_COLOR_WEIGHT)
+        overall_weights.append(REFERENCE_CHECK_COLOR_DOMINANT_WEIGHT)
     if alignment_match is not None:
         overall_components.append(alignment_match)
-        overall_weights.append(REFERENCE_CHECK_ALIGNMENT_WEIGHT)
+        overall_weights.append(REFERENCE_CHECK_ALIGNMENT_LIGHT_WEIGHT)
     if overall_components and overall_weights:
         weighted_total = sum(value * weight for value, weight in zip(overall_components, overall_weights))
         total_weight = sum(overall_weights) or 1.0
@@ -3789,66 +4045,83 @@ def _reference_check_difference_profile(
     color_value = float(color_match or 0.0)
     alignment_value = float(alignment_match or 0.0)
     brightness_value = float(brightness_delta_pct or 0.0)
+    chroma_value = float(chroma_similarity_pct or 0.0)
+    lightness_value = float(lab_lightness_similarity_pct or 0.0)
+    content_presence_value = float(content_presence_pct or 0.0)
     overall_value = float(overall_match or 0.0)
     if overall_match is None:
         reason_key = "unscored"
         reason_label = "Unscored"
         explanation = "Comparison scoring is unavailable for this image pair."
-    elif content_value >= 93 and alignment_value >= 90 and color_value >= 84:
+    elif content_value >= 92 and alignment_value >= 82 and color_value >= 82:
         reason_key = "strong_match"
         reason_label = "Strong match"
         explanation = "Content, color, and placement all remain highly consistent with the baseline."
-    elif content_value >= 90 and alignment_value >= 88 and color_value >= 74 and brightness_value >= 10:
+    elif content_value >= 90 and alignment_value >= 78 and chroma_value >= 86 and lightness_value < 78:
         reason_key = "exposure_shift"
         reason_label = "Brightness / exposure shift"
         explanation = "Printed structure and placement remain stable; the main difference is brightness or display exposure."
-    elif content_value >= 88 and alignment_value >= 85 and color_value < 72:
-        if brightness_value >= 14 and (masked_lightness_delta or 0.0) > (masked_lab_delta or 0.0):
+    elif content_value >= 88 and alignment_value >= 78 and color_value < 76:
+        if brightness_value >= 14 and lightness_value < 72 and chroma_value >= 84:
             reason_key = "exposure_shift"
             reason_label = "Exposure / brightness shift"
             explanation = "Printed structure remains stable, but brightness or exposure changed noticeably."
         else:
             reason_key = "color_shift"
             reason_label = "Color shift"
-            explanation = "Printed content still matches strongly, but color consistency drifted from the baseline."
-    elif content_value >= 86 and alignment_value < 78:
+            explanation = "Printed content still matches strongly, but chroma or tone drifted from the baseline."
+    elif content_value >= 86 and alignment_value < 70 and abs(dx) >= 2:
         reason_key = "alignment_shift"
         reason_label = "Alignment shift"
-        explanation = "The main difference appears to be placement or registration offset rather than content."
-    elif content_value < 72 and color_value < 70:
+        explanation = "The main difference appears to be slight horizontal placement or registration offset rather than missing content."
+    elif content_value < 70 and color_value < 72 and content_presence_value < 78:
         reason_key = "major_change"
         reason_label = "Major change"
         explanation = "Both structure and color differ substantially from the baseline."
-    elif content_value < 80 and alignment_value >= 78:
+    elif content_value < 80 and content_presence_value < 82:
+        if coarse_missing_regions:
+            reason_key = "missing_content"
+            reason_label = "Missing content"
+            explanation = "One or more coarse content regions appear absent after wrap-aware alignment."
+        else:
+            reason_key = "content_change"
+            reason_label = "Content / template change"
+            explanation = "The printed structure changed more than color or placement, suggesting a template/content change."
+    elif overall_value >= 84:
+        reason_key = "minor_variation"
+        reason_label = "Minor appearance shift"
+        explanation = "The same content appears present with only limited appearance variation."
+    elif content_value < 84 and alignment_value >= 72:
         reason_key = "content_change"
         reason_label = "Content / template change"
         explanation = "The printed structure changed more than color or placement, suggesting a template/content change."
-    elif overall_value >= 85 and color_value >= 80:
-        reason_key = "minor_variation"
-        reason_label = "Minor variation"
-        explanation = "Differences are present but remain modest across the main comparison signals."
     debug_metrics = {
         "gray_ssim_pct": gray_ssim_score,
         "normalized_gray_ssim_pct": normalized_gray_ssim,
         "normalized_gray_corr_pct": normalized_gray_score,
         "gradient_ssim_pct": gradient_score,
+        "gradient_corr_pct": gradient_score,
         "edge_overlap_pct": edge_overlap_score,
         "print_region_coverage_pct": region_coverage_pct if region_coverage_pct is not None else print_region_coverage,
         "masked_lab_delta": masked_lab_delta,
         "global_lab_delta": global_lab_delta,
         "lab_lightness_delta": masked_lightness_delta,
         "lab_chroma_similarity_pct": chroma_similarity_pct,
+        "lab_lightness_similarity_pct": lab_lightness_similarity_pct,
         "brightness_delta_pct": brightness_delta_pct,
         "alignment_match_pct": alignment_match,
         "alignment_offset": alignment_offset,
         "content_inputs": {
+            "content_presence_pct": content_presence_pct,
+            "coarse_presence_pct": coarse_presence_pct,
             "normalized_gray_corr_pct": normalized_gray_score,
             "normalized_gray_ssim_pct": normalized_gray_ssim,
-            "gradient_ssim_pct": gradient_score,
+            "gradient_corr_pct": gradient_score,
             "edge_overlap_pct": edge_overlap_score,
         },
         "color_inputs": {
             "lab_chroma_similarity_pct": chroma_similarity_pct,
+            "lab_lightness_similarity_pct": lab_lightness_similarity_pct,
             "lab_lightness_delta": masked_lightness_delta,
             "masked_lab_delta": masked_lab_delta,
             "global_lab_delta": global_lab_delta,
@@ -3858,6 +4131,9 @@ def _reference_check_difference_profile(
             "color_match_pct": color_match,
             "alignment_match_pct": alignment_match,
             "brightness_delta_pct": brightness_delta_pct,
+            "content_presence_pct": content_presence_pct,
+            "coarse_presence_pct": coarse_presence_pct,
+            "coarse_missing_region_count": len(coarse_missing_regions),
         },
     }
     return {
@@ -3865,6 +4141,18 @@ def _reference_check_difference_profile(
         "content_match_pct": content_match,
         "color_match_pct": color_match,
         "alignment_match_pct": alignment_match,
+        "best_vertical_wrap_dy_px": _reference_check_signed_vertical_shift(
+            dy, gray_base.shape[0] if gray_base is not None else 0
+        ),
+        "best_horizontal_dx_px": int(dx),
+        "alignment_confidence": alignment_confidence,
+        "content_presence_pct": content_presence_pct,
+        "coarse_presence_pct": coarse_presence_pct,
+        "gradient_corr_pct": gradient_score,
+        "edge_overlap_pct": edge_overlap_score,
+        "lab_chroma_similarity_pct": chroma_similarity_pct,
+        "lab_lightness_similarity_pct": lab_lightness_similarity_pct,
+        "coarse_missing_regions": coarse_missing_regions,
         "likely_difference_type": reason_label,
         "difference_reason_key": reason_key,
         "difference_explanation": explanation,
