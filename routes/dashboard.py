@@ -3488,10 +3488,12 @@ def _reference_check_image_payload(image_src: Optional[str]) -> Optional[Dict[st
             edge_x = np.abs(np.diff(gray_array, axis=1, append=gray_array[:, -1:]))
             edge_y = np.abs(np.diff(gray_array, axis=0, append=gray_array[-1:, :]))
             edge_array = np.clip(edge_x + edge_y, 0.0, 1.0)
+            gradient_array = np.sqrt((edge_x ** 2) + (edge_y ** 2))
             return {
                 "gray": gray_array,
                 "rgb": rgb_array,
                 "edge": edge_array,
+                "gradient": gradient_array,
             }
     except (FileNotFoundError, OSError, ValueError):
         return None
@@ -3534,6 +3536,122 @@ def _reference_check_color_match_percent(
     mean_abs_diff = float(np.mean(np.abs(baseline_rgb.astype(np.float32) - comparison_rgb.astype(np.float32))))
     similarity = max(0.0, min(1.0, 1.0 - mean_abs_diff / 0.65))
     return round(similarity * 100.0, 1)
+
+
+def _reference_check_correlation_percent(
+    baseline_array: Optional[np.ndarray],
+    comparison_array: Optional[np.ndarray],
+) -> Optional[float]:
+    if baseline_array is None or comparison_array is None:
+        return None
+    if baseline_array.shape != comparison_array.shape:
+        return None
+    base = baseline_array.astype(np.float32).reshape(-1)
+    comp = comparison_array.astype(np.float32).reshape(-1)
+    base = base - float(base.mean())
+    comp = comp - float(comp.mean())
+    base_norm = float(np.linalg.norm(base))
+    comp_norm = float(np.linalg.norm(comp))
+    if base_norm <= 1e-8 or comp_norm <= 1e-8:
+        return None
+    correlation = float(np.dot(base, comp) / (base_norm * comp_norm))
+    similarity = max(0.0, min(1.0, (correlation + 1.0) / 2.0))
+    return round(similarity * 100.0, 1)
+
+
+def _reference_check_edge_overlap_percent(
+    baseline_edge: Optional[np.ndarray],
+    comparison_edge: Optional[np.ndarray],
+) -> Tuple[Optional[float], Optional[float]]:
+    if baseline_edge is None or comparison_edge is None:
+        return None, None
+    if baseline_edge.shape != comparison_edge.shape:
+        return None, None
+    combined = np.concatenate(
+        [
+            baseline_edge.astype(np.float32).reshape(-1),
+            comparison_edge.astype(np.float32).reshape(-1),
+        ]
+    )
+    threshold = float(np.percentile(combined, 76))
+    threshold = max(threshold, 0.04)
+    base_mask = baseline_edge >= threshold
+    comp_mask = comparison_edge >= threshold
+    overlap = float(np.logical_and(base_mask, comp_mask).sum())
+    denom = float(base_mask.sum() + comp_mask.sum())
+    if denom <= 0:
+        return 100.0, 0.0
+    dice = (2.0 * overlap) / denom
+    return round(max(0.0, min(1.0, dice)) * 100.0, 1), round(
+        float((base_mask.sum() + comp_mask.sum()) / (2.0 * base_mask.size)) * 100.0, 1
+    )
+
+
+def _reference_check_print_region_mask(
+    rgb_array: Optional[np.ndarray],
+    edge_array: Optional[np.ndarray],
+) -> Optional[np.ndarray]:
+    if rgb_array is None or edge_array is None:
+        return None
+    luminance = (
+        (rgb_array[..., 0] * 0.299) + (rgb_array[..., 1] * 0.587) + (rgb_array[..., 2] * 0.114)
+    ).astype(np.float32)
+    saturation = (np.max(rgb_array, axis=2) - np.min(rgb_array, axis=2)).astype(np.float32)
+    edge_threshold = max(float(np.percentile(edge_array, 68)), 0.03)
+    luminance_mask = luminance < 0.94
+    saturation_mask = saturation > 0.08
+    edge_mask = edge_array >= edge_threshold
+    combined = np.logical_or(np.logical_or(luminance_mask, saturation_mask), edge_mask)
+    if not np.any(combined):
+        combined = luminance < 0.985
+    return combined
+
+
+def _reference_check_rgb_to_lab(rgb_array: np.ndarray) -> np.ndarray:
+    rgb = np.clip(rgb_array.astype(np.float32), 0.0, 1.0)
+    threshold = 0.04045
+    linear = np.where(rgb <= threshold, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
+    x = (linear[..., 0] * 0.4124564) + (linear[..., 1] * 0.3575761) + (linear[..., 2] * 0.1804375)
+    y = (linear[..., 0] * 0.2126729) + (linear[..., 1] * 0.7151522) + (linear[..., 2] * 0.0721750)
+    z = (linear[..., 0] * 0.0193339) + (linear[..., 1] * 0.1191920) + (linear[..., 2] * 0.9503041)
+    x = x / 0.95047
+    y = y / 1.00000
+    z = z / 1.08883
+
+    def _f(channel: np.ndarray) -> np.ndarray:
+        delta = 6.0 / 29.0
+        threshold_local = delta ** 3
+        return np.where(channel > threshold_local, np.cbrt(channel), (channel / (3 * delta * delta)) + (4.0 / 29.0))
+
+    fx = _f(x)
+    fy = _f(y)
+    fz = _f(z)
+    l = (116.0 * fy) - 16.0
+    a = 500.0 * (fx - fy)
+    b = 200.0 * (fy - fz)
+    return np.stack([l, a, b], axis=-1)
+
+
+def _reference_check_region_color_match(
+    baseline_rgb: Optional[np.ndarray],
+    comparison_rgb: Optional[np.ndarray],
+    region_mask: Optional[np.ndarray],
+) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    if baseline_rgb is None or comparison_rgb is None or region_mask is None:
+        return None, None, None
+    if baseline_rgb.shape != comparison_rgb.shape or baseline_rgb.shape[:2] != region_mask.shape:
+        return None, None, None
+    base_lab = _reference_check_rgb_to_lab(baseline_rgb)
+    comp_lab = _reference_check_rgb_to_lab(comparison_rgb)
+    delta = np.linalg.norm(base_lab - comp_lab, axis=2)
+    global_delta = float(delta.mean())
+    active_mask = region_mask.astype(bool)
+    if not np.any(active_mask):
+        active_mask = np.ones(region_mask.shape, dtype=bool)
+    masked_delta = float(delta[active_mask].mean())
+    blended_delta = (masked_delta * 0.85) + (global_delta * 0.15)
+    similarity = max(0.0, min(1.0, 1.0 - (blended_delta / 24.0)))
+    return round(similarity * 100.0, 1), round(masked_delta, 2), round(global_delta, 2)
 
 
 def _reference_check_alignment_match_percent(
@@ -3581,6 +3699,7 @@ def _reference_check_difference_profile(
             "difference_explanation": "Reference scoring is unavailable for this comparison.",
             "brightness_delta_pct": None,
             "alignment_offset": None,
+            "debug_metrics": {},
         }
     gray_base = baseline_payload.get("gray")
     gray_comp = comparison_payload.get("gray")
@@ -3588,13 +3707,24 @@ def _reference_check_difference_profile(
     rgb_comp = comparison_payload.get("rgb")
     edge_base = baseline_payload.get("edge")
     edge_comp = comparison_payload.get("edge")
-    gray_score = _reference_check_ssim_percent(gray_base, gray_comp)
-    edge_score = _reference_check_ssim_percent(edge_base, edge_comp)
-    if gray_score is not None and edge_score is not None:
-        content_match = round((gray_score * 0.65) + (edge_score * 0.35), 1)
+    gradient_base = baseline_payload.get("gradient")
+    gradient_comp = comparison_payload.get("gradient")
+    normalized_gray_score = _reference_check_correlation_percent(gray_base, gray_comp)
+    edge_overlap_score, print_region_coverage = _reference_check_edge_overlap_percent(edge_base, edge_comp)
+    gradient_score = _reference_check_ssim_percent(gradient_base, gradient_comp)
+    gray_ssim_score = _reference_check_ssim_percent(gray_base, gray_comp)
+    if normalized_gray_score is not None and edge_overlap_score is not None and gradient_score is not None:
+        content_match = round(
+            (normalized_gray_score * 0.2) + (gradient_score * 0.45) + (edge_overlap_score * 0.35),
+            1,
+        )
     else:
-        content_match = gray_score if gray_score is not None else edge_score
-    color_match = _reference_check_color_match_percent(rgb_base, rgb_comp)
+        content_match = gradient_score if gradient_score is not None else edge_overlap_score
+    region_mask = _reference_check_print_region_mask(rgb_base, edge_base)
+    region_coverage_pct = round(float(region_mask.mean()) * 100.0, 1) if region_mask is not None else None
+    color_match, masked_lab_delta, global_lab_delta = _reference_check_region_color_match(
+        rgb_base, rgb_comp, region_mask
+    )
     alignment_match, alignment_offset = _reference_check_alignment_match_percent(gray_base, gray_comp)
     brightness_delta_pct = None
     if gray_base is not None and gray_comp is not None:
@@ -3657,6 +3787,18 @@ def _reference_check_difference_profile(
         reason_key = "minor_variation"
         reason_label = "Minor variation"
         explanation = "Differences are present but remain modest across the main comparison signals."
+    debug_metrics = {
+        "gray_ssim_pct": gray_ssim_score,
+        "normalized_gray_corr_pct": normalized_gray_score,
+        "gradient_ssim_pct": gradient_score,
+        "edge_overlap_pct": edge_overlap_score,
+        "print_region_coverage_pct": region_coverage_pct if region_coverage_pct is not None else print_region_coverage,
+        "masked_lab_delta": masked_lab_delta,
+        "global_lab_delta": global_lab_delta,
+        "brightness_delta_pct": brightness_delta_pct,
+        "alignment_match_pct": alignment_match,
+        "alignment_offset": alignment_offset,
+    }
     return {
         "overall_match_pct": overall_match,
         "content_match_pct": content_match,
@@ -3667,6 +3809,7 @@ def _reference_check_difference_profile(
         "difference_explanation": explanation,
         "brightness_delta_pct": brightness_delta_pct,
         "alignment_offset": alignment_offset,
+        "debug_metrics": debug_metrics,
     }
 
 

@@ -21,6 +21,7 @@
       modalImages: [],
       modalImageIndex: 0,
       modalBaselineImage: null,
+      lastLoggedDebugRefImageId: null,
     };
 
     const elements = {};
@@ -47,8 +48,6 @@
       elements.resultsHead = Utils.qs("#referenceCheckResultsHead");
       elements.resultsBody = Utils.qs("#referenceCheckResultsBody");
       elements.chart = Utils.qs("#referenceCheckTrendChart");
-      elements.insightsSection = Utils.qs("#referenceCheckInsightsSection");
-      elements.insights = Utils.qs("#referenceCheckInsights");
       elements.modal = Utils.qs("#referenceCheckModal");
       elements.modalClose = Utils.qs("#referenceCheckModalClose");
       elements.modalDismiss = Utils.qs("#referenceCheckModalDismiss");
@@ -373,9 +372,6 @@
       const overallValues = group
         .map((item) => Number(item.overall_match_pct))
         .filter((value) => Number.isFinite(value));
-      const contentValues = group
-        .map((item) => Number(item.content_match_pct))
-        .filter((value) => Number.isFinite(value));
       const thumbs = group
         .map((item) => {
           const matchHtml =
@@ -427,10 +423,6 @@
                 <div class="reference-check-card__metric">${overallValues.length ? formatPercent(Math.min(...overallValues)) : "—"}</div>
                 <span class="reference-check-muted">Overall</span>
               </div>
-              <div class="reference-check-card__metric-group">
-                <div class="reference-check-card__metric">${contentValues.length ? formatPercent(Math.max(...contentValues)) : "—"}</div>
-                <span class="reference-check-muted">Content</span>
-              </div>
               <span class="reference-check-status reference-check-status--${Utils.escapeHtml(reasonSummary.key)}">${Utils.escapeHtml(reasonSummary.label)}</span>
             </div>
             <div class="reference-check-gallery-group">
@@ -453,9 +445,6 @@
       if (elements.resultsTableSection) {
         elements.resultsTableSection.classList.toggle("hidden", !hasBaseline);
       }
-      if (elements.insightsSection) {
-        elements.insightsSection.classList.toggle("hidden", !hasBaseline);
-      }
       if (!hasBaseline) {
         if (elements.baselineSummary) {
           elements.baselineSummary.innerHTML = `
@@ -474,9 +463,6 @@
             </tr>
           `;
         }
-        if (elements.insights) {
-          elements.insights.innerHTML = "";
-        }
         renderTrendChart([]);
         return;
       }
@@ -486,7 +472,6 @@
       const trendPoints = sortTrendPoints(payload.trend || []);
       renderResultsTable(payload.reel_comparisons || [], payload.defect_types || []);
       renderTrendChart(trendPoints);
-      renderInsights();
     }
 
     function renderBaselineSummary() {
@@ -735,105 +720,6 @@
       }
     }
 
-    function renderInsights() {
-      if (!elements.insights || !payload) return;
-      const insights = payload.insights || {};
-      const firstChange = insights.first_major_change_point;
-      const lowestRows = Array.isArray(insights.lowest_match_references) ? insights.lowest_match_references : [];
-      const stable = insights.stable_streaks || {};
-      const unstablePeriods = Array.isArray(insights.unstable_periods) ? insights.unstable_periods : [];
-      const defectAssociation = insights.defect_association || {};
-      const clusterSummary = insights.cluster_summary || {};
-      const differenceSummary = insights.difference_type_summary || {};
-      const clusters = Array.isArray(clusterSummary.clusters) ? clusterSummary.clusters : [];
-      const dominantCluster = clusterSummary.dominant_cluster || null;
-      const differenceItems = Array.isArray(differenceSummary.items) ? differenceSummary.items : [];
-      const dominantDifference = differenceSummary.dominant || null;
-      const changeWindows = Array.isArray(insights.change_windows) ? insights.change_windows : [];
-      const largestDrop = insights.largest_match_drop || null;
-
-      const lowestMarkup = lowestRows.length
-        ? lowestRows
-            .map(
-              (row) =>
-                `<li>${Utils.escapeHtml(row.reel_code || "Reference")} · ${formatPercent(row.match_pct)} · ${Utils.escapeHtml(formatTime(row.captured_at, "—"))}</li>`
-            )
-            .join("")
-        : "<li>No low-match references identified yet.</li>";
-
-      const unstableMarkup = unstablePeriods.length
-        ? unstablePeriods
-            .map(
-              (period) =>
-                `<li>${Utils.escapeHtml(period.start_reel_code || "Reference")} · ${Utils.escapeHtml(formatTime(period.start_timestamp, "—"))} · ${Utils.formatNumber(period.count || 0)} refs</li>`
-            )
-            .join("")
-        : "<li>No unstable periods crossed the likely-change threshold.</li>";
-
-      const clusterMarkup = clusters.length
-        ? clusters
-            .map(
-              (cluster) =>
-                `<li>${Utils.escapeHtml(cluster.label || "Cluster")} · ${Utils.formatNumber(cluster.count || 0)} refs</li>`
-            )
-            .join("")
-        : "<li>No cluster data available.</li>";
-
-      const changeWindowMarkup = changeWindows.length
-        ? changeWindows
-            .slice(0, 4)
-            .map(
-              (window) =>
-                `<li>Window ${Utils.formatNumber(window.window_id || 0)} · ${Utils.escapeHtml(window.start_reel_code || "—")} to ${Utils.escapeHtml(window.end_reel_code || "—")} · avg ${formatPercent(window.avg_match_pct)}</li>`
-            )
-            .join("")
-        : "<li>No sustained low-match windows detected.</li>";
-      const differenceMarkup = differenceItems.length
-        ? differenceItems
-            .map((entry) => `<li>${Utils.escapeHtml(entry.label || "Difference")} · ${Utils.formatNumber(entry.count || 0)} refs</li>`)
-            .join("")
-        : "<li>No difference typing available.</li>";
-
-      elements.insights.innerHTML = `
-        <article class="reference-check-insight-card">
-          <h4>First Likely Major Change</h4>
-          <p>${firstChange ? `${Utils.escapeHtml(firstChange.reel_code || "Reference")} at ${Utils.escapeHtml(formatTime(firstChange.captured_at, "—"))}` : "No major change point detected."}</p>
-        </article>
-        <article class="reference-check-insight-card">
-          <h4>Difference Types</h4>
-          <p>${dominantDifference ? `Most drift looks like ${Utils.escapeHtml(String(dominantDifference.label || "").toLowerCase())}.` : "No dominant difference type yet."}</p>
-          <ul class="reference-check-insight-list">${differenceMarkup}</ul>
-        </article>
-        <article class="reference-check-insight-card">
-          <h4>Similarity Clusters</h4>
-          <p>${dominantCluster ? `Dominant cluster: ${Utils.escapeHtml(dominantCluster.label || "—")} (${Utils.formatNumber(dominantCluster.count || 0)} refs)` : "No dominant cluster yet."}</p>
-          <ul class="reference-check-insight-list">${clusterMarkup}</ul>
-        </article>
-        <article class="reference-check-insight-card">
-          <h4>Lowest-Match References</h4>
-          <ul class="reference-check-insight-list">${lowestMarkup}</ul>
-        </article>
-        <article class="reference-check-insight-card">
-          <h4>Stable vs Unstable</h4>
-          <p>Longest strong-match streak: <strong>${Utils.formatNumber(stable.longest_strong_match_streak || 0)}</strong></p>
-          <ul class="reference-check-insight-list">${unstableMarkup}</ul>
-        </article>
-        <article class="reference-check-insight-card">
-          <h4>Change Windows</h4>
-          <p>${largestDrop ? `Largest match drop: ${Utils.escapeHtml(largestDrop.from_reel_code || "—")} to ${Utils.escapeHtml(largestDrop.to_reel_code || "—")} (${formatPercent(largestDrop.delta_match_pct)})` : "No major drop between adjacent references."}</p>
-          <ul class="reference-check-insight-list">${changeWindowMarkup}</ul>
-        </article>
-        <article class="reference-check-insight-card">
-          <h4>Defect Association</h4>
-          <p>${Utils.escapeHtml(defectAssociation.interpretation || "No association data available.")}</p>
-          <div class="reference-check-insight-metrics">
-            <span>Low-match avg defects: ${formatNumberOrDash(defectAssociation.avg_defects_low_match)}</span>
-            <span>Strong-match avg defects: ${formatNumberOrDash(defectAssociation.avg_defects_strong_match)}</span>
-          </div>
-        </article>
-      `;
-    }
-
     function sortComparisons(rows) {
       const items = Array.isArray(rows) ? rows.slice() : [];
       const comparators = {
@@ -951,6 +837,7 @@
       if (elements.modalCompareLabel) {
         elements.modalCompareLabel.textContent = comparisonMode ? "Selected" : "Preview";
       }
+      logComparisonDebug(item, comparisonMode);
       renderModalComparison(item);
       if (elements.modalMeta) {
         elements.modalMeta.innerHTML = [
@@ -1441,8 +1328,44 @@
       state.modalImageIndex = 0;
       state.modalBaselineImage = null;
       state.modalRefImageId = null;
+      state.lastLoggedDebugRefImageId = null;
       clearOverlayCanvas(elements.modalBaselineOverlay);
       clearOverlayCanvas(elements.modalCompareOverlay);
+    }
+
+    function logComparisonDebug(item, comparisonMode) {
+      if (!comparisonMode || !item) return;
+      const refImageId = Number(item.ref_image_id);
+      if (!Number.isFinite(refImageId)) return;
+      if (state.lastLoggedDebugRefImageId === refImageId) return;
+      state.lastLoggedDebugRefImageId = refImageId;
+      const debug = item.debug_metrics || {};
+      console.groupCollapsed(
+        `[Reference Check Debug] ${item.reel_code || "Reference"} · ref_image_id=${refImageId}`
+      );
+      console.log({
+        baseline_ref_image_id:
+          state.modalBaselineImage && Number.isFinite(Number(state.modalBaselineImage.ref_image_id))
+            ? Number(state.modalBaselineImage.ref_image_id)
+            : null,
+        comparison_ref_image_id: refImageId,
+        reel_code: item.reel_code || null,
+        captured_at: item.captured_at || null,
+        content_match_pct: item.content_match_pct ?? null,
+        color_match_pct: item.color_match_pct ?? null,
+        alignment_match_pct: item.alignment_match_pct ?? null,
+        overall_match_pct: item.overall_match_pct ?? null,
+        debug_metrics: {
+          gradient_ssim_pct: debug.gradient_ssim_pct ?? null,
+          edge_overlap_pct: debug.edge_overlap_pct ?? null,
+          normalized_gray_corr_pct: debug.normalized_gray_corr_pct ?? null,
+          masked_lab_delta: debug.masked_lab_delta ?? null,
+          global_lab_delta: debug.global_lab_delta ?? null,
+          brightness_delta_pct: debug.brightness_delta_pct ?? null,
+          alignment_offset: debug.alignment_offset ?? null,
+        },
+      });
+      console.groupEnd();
     }
 
     function applyBaseline(refImageId) {
