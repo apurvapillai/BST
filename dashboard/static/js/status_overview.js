@@ -239,6 +239,7 @@
       <div class="status-substatus ${escapeAttr(box.state || "neutral")}">
         <span class="status-substatus-label">${escapeHtml(box.label || "")}</span>
         <strong>${escapeHtml(box.detail || "")}</strong>
+        ${box.subdetail ? `<small>${escapeHtml(box.subdetail)}</small>` : ""}
       </div>
     `;
   }

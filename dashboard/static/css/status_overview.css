@@ -1,7 +1,7 @@
 .status-overview-shell {
   position: relative;
   display: grid;
-  gap: 22px;
+  gap: 14px;
 }
 
 .status-overview-loading {
@@ -87,8 +87,36 @@
 .status-banner {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
+}
+
+.status-banner-frame {
+  position: relative;
+  padding: 10px;
+  border-radius: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96));
+  box-shadow:
+    0 10px 24px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.status-banner-frame::before {
+  content: "ACTIVE ALERTS";
+  position: absolute;
+  left: 8px;
+  top: -10px;
+  padding: 0.16rem 0.48rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .status-banner-track {
@@ -98,7 +126,9 @@
 .status-history-btn {
   min-height: 58px;
   white-space: nowrap;
-  background: linear-gradient(135deg, rgba(15, 23, 42, 0.05), rgba(148, 163, 184, 0.08));
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(241, 245, 249, 0.94));
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
   transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
 }
 
@@ -111,44 +141,59 @@
 
 .status-banner-item {
   width: 100%;
-  min-height: 58px;
+  min-height: 62px;
   border: 0;
   border-radius: 16px;
-  padding: 0.7rem 0.95rem;
+  padding: 0.78rem 1rem;
   text-align: left;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  background: linear-gradient(135deg, rgba(127, 29, 29, 0.96), rgba(153, 27, 27, 0.88));
+  background: linear-gradient(135deg, rgba(127, 29, 29, 0.9), rgba(153, 27, 27, 0.82));
   color: #fff;
-  box-shadow: var(--shadow-sm);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 8px 18px rgba(127, 29, 29, 0.14);
+  transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
 }
 
 .status-banner-item.acknowledged {
-  background: linear-gradient(135deg, rgba(30, 64, 175, 0.95), rgba(37, 99, 235, 0.88));
+  background: linear-gradient(135deg, rgba(30, 64, 175, 0.9), rgba(37, 99, 235, 0.82));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 8px 18px rgba(30, 64, 175, 0.14);
 }
 
 .status-banner-item.healthy {
-  background: linear-gradient(135deg, rgba(21, 128, 61, 0.95), rgba(22, 163, 74, 0.86));
+  background: linear-gradient(135deg, rgba(21, 128, 61, 0.9), rgba(22, 163, 74, 0.82));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 8px 18px rgba(21, 128, 61, 0.12);
+}
+
+.status-banner-item:hover {
+  transform: translateY(-1px);
+  filter: saturate(1.03);
 }
 
 .status-banner-main {
   min-width: 0;
   display: grid;
-  gap: 2px;
+  gap: 3px;
 }
 
 .status-banner-title {
-  font-size: 0.98rem;
+  font-size: 1rem;
   font-weight: 800;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
 }
 
 .status-banner-machine {
-  font-size: 0.82rem;
-  opacity: 0.92;
+  font-size: 0.8rem;
+  opacity: 0.88;
+  font-weight: 600;
 }
 
 .status-banner-side {
@@ -160,35 +205,35 @@
 }
 
 .status-banner-side-main {
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   font-weight: 700;
-  opacity: 0.95;
+  opacity: 0.92;
   white-space: nowrap;
 }
 
 .status-banner-time {
-  font-size: 0.74rem;
-  opacity: 0.84;
+  font-size: 0.72rem;
+  opacity: 0.76;
   white-space: nowrap;
 }
 
 .status-card-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 20px;
+  gap: 14px;
 }
 
 .status-card {
   position: relative;
   overflow: hidden;
   border-radius: 20px;
-  padding: 1.2rem 1.2rem 1.15rem;
+  padding: 1rem 1rem 0.96rem;
   border: 1px solid var(--border);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
   display: grid;
-  gap: 12px;
-  min-height: 265px;
+  gap: 9px;
+  min-height: 242px;
   transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
 }
 
@@ -241,6 +286,12 @@
   z-index: 3;
 }
 
+.status-card.stale .status-card-title-group h3,
+.status-card.stale .status-card-header-time,
+.status-card.stale .status-card-status {
+  filter: blur(0.7px);
+}
+
 .status-card-header,
 .status-card-meta,
 .status-substatus-row,
@@ -287,9 +338,9 @@
 }
 
 .status-card-title-group h3 {
-  font-size: 1.45rem;
+  font-size: 1.56rem;
   line-height: 1.1;
-  letter-spacing: -0.02em;
+  letter-spacing: 0.04em;
 }
 
 .status-card-badge {
@@ -307,20 +358,22 @@
   font-weight: 600;
   opacity: 0.82;
   white-space: nowrap;
-  padding-top: 0.22rem;
+  padding-top: 0.14rem;
 }
 
 .status-card-secondary {
   position: relative;
   display: grid;
-  gap: 12px;
+  gap: 9px;
+  padding-top: 0.42rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
 }
 
 .status-card-status-band {
   display: grid;
   align-items: center;
-  min-height: 54px;
-  padding: 0.72rem 0.9rem;
+  min-height: 46px;
+  padding: 0.54rem 0.74rem;
   border-radius: 14px;
   border: 1px solid rgba(148, 163, 184, 0.16);
   background: rgba(248, 250, 252, 0.72);
@@ -328,12 +381,12 @@
 
 .status-card.healthy .status-card-status-band {
   border-color: rgba(22, 163, 74, 0.2);
-  background: linear-gradient(180deg, rgba(220, 252, 231, 0.7), rgba(240, 253, 244, 0.76));
+  background: linear-gradient(180deg, rgba(220, 252, 231, 0.88), rgba(240, 253, 244, 0.92));
 }
 
 .status-card.critical .status-card-status-band {
   border-color: rgba(220, 38, 38, 0.22);
-  background: linear-gradient(180deg, rgba(254, 226, 226, 0.74), rgba(254, 242, 242, 0.8));
+  background: linear-gradient(180deg, rgba(254, 226, 226, 0.88), rgba(254, 242, 242, 0.92));
 }
 
 .status-card.stale .status-card-status-band {
@@ -344,7 +397,7 @@
 .status-card-info-panel {
   display: grid;
   gap: 0;
-  padding: 0.15rem 0 0;
+  padding: 0.04rem 0 0;
   border-radius: 0;
   background: transparent;
   border: 0;
@@ -355,8 +408,8 @@
   grid-template-columns: minmax(0, 88px) minmax(0, 1fr);
   align-items: center;
   gap: 8px;
-  min-height: 38px;
-  padding: 0.5rem 0;
+  min-height: 33px;
+  padding: 0.34rem 0;
   border-bottom: 1px solid rgba(148, 163, 184, 0.16);
 }
 
@@ -403,8 +456,13 @@
   opacity: 0.72;
 }
 
+.status-card.stale .status-substatus {
+  background: rgba(148, 163, 184, 0.08);
+  border-color: rgba(148, 163, 184, 0.16);
+}
+
 .status-card-status {
-  font-size: 1.18rem;
+  font-size: 1.28rem;
   line-height: 1.08;
   font-weight: 650;
   letter-spacing: -0.02em;
@@ -464,7 +522,7 @@
 }
 
 .status-substatus.healthy {
-  background: rgba(22, 163, 74, 0.1);
+  background: linear-gradient(180deg, rgba(220, 252, 231, 0.88), rgba(240, 253, 244, 0.92));
   border-color: rgba(22, 163, 74, 0.2);
 }
 
@@ -474,7 +532,7 @@
 }
 
 .status-substatus.off {
-  background: rgba(220, 38, 38, 0.14);
+  background: linear-gradient(180deg, rgba(254, 226, 226, 0.88), rgba(254, 242, 242, 0.92));
   border-color: rgba(220, 38, 38, 0.28);
 }
 
@@ -486,6 +544,28 @@
 .status-substatus strong {
   font-size: 0.94rem;
   line-height: 1.22;
+}
+
+.status-substatus.healthy strong {
+  color: #166534;
+}
+
+.status-substatus.off strong {
+  color: #991b1b;
+}
+
+.status-substatus.warn strong {
+  color: #b45309;
+}
+
+.status-substatus.neutral strong {
+  color: #475569;
+}
+
+.status-substatus small {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+  line-height: 1.25;
 }
 
 .status-substatus small {
@@ -1206,6 +1286,20 @@ body.dark-mode .status-overview-loading {
   background: rgba(15, 23, 42, 0.72);
 }
 
+body.dark-mode .status-banner-frame {
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.98));
+  border-color: rgba(71, 85, 105, 0.55);
+  box-shadow:
+    0 10px 24px rgba(2, 6, 23, 0.32),
+    inset 0 1px 0 rgba(148, 163, 184, 0.08);
+}
+
+body.dark-mode .status-banner-frame::before {
+  background: rgba(15, 23, 42, 0.96);
+  border-color: rgba(71, 85, 105, 0.55);
+  color: #94a3b8;
+}
+
 body.dark-mode .status-card {
   background: linear-gradient(180deg, rgba(30, 41, 59, 0.98), rgba(30, 41, 59, 0.9));
   border-color: rgba(71, 85, 105, 0.6);
@@ -1236,9 +1330,18 @@ body.dark-mode .status-card.stale .status-card-secondary::after {
   background: rgba(15, 23, 42, 0.12);
 }
 
+body.dark-mode .status-card.stale .status-substatus {
+  background: rgba(71, 85, 105, 0.18);
+  border-color: rgba(148, 163, 184, 0.14);
+}
+
 body.dark-mode .status-card-info-panel {
   background: transparent;
   border-color: transparent;
+}
+
+body.dark-mode .status-card-secondary {
+  border-top-color: rgba(71, 85, 105, 0.45);
 }
 
 body.dark-mode .status-card-meta-row {
@@ -1252,12 +1355,12 @@ body.dark-mode .status-card-status-band {
 
 body.dark-mode .status-card.healthy .status-card-status-band {
   border-color: rgba(74, 222, 128, 0.18);
-  background: linear-gradient(180deg, rgba(20, 83, 45, 0.36), rgba(15, 23, 42, 0.3));
+  background: linear-gradient(180deg, rgba(20, 83, 45, 0.48), rgba(15, 23, 42, 0.34));
 }
 
 body.dark-mode .status-card.critical .status-card-status-band {
   border-color: rgba(248, 113, 113, 0.2);
-  background: linear-gradient(180deg, rgba(127, 29, 29, 0.34), rgba(15, 23, 42, 0.32));
+  background: linear-gradient(180deg, rgba(127, 29, 29, 0.46), rgba(15, 23, 42, 0.36));
 }
 
 body.dark-mode .status-card.stale .status-card-status-band {
@@ -1282,8 +1385,12 @@ body.dark-mode .status-card.stale .status-card-status {
 }
 
 body.dark-mode .status-substatus.healthy {
-  background: rgba(22, 163, 74, 0.18);
+  background: linear-gradient(180deg, rgba(20, 83, 45, 0.48), rgba(15, 23, 42, 0.34));
   border-color: rgba(74, 222, 128, 0.2);
+}
+
+body.dark-mode .status-substatus.healthy strong {
+  color: #bbf7d0;
 }
 
 body.dark-mode .status-substatus.warn {
@@ -1291,14 +1398,26 @@ body.dark-mode .status-substatus.warn {
   border-color: rgba(251, 191, 36, 0.2);
 }
 
+body.dark-mode .status-substatus.warn strong {
+  color: #fcd34d;
+}
+
 body.dark-mode .status-substatus.off {
-  background: rgba(220, 38, 38, 0.18);
+  background: linear-gradient(180deg, rgba(127, 29, 29, 0.46), rgba(15, 23, 42, 0.36));
   border-color: rgba(248, 113, 113, 0.28);
+}
+
+body.dark-mode .status-substatus.off strong {
+  color: #fecaca;
 }
 
 body.dark-mode .status-substatus.neutral {
   background: rgba(71, 85, 105, 0.18);
   border-color: rgba(148, 163, 184, 0.14);
+}
+
+body.dark-mode .status-substatus.neutral strong {
+  color: #cbd5e1;
 }
 
 body.dark-mode .status-alert-column,

@@ -530,7 +530,7 @@ class StatusOverviewService:
                 "reelNumber": display_reel["reelNumber"] or "",
                 "jobNumber": display_reel["jobNumber"] or "",
                 "lastUpdated": self._iso_local(last_activity),
-                "statusText": title or "Running Good",
+                "statusText": title or "All Systems Active",
                 "state": state,
                 "workflowBadge": workflow_badge,
                 "metrics": {
@@ -568,8 +568,8 @@ class StatusOverviewService:
         return {
             "label": "BST STATUS",
             "state": state,
-            "detail": f"{metrics['activePct']:.1f}% inspection",
-            "subdetail": f"red < {settings.bst_critical_active_pct:.1f}%",
+            "detail": "Inactive" if is_off else "Active",
+            "subdetail": f"{metrics['activePct']:.1f}% inspection",
         }
 
     def _build_rlm_box(self, health, settings: StatusOverviewSetting, is_off: bool, is_warn: bool) -> Dict[str, Any]:
@@ -581,8 +581,8 @@ class StatusOverviewService:
         return {
             "label": "RLM STATUS",
             "state": state,
-            "detail": f"{pts} pts | {density:.1f}/1k ft",
-            "subdetail": f"red < {settings.rlm_min_points_per_1000_ft:.1f}/1k",
+            "detail": "Inactive" if is_off else "Active",
+            "subdetail": f"{pts} pts | {density:.1f}/1k ft",
         }
 
     def _build_alert_detail(
