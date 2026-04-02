@@ -364,7 +364,7 @@
     }
     if (title.includes("RLM")) {
       const count = rlm.consecutiveOffReels || 0;
-      lines.push(`RLM OFF for ${count} consecutive reels`);
+      lines.push(`Repeat length Monitoring OFF for ${count} consecutive reels`);
     }
     if (!lines.length) {
       lines.push("Critical machine alert is active.");

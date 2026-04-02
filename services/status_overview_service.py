@@ -486,7 +486,7 @@ class StatusOverviewService:
                 state = "critical"
                 is_alertable = True
             elif rlm_off:
-                title = "RLM OFF"
+                title = "Repeat length Monitoring OFF"
                 source = "RLM"
                 state = "critical"
                 is_alertable = True
@@ -645,7 +645,7 @@ class StatusOverviewService:
             if rlm_off:
                 if rlm_prev and float(rlm_prev["health"].points_per_1000_ft or 0.0) >= machine_settings.rlm_min_points_per_1000_ft:
                     lines.append("changed from previous reel good to current reel bad")
-                lines.append(f"RLM OFF for {rlm_streak} consecutive reels")
+                lines.append(f"Repeat length Monitoring OFF for {rlm_streak} consecutive reels")
                 lines.append(f"current reel number {reel.reel_id or 'Unknown'}")
                 lines.append(f"current job number {reel.job_name or 'Unknown'}")
                 lines.append(f"monitoring points {int(health.monitoring_points_total or 0)}")
