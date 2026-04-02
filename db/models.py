@@ -5,6 +5,7 @@ from sqlalchemy import (
     Integer,
     String,
     DECIMAL,
+    Float,
     DateTime,
     ForeignKey,
     Boolean,
@@ -308,3 +309,63 @@ class BSTLiveAlertThreshold(Base):
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+# -----------------------
+# StatusOverviewSetting
+# -----------------------
+class StatusOverviewSetting(Base):
+    __tablename__ = "status_overview_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    machine_id = Column(Integer, ForeignKey("machines.machine_id"), nullable=True, index=True)
+    machine_name = Column(String(100), index=True)
+
+    bst_green_pct = Column(Float, nullable=False, default=25.0)
+    bst_yellow_pct = Column(Float, nullable=False, default=10.0)
+    bst_critical_active_pct = Column(Float, nullable=False, default=5.0)
+    bst_red_logic = Column(String(255), nullable=False, default="Red when latest reliable reel active inspection % is below the red threshold.")
+
+    rlm_min_qualifying_feet = Column(Float, nullable=False, default=300.0)
+    rlm_green_pts_per_1000_ft = Column(Float, nullable=False, default=20.0)
+    rlm_yellow_pts_per_1000_ft = Column(Float, nullable=False, default=12.0)
+    rlm_min_points_per_1000_ft = Column(Float, nullable=False, default=8.0)
+    rlm_red_logic = Column(String(255), nullable=False, default="Red when the latest qualifying reel has zero monitoring or points per 1k ft below the red threshold.")
+
+    stale_no_reel_minutes = Column(Integer, nullable=False, default=60)
+    resolved_recent_hours = Column(Integer, nullable=False, default=24)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False, onupdate=datetime.utcnow)
+    updated_by = Column(String(100))
+
+
+# -----------------------
+# StatusOverviewAlert
+# -----------------------
+class StatusOverviewAlert(Base):
+    __tablename__ = "status_overview_alerts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    issue_key = Column(String(255), nullable=False, index=True)
+
+    machine_id = Column(Integer, ForeignKey("machines.machine_id"), nullable=True, index=True)
+    machine_name = Column(String(100), nullable=False, index=True)
+    reel_id = Column(Integer, ForeignKey("reels.reel_id"), nullable=True, index=True)
+    reel_number = Column(String(64), index=True)
+    job_number = Column(String(100), index=True)
+
+    alert_title = Column(String(255), nullable=False)
+    alert_description = Column(Text, nullable=False)
+    alert_source = Column(String(16), nullable=False, index=True)  # BST | RLM | BOTH | SYSTEM
+    alert_state = Column(String(16), nullable=False, default="NEW", index=True)  # NEW | ACKNOWLEDGED | RESOLVED
+    is_active = Column(Boolean, nullable=False, default=True, index=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False, onupdate=datetime.utcnow)
+    acknowledged_at = Column(DateTime, nullable=True, index=True)
+    acknowledged_by = Column(String(100))
+    acknowledge_comment = Column(Text)
+    resolved_at = Column(DateTime, nullable=True, index=True)
+    resolved_by = Column(String(100))
+    resolved_comment = Column(Text)
+
+    metadata_json = Column(JSON)

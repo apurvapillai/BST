@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Status Overview</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/status_overview.css') }}">
+</head>
+<body>
+  <div class="app-layout">
+    {% include 'partials/sidebar.html' %}
+    <div class="app-main">
+      <div class="app-shell">
+        {% set header_eyebrow = 'ProcessGuard AI - Five Star Management' %}
+        {% set header_title = '' %}
+        {% include 'partials/app_header.html' %}
+
+        <div id="statusOverviewShell" class="status-overview-shell is-loading">
+          <div id="statusOverviewLoading" class="status-overview-loading" aria-live="polite">
+            <div class="status-overview-spinner" aria-hidden="true"></div>
+            <span>Loading status board...</span>
+          </div>
+          <section class="status-banner" aria-label="Active critical alerts">
+            <div id="statusBannerTrack" class="status-banner-track"></div>
+            <button id="statusHistoryOpenBtn" type="button" class="status-history-btn" hidden>Alert History</button>
+            <button id="statusSettingsOpenBtn" type="button" class="status-settings-btn">Alert Settings</button>
+          </section>
+
+          <section class="status-board-section">
+            <div id="statusCardGrid" class="status-card-grid"></div>
+          </section>
+
+          <dialog id="statusAlertModal" class="modal status-alert-modal">
+            <div class="modal-header status-alert-header">
+              <div class="status-alert-header-copy">
+                <span class="status-alert-kicker">Critical Alert</span>
+                <h3 id="statusAlertModalTitle">Alert</h3>
+              </div>
+              <button class="close-btn status-alert-close" data-close="statusAlertModal" type="button" aria-label="Close alert details">✕</button>
+            </div>
+            <div class="modal-body status-alert-body">
+              <div id="statusAlertModalBody" class="status-alert-modal-body"></div>
+              <div id="statusAlertFooter" class="status-alert-footer">
+                <label class="status-alert-form-field">
+                  Comment
+                  <textarea id="statusAlertComment" rows="4" placeholder="Add an operational note for acknowledge or resolve"></textarea>
+                </label>
+                <div class="status-alert-modal-actions">
+                  <button id="statusAlertAcknowledgeBtn" type="button">Working on it</button>
+                  <button id="statusAlertResolveBtn" type="button" class="danger">Solved</button>
+                </div>
+              </div>
+              <p id="statusAlertModalMessage" class="status-alert-modal-message"></p>
+            </div>
+          </dialog>
+
+          <dialog id="statusHistoryModal" class="modal status-history-modal">
+            <div class="modal-header status-history-header">
+              <div class="status-history-header-copy">
+                <h3>Alert History Last 24 Hours</h3>
+                <p>Review active and recently resolved status alerts.</p>
+              </div>
+              <button class="close-btn status-history-close" data-close="statusHistoryModal" type="button" aria-label="Close alert history">✕</button>
+            </div>
+            <div class="modal-body status-history-body">
+              <section class="status-history-filter-card">
+                <div class="status-history-filter-copy">
+                  <h4>Machine Scope</h4>
+                  <p>View alerts for all presses or focus on a single machine.</p>
+                </div>
+                <div id="statusHistoryMachineFilter" class="status-history-machine-filter"></div>
+              </section>
+              <section id="statusHistorySummary" class="status-history-summary"></section>
+              <section class="status-history-grid">
+                <article class="status-history-column">
+                  <div class="status-history-title-row">
+                    <h4>Active Alerts</h4>
+                  </div>
+                  <div id="statusAlertsNew" class="status-alert-list status-history-list"></div>
+                </article>
+                <article class="status-history-column">
+                  <div class="status-history-title-row">
+                    <h4>Being Addressed</h4>
+                  </div>
+                  <div id="statusAlertsAcknowledged" class="status-alert-list status-history-list"></div>
+                </article>
+                <article class="status-history-column">
+                  <div class="status-history-title-row">
+                    <h4>Resolved Recently</h4>
+                  </div>
+                  <div id="statusAlertsResolved" class="status-alert-list status-history-list"></div>
+                </article>
+              </section>
+            </div>
+          </dialog>
+
+          <dialog id="statusSettingsModal" class="modal status-settings-modal">
+            <div class="modal-header status-settings-header">
+              <div class="status-settings-header-copy">
+                <h3>Alert Settings</h3>
+              </div>
+              <button class="close-btn status-settings-close" data-close="statusSettingsModal" type="button" aria-label="Close alert settings">✕</button>
+            </div>
+            <div class="modal-body status-settings-body">
+              <section class="status-settings-card status-settings-machine-card">
+                <h4>Machine</h4>
+                <label class="status-alert-form-field">
+                  <select id="statusSettingsMachineSelect"></select>
+                </label>
+              </section>
+
+              <section class="status-settings-section status-settings-card">
+                <h4>BST Settings</h4>
+                <div class="status-settings-grid status-settings-grid--bst">
+                  <label class="status-alert-form-field">
+                    Green Threshold %
+                    <input id="settingsBstGreen" type="number" step="0.1">
+                  </label>
+                  <label class="status-alert-form-field">
+                    Yellow Threshold %
+                    <input id="settingsBstYellow" type="number" step="0.1">
+                  </label>
+                </div>
+              </section>
+
+              <section class="status-settings-section status-settings-card">
+                <h4>RLM Settings</h4>
+                <div class="status-settings-grid status-settings-grid--rlm">
+                  <label class="status-alert-form-field">
+                    Min Qualifying Reel Feet
+                    <input id="settingsRlmFeet" type="number" step="0.1">
+                  </label>
+                  <label class="status-alert-form-field">
+                    Green Pts per 1k
+                    <input id="settingsRlmGreen" type="number" step="0.1">
+                  </label>
+                  <label class="status-alert-form-field">
+                    Yellow Pts per 1k
+                    <input id="settingsRlmYellow" type="number" step="0.1">
+                  </label>
+                </div>
+              </section>
+
+              <div class="status-settings-actions">
+                <button id="statusSettingsApplyAllBtn" type="button">Apply</button>
+              </div>
+              <p id="statusSettingsMessage" class="status-alert-modal-message"></p>
+            </div>
+          </dialog>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/nav.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/status_overview.js') }}"></script>
+</body>
+</html>

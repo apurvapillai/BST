@@ -8,6 +8,7 @@ from routes.insights_api import insights_api
 from routes.rlm import rlm_bp
 from routes.rlm_jobs import rlm_jobs_bp
 from routes.rlm_live import rlm_live_bp
+from routes.status_overview import status_overview_bp
 
 def setup_logging(app: Flask) -> None:
     """Configure rotating file logs for the Flask app."""
@@ -48,6 +49,7 @@ def create_app() -> Flask:
     app.register_blueprint(rlm_bp, url_prefix="/rlm")
     app.register_blueprint(rlm_jobs_bp, url_prefix="/rlm/api")
     app.register_blueprint(rlm_live_bp, url_prefix="/rlm/live")
+    app.register_blueprint(status_overview_bp)
 
     # Logging
     setup_logging(app)

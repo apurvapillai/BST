@@ -62,6 +62,8 @@
         isActive = path.startsWith("/rlm/live");
       } else if (route === "dashboard-live") {
         isActive = path.startsWith("/dashboard/live");
+      } else if (route === "status-overview") {
+        isActive = path.startsWith("/statusOverview");
       } else if (route === "insights") {
         isActive = path.startsWith("/insights");
       }

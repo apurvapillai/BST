@@ -1,6 +1,8 @@
 <header class="app-header">
   <div class="app-title">
     <p class="app-title__eyebrow">{{ header_eyebrow | default('ProcessGuard AI - Five Star Management') }}</p>
+    {% if header_title %}
     <h1>{{ header_title | default('ProcessGuard Vision - BST Module') }}</h1>
+    {% endif %}
   </div>
 </header>
