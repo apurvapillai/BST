@@ -367,7 +367,7 @@
     return `
       <section class="status-alert-meta-grid">
         ${renderMetaCard("Created", formatTime(alert.createdAt))}
-        ${renderMetaCard("Resolved", alert.resolvedAt ? formatTime(alert.resolvedAt) : "")}
+        ${renderMetaCard("Resolved", alert.resolvedAt ? formatTime(alert.resolvedAt) : "Open")}
       </section>
       <section class="status-alert-summary-card">
         <h4>Alert Summary</h4>
@@ -405,12 +405,18 @@
 
   function buildAlertSummaryLines(alert, bst, rlm) {
     const title = String(alert.alertTitle || "").toUpperCase();
+    const source = String(alert.alertSource || "").toUpperCase();
     const lines = [];
-    if (title.includes("BST")) {
+    if (source === "BST" || source === "BOTH" || title.includes("BST")) {
       const count = bst.consecutiveOffReels || 0;
       lines.push(`BST OFF for ${count} consecutive reels`);
     }
-    if (title.includes("RLM")) {
+    if (
+      source === "RLM"
+      || source === "BOTH"
+      || title.includes("RLM")
+      || title.includes("REPEAT LENGTH")
+    ) {
       const count = rlm.consecutiveOffReels || 0;
       lines.push(`Repeat length Monitoring OFF for ${count} consecutive reels`);
     }
