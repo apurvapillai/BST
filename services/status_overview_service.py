@@ -61,6 +61,7 @@ class StatusOverviewService:
         now = self._central_now()
         with SessionLocal() as session:
             global_settings, overrides = self._get_settings_map(session)
+            settings_summary = self._serialize_settings(global_settings)
             bst_data = self._load_bst_machine_data(now)
             rlm_data = self._load_rlm_machine_data(now, bst_data, global_settings, overrides)
             cards, candidates = self._build_cards(now, global_settings, overrides, bst_data, rlm_data)
@@ -71,7 +72,7 @@ class StatusOverviewService:
         cards.sort(key=self._card_sort_key)
         return {
             "generatedAt": self._iso(now),
-            "settingsSummary": self._serialize_settings(global_settings),
+            "settingsSummary": settings_summary,
             "cards": cards,
             "alerts": alerts,
             "bannerAlerts": alerts["new"] + alerts["acknowledged"],
@@ -718,7 +719,7 @@ class StatusOverviewService:
             card["workflowBadge"] = "Being Addressed" if row.alert_state == "ACKNOWLEDGED" else "New"
 
     def _load_alert_sections(self, session, settings: StatusOverviewSetting, now: datetime) -> Dict[str, List[Dict[str, Any]]]:
-        resolved_cutoff = now - timedelta(hours=max(int(settings.resolved_recent_hours or 24), 1))
+        resolved_cutoff = now.replace(hour=0, minute=0, second=0, microsecond=0)
         new_rows = (
             session.query(StatusOverviewAlert)
             .filter(StatusOverviewAlert.is_active.is_(True))

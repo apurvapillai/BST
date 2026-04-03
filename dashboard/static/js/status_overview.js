@@ -16,6 +16,7 @@
     bannerTrack: document.getElementById("statusBannerTrack"),
     historyOpenBtn: document.getElementById("statusHistoryOpenBtn"),
     historyMachineFilter: document.getElementById("statusHistoryMachineFilter"),
+    historyTodayCounts: document.getElementById("statusHistoryTodayCounts"),
     historySummary: document.getElementById("statusHistorySummary"),
     cardGrid: document.getElementById("statusCardGrid"),
     newAlerts: document.getElementById("statusAlertsNew"),
@@ -73,6 +74,7 @@
 
   function renderHistory(data) {
     renderHistoryMachineFilter(data.cards || []);
+    renderHistoryTodayCounts(data.cards || [], data.alerts || {});
     const filteredAlerts = filterAlertGroups(data.alerts || {});
     renderHistorySummary(filteredAlerts);
     renderAlertSection(refs.newAlerts, filteredAlerts.new || [], "No active alerts");
@@ -99,7 +101,8 @@
     ].join("");
     refs.historyMachineFilter.querySelectorAll("[data-history-machine]").forEach((node) => {
       bindGuardedClick(node, () => {
-        state.historyMachineFilter = node.getAttribute("data-history-machine") || "all";
+        const nextValue = node.getAttribute("data-history-machine") || "all";
+        state.historyMachineFilter = state.historyMachineFilter === nextValue ? "all" : nextValue;
         renderHistory(state.board || {});
       });
     });
@@ -108,6 +111,51 @@
   function renderHistoryMachineButton(label, value) {
     const activeClass = state.historyMachineFilter === value ? " is-active" : "";
     return `<button type="button" class="status-history-machine-chip${activeClass}" data-history-machine="${escapeAttr(value)}">${escapeHtml(label)}</button>`;
+  }
+
+  function renderHistoryTodayCounts(cards, alertGroups) {
+    if (!refs.historyTodayCounts) return;
+    const totals = buildTodayAlertCounts(cards, alertGroups);
+    refs.historyTodayCounts.innerHTML = totals
+      .map(
+        ({ machineName, count }) => `
+          <div class="status-history-count-box">
+            <span class="status-history-count-box-label">${escapeHtml(machineName)}</span>
+            <strong class="status-history-count-box-value">${count}</strong>
+          </div>
+        `
+      )
+      .join("");
+  }
+
+  function buildTodayAlertCounts(cards, alertGroups) {
+    const counts = new Map(
+      (cards || []).map((card) => [String(card.machineName || "").trim(), 0]).filter(([machineName]) => Boolean(machineName))
+    );
+    const seen = new Set();
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    [alertGroups.new || [], alertGroups.acknowledged || [], alertGroups.resolved || []].forEach((group) => {
+      group.forEach((alert) => {
+        if (!alert?.id || seen.has(alert.id) || !isAlertFromToday(alert, todayStart)) return;
+        seen.add(alert.id);
+        const machineName = String(alert.machineName || "").trim() || "Unknown";
+        counts.set(machineName, (counts.get(machineName) || 0) + 1);
+      });
+    });
+
+    return Array.from(counts.entries())
+      .map(([machineName, count]) => ({ machineName, count }))
+      .sort((left, right) => left.machineName.localeCompare(right.machineName, undefined, { numeric: true }));
+  }
+
+  function isAlertFromToday(alert, todayStart) {
+    return [alert.createdAt, alert.acknowledgedAt, alert.resolvedAt].some((value) => {
+      if (!value) return false;
+      const date = new Date(value);
+      return !Number.isNaN(date.getTime()) && date >= todayStart;
+    });
   }
 
   function filterAlertGroups(alertGroups) {
