@@ -18,8 +18,22 @@ from parser.extract_one import extract_one
 # --------------------------------------------------------------------------- #
 
 MACHINES = [
-    {"name": "Press 5", "host": "192.168.20.61"},
-    {"name": "Press 14", "host": "192.168.20.147"},
+    {"name": "Press 5", "host": "192.168.20.61", "save_images": True, "import_mode": "full"},
+    {"name": "Press 6", "host": "192.168.20.64", "save_images": False, "import_mode": "minimal"},
+    {"name": "Press 7", "host": "192.168.20.62", "save_images": False, "import_mode": "minimal"},
+    {"name": "Press 8", "host": "192.168.20.63", "save_images": False, "import_mode": "minimal"},
+    {"name": "Press 9", "host": "192.168.20.78", "save_images": False, "import_mode": "minimal"},
+    {
+        "name": "Press 11",
+        "host": "192.168.20.82",
+        "save_images": False,
+        "import_mode": "minimal",
+        "base_path": "protocols",
+    },
+    {"name": "Press 12", "host": "192.168.20.83", "save_images": False, "import_mode": "minimal"},
+    {"name": "Press 13", "host": "192.168.20.170", "save_images": False, "import_mode": "minimal"},
+    {"name": "Press 14", "host": "192.168.20.147", "save_images": True, "import_mode": "full"},
+    {"name": "Press 15", "host": "192.168.20.126", "save_images": False, "import_mode": "minimal"},
 ]
 
 DATA_ROOT = Path("data")
@@ -75,18 +89,18 @@ def state_path(machine_name: str) -> Path:
     return machine_dir(machine_name) / ".sync_state.json"
 
 
-def base_page(host: str) -> str:
-    return f"http://{host}/user/remote/protocol/download/"
+def base_page(host: str, base_path: str = "protocol") -> str:
+    return f"http://{host}/user/remote/{base_path}/download/"
 
 
-def build_headers(host: str) -> dict:
+def build_headers(host: str, base_path: str = "protocol") -> dict:
     return {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
             "Chrome/109.0.0.0 Safari/537.36"
         ),
-        "Referer": base_page(host),
+        "Referer": base_page(host, base_path),
         "Cookie": COOKIE_FROM_ENV or DEFAULT_COOKIE,
     }
 
@@ -141,16 +155,20 @@ def parse_zip_timestamp(filename: str) -> Optional[datetime]:
     return None
 
 
-def resolve_zip_url(host: str, href: str) -> str:
+def resolve_zip_url(host: str, href: str, base_path: str = "protocol") -> str:
     if href.startswith("http://") or href.startswith("https://"):
         return href
     if href.startswith("data/"):
-        return f"http://{host}/user/remote/protocol/" + href
-    return base_page(host) + href
+        return f"http://{host}/user/remote/{base_path}/" + href
+    return base_page(host, base_path) + href
 
 
-def fetch_zip_catalog(session: requests.Session, host: str) -> Iterable[ZipEntry]:
-    response = session.get(base_page(host), timeout=30)
+def fetch_zip_catalog(
+    session: requests.Session,
+    host: str,
+    base_path: str = "protocol",
+) -> Iterable[ZipEntry]:
+    response = session.get(base_page(host, base_path), timeout=30)
     response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
@@ -161,7 +179,7 @@ def fetch_zip_catalog(session: requests.Session, host: str) -> Iterable[ZipEntry
         filename = os.path.basename(href)
         yield ZipEntry(
             filename=filename,
-            url=resolve_zip_url(host, href),
+            url=resolve_zip_url(host, href, base_path),
             timestamp=parse_zip_timestamp(filename),
         )
 
@@ -184,16 +202,10 @@ def download_zip(session: requests.Session, entry: ZipEntry, target: Path) -> No
 
 def should_process(entry: ZipEntry, state: State) -> bool:
     if entry.timestamp and entry.timestamp <= CUTOFF_DATE:
-        print(
-            f"⏩ Skipping {entry.filename}: {entry.display_timestamp} <= cutoff {CUTOFF_DATE.isoformat()}"
-        )
         return False
 
     last_ts = state.last_timestamp
     if last_ts and entry.timestamp and entry.timestamp <= last_ts:
-        print(
-            f"⏩ Skipping {entry.filename}: {entry.display_timestamp} <= last processed {last_ts.isoformat()}"
-        )
         return False
 
     return True
@@ -203,13 +215,20 @@ def should_process(entry: ZipEntry, state: State) -> bool:
 # Core workflow
 # --------------------------------------------------------------------------- #
 
-def sync_machine(machine_name: str, host: str) -> None:
+def sync_machine(
+    machine_name: str,
+    host: str,
+    save_images: bool = True,
+    import_mode: str = "full",
+    base_path: str = "protocol",
+) -> None:
     print(f"\n{'=' * 80}")
     print(f"🔄 Syncing {machine_name} ({host})")
+    print(f"   mode={import_mode}, save_images={save_images}, base_path={base_path}")
     print(f"{'=' * 80}")
 
     session = requests.Session()
-    session.headers.update(build_headers(host))
+    session.headers.update(build_headers(host, base_path))
 
     state = load_state(machine_name)
     print(
@@ -219,7 +238,7 @@ def sync_machine(machine_name: str, host: str) -> None:
 
     entries = [
         entry
-        for entry in fetch_zip_catalog(session, host)
+        for entry in fetch_zip_catalog(session, host, base_path)
         if should_process(entry, state)
     ]
 
@@ -240,7 +259,12 @@ def sync_machine(machine_name: str, host: str) -> None:
                 download_zip(session, entry, target_path)
 
             print(f"📦 Importing {target_path} ...")
-            extract_one(str(target_path), machine_name)
+            extract_one(
+                str(target_path),
+                machine_name,
+                save_images=save_images,
+                import_mode=import_mode,
+            )
 
             # only mark success after extract_one finishes
             state.last_processed_zip = Path(entry.filename).stem
@@ -266,7 +290,13 @@ def sync_machine(machine_name: str, host: str) -> None:
 
 def sync_reports() -> None:
     for machine in MACHINES:
-        sync_machine(machine["name"], machine["host"])
+        sync_machine(
+            machine["name"],
+            machine["host"],
+            machine.get("save_images", True),
+            machine.get("import_mode", "full"),
+            machine.get("base_path", "protocol"),
+        )
 
 
 if __name__ == "__main__":

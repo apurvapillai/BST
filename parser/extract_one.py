@@ -90,21 +90,26 @@ def build_intervals(
 ) -> List[Dict[str, Any]]:
     if not events:
         return []
+
     events_sorted = sorted(events, key=lambda e: e["time"])
-    intervals = []
+    intervals: List[Dict[str, Any]] = []
+
     for i, ev in enumerate(events_sorted):
         start_time = ev["time"]
         start_format = ev.get("format")
         refimgid = ev.get("refimgid")
         phase = ev.get("phase")
+
         if i + 1 < len(events_sorted):
             end_time = events_sorted[i + 1]["time"]
             end_format = events_sorted[i + 1].get("format")
         else:
             end_time = final_end_time
             end_format = final_end_format
+
         if end_time is None or end_time <= start_time:
             continue
+
         intervals.append(
             {
                 "phase": phase,
@@ -115,6 +120,7 @@ def build_intervals(
                 "refimgid": refimgid,
             }
         )
+
     return intervals
 
 
@@ -123,7 +129,11 @@ def dict_from_element(el: ET.Element) -> Dict[str, Any]:
     children = []
     for child in el:
         children.append(
-            {"_tag": child.tag, "_attrs": dict(child.attrib), "_text": (child.text or "").strip()}
+            {
+                "_tag": child.tag,
+                "_attrs": dict(child.attrib),
+                "_text": (child.text or "").strip(),
+            }
         )
     if children:
         data["_children"] = children
@@ -132,10 +142,28 @@ def dict_from_element(el: ET.Element) -> Dict[str, Any]:
     return data
 
 
-def extract_one(zip_path: str, machine_name: str):
+def extract_one(
+    zip_path: str,
+    machine_name: str,
+    save_images: bool = True,
+    import_mode: str = "full",
+):
     """
     Extract one report ZIP for a specific machine.
+
+    Modes:
+      - import_mode="full":
+          imports everything currently supported
+      - import_mode="minimal":
+          imports only Reel + InspectionPhase
+
+    save_images:
+      - True  -> copy defect/reference images into dashboard/static and store image_src
+      - False -> skip extracting/copying images
     """
+    if import_mode not in {"full", "minimal"}:
+        raise ValueError(f"Unsupported import_mode: {import_mode}")
+
     tmp_dir = tempfile.mkdtemp(prefix="bst_")
 
     try:
@@ -149,10 +177,12 @@ def extract_one(zip_path: str, machine_name: str):
             zf.extract(xml_name, tmp_dir)
             xml_path = os.path.join(tmp_dir, xml_name)
 
-            for member in zf.namelist():
-                lower = member.lower()
-                if lower.endswith(".jpg") or lower.endswith(".jpeg") or lower.endswith(".png"):
-                    zf.extract(member, tmp_dir)
+            # Only extract image assets when they might actually be used
+            if import_mode == "full" and save_images:
+                for member in zf.namelist():
+                    lower = member.lower()
+                    if lower.endswith((".jpg", ".jpeg", ".png")):
+                        zf.extract(member, tmp_dir)
 
         tree = ET.parse(xml_path)
         root = tree.getroot()
@@ -219,12 +249,60 @@ def extract_one(zip_path: str, machine_name: str):
                 format_width=format_width,
             )
             session.add(reel)
-            session.commit()
+            session.flush()  # gets reel_id without committing early
 
-            date_str = time_start.strftime("%Y-%m-%d")
-            img_dirs = _ensure_day_dirs(machine_name, date_str)
-            DEFECT_IMG_DIR = img_dirs["defects"]
-            REFERENCE_IMG_DIR = img_dirs["reference"]
+            defect_img_dir: Optional[str] = None
+            reference_img_dir: Optional[str] = None
+            if import_mode == "full" and save_images:
+                date_str = time_start.strftime("%Y-%m-%d")
+                img_dirs = _ensure_day_dirs(machine_name, date_str)
+                defect_img_dir = img_dirs["defects"]
+                reference_img_dir = img_dirs["reference"]
+
+            # Always build inspection phases, even in minimal mode
+            status_events = []
+            for st in root.findall("inspection/statusprotocol/*"):
+                phase = st.tag
+                try:
+                    start_time = parse_datetime(st.attrib["date"], st.attrib["time"])
+                except Exception:
+                    continue
+                fmt = attr_as_float(st, "format")
+                refimgid = st.attrib.get("refimgid")
+                status_events.append(
+                    {"phase": phase, "time": start_time, "format": fmt, "refimgid": refimgid}
+                )
+
+            insp_intervals = build_intervals(
+                status_events,
+                final_end_time=time_end,
+                final_end_format=reel_end,
+            )
+            for iv in insp_intervals:
+                session.add(
+                    InspectionPhase(
+                        reel_id=reel.reel_id,
+                        phase=iv["phase"],
+                        start_time=iv["start_time"],
+                        end_time=iv["end_time"],
+                        start_format=iv.get("start_format"),
+                        end_format=iv.get("end_format"),
+                        refimgid=iv.get("refimgid"),
+                    )
+                )
+
+            # Minimal mode stops here
+            if import_mode == "minimal":
+                session.commit()
+                print(
+                    f"✅ Inserted Reel {reel.reel_id} ({machine_name}: {order_number}/{job_name}) "
+                    f"with InspectionPhase only. import_mode=minimal"
+                )
+                return
+
+            # -------------------------
+            # Full mode below
+            # -------------------------
 
             for sset in root.findall("inspection/sensitivitysets/set"):
                 set_name = sset.attrib.get("id")
@@ -251,21 +329,36 @@ def extract_one(zip_path: str, machine_name: str):
             for defect in root.findall(".//defect"):
                 class_node = defect.find("class")
                 class_name = class_node.attrib.get("name") if class_node is not None else None
-                magnitude = float(class_node.attrib.get("magnitude", 0) or 0) if class_node is not None else 0.0
-                severity = float(class_node.attrib.get("value", 0) or 0) if class_node is not None else 0.0
+                magnitude = (
+                    float(class_node.attrib.get("magnitude", 0) or 0)
+                    if class_node is not None
+                    else 0.0
+                )
+                severity = (
+                    float(class_node.attrib.get("value", 0) or 0)
+                    if class_node is not None
+                    else 0.0
+                )
 
                 defect_time = parse_datetime(defect.attrib["date"], defect.attrib["time"])
                 format_position = float(defect.attrib.get("format", 0) or 0)
 
                 image_src_rel = None
-                img_node = defect.find("image")
-                if img_node is not None:
-                    relative_path = img_node.attrib.get("src", "").replace("../", "").replace("\\", "/")
-                    extracted_img_path = os.path.join(tmp_dir, relative_path)
-                    if os.path.exists(extracted_img_path):
-                        target_path = os.path.join(DEFECT_IMG_DIR, os.path.basename(extracted_img_path))
-                        shutil.copy(extracted_img_path, target_path)
-                        image_src_rel = safe_join_relpath(target_path)
+                if save_images and defect_img_dir:
+                    img_node = defect.find("image")
+                    if img_node is not None:
+                        relative_path = (
+                            img_node.attrib.get("src", "").replace("../", "").replace("\\", "/")
+                        )
+                        if relative_path:
+                            extracted_img_path = os.path.join(tmp_dir, relative_path)
+                            if os.path.exists(extracted_img_path):
+                                target_path = os.path.join(
+                                    defect_img_dir,
+                                    os.path.basename(extracted_img_path),
+                                )
+                                shutil.copy(extracted_img_path, target_path)
+                                image_src_rel = safe_join_relpath(target_path)
 
                 coords_payload: List[Dict[str, Optional[List[float]]]] = []
                 for pd_node in defect.findall(".//pds/pd"):
@@ -289,70 +382,53 @@ def extract_one(zip_path: str, machine_name: str):
                     )
                 )
 
-            ref_entries: List[Dict[str, str]] = []
+            if save_images and reference_img_dir:
+                ref_entries: List[Dict[str, str]] = []
 
-            for ref_node in root.findall(".//reference_images/*"):
-                attrs = dict(ref_node.attrib)
-                path = attrs.get("src") or attrs.get("href") or attrs.get("file") or attrs.get("name")
-                if path:
-                    ref_entries.append({"path": path.replace("../", "").replace("\\", "/")})
-
-            if not ref_entries:
-                for root_dir, _, files in os.walk(tmp_dir):
-                    for fn in files:
-                        lower = fn.lower()
-                        if lower.endswith((".jpg", ".jpeg", ".png")) and "reference" in lower:
-                            rel = os.path.relpath(os.path.join(root_dir, fn), start=tmp_dir).replace("\\", "/")
-                            ref_entries.append({"path": rel})
-
-            seen_ref_basenames = set()
-            for ref in ref_entries:
-                src_path = os.path.join(tmp_dir, ref["path"])
-                if not os.path.exists(src_path):
-                    continue
-                basename = os.path.basename(src_path)
-                if basename in seen_ref_basenames:
-                    continue
-                seen_ref_basenames.add(basename)
-
-                target_path = os.path.join(REFERENCE_IMG_DIR, basename)
-                shutil.copy(src_path, target_path)
-                image_src_rel = safe_join_relpath(target_path)
-
-                session.add(
-                    ReferenceImage(
-                        reel_id=reel.reel_id,
-                        filename=basename,
-                        image_src=image_src_rel,
+                for ref_node in root.findall(".//reference_images/*"):
+                    attrs = dict(ref_node.attrib)
+                    path = (
+                        attrs.get("src")
+                        or attrs.get("href")
+                        or attrs.get("file")
+                        or attrs.get("name")
                     )
-                )
+                    if path:
+                        ref_entries.append({"path": path.replace("../", "").replace("\\", "/")})
 
-            status_events = []
-            for st in root.findall("inspection/statusprotocol/*"):
-                phase = st.tag
-                try:
-                    start_time = parse_datetime(st.attrib["date"], st.attrib["time"])
-                except Exception:
-                    continue
-                fmt = attr_as_float(st, "format")
-                refimgid = st.attrib.get("refimgid")
-                status_events.append(
-                    {"phase": phase, "time": start_time, "format": fmt, "refimgid": refimgid}
-                )
+                if not ref_entries:
+                    for root_dir, _, files in os.walk(tmp_dir):
+                        for fn in files:
+                            lower = fn.lower()
+                            if lower.endswith((".jpg", ".jpeg", ".png")) and "reference" in lower:
+                                rel = os.path.relpath(
+                                    os.path.join(root_dir, fn),
+                                    start=tmp_dir,
+                                ).replace("\\", "/")
+                                ref_entries.append({"path": rel})
 
-            insp_intervals = build_intervals(status_events, final_end_time=time_end, final_end_format=reel_end)
-            for iv in insp_intervals:
-                session.add(
-                    InspectionPhase(
-                        reel_id=reel.reel_id,
-                        phase=iv["phase"],
-                        start_time=iv["start_time"],
-                        end_time=iv["end_time"],
-                        start_format=iv.get("start_format"),
-                        end_format=iv.get("end_format"),
-                        refimgid=iv.get("refimgid"),
+                seen_ref_basenames = set()
+                for ref in ref_entries:
+                    src_path = os.path.join(tmp_dir, ref["path"])
+                    if not os.path.exists(src_path):
+                        continue
+
+                    basename = os.path.basename(src_path)
+                    if basename in seen_ref_basenames:
+                        continue
+                    seen_ref_basenames.add(basename)
+
+                    target_path = os.path.join(reference_img_dir, basename)
+                    shutil.copy(src_path, target_path)
+                    image_src_rel = safe_join_relpath(target_path)
+
+                    session.add(
+                        ReferenceImage(
+                            reel_id=reel.reel_id,
+                            filename=basename,
+                            image_src=image_src_rel,
+                        )
                     )
-                )
 
             for m in root.findall(".//masks//mask"):
                 props = dict(m.attrib)
@@ -365,21 +441,22 @@ def extract_one(zip_path: str, machine_name: str):
                 if not (sensitivitysetid == "sId_mmx_noinsp" and noinspection_str == "true"):
                     continue
 
-                date_str = props.get("date") or m.attrib.get("date")
-                time_str = props.get("time") or m.attrib.get("time")
+                mask_date_str = props.get("date") or m.attrib.get("date")
+                mask_time_str = props.get("time") or m.attrib.get("time")
                 ts = None
-                if date_str and time_str:
+                if mask_date_str and mask_time_str:
                     try:
-                        ts = parse_datetime(date_str, time_str)
+                        ts = parse_datetime(mask_date_str, mask_time_str)
                     except Exception:
                         pass
 
                 coords = props.get("coords") or ""
                 fmt_val = None
                 try:
-                    fmt_val = float(props.get("format", "") or 0)
+                    raw_format = props.get("format")
+                    fmt_val = float(raw_format) if raw_format not in (None, "") else None
                 except Exception:
-                    pass
+                    fmt_val = None
 
                 session.add(
                     Mask(
@@ -410,7 +487,11 @@ def extract_one(zip_path: str, machine_name: str):
                     fmt = attr_as_float(st, "format")
                     rlm_status_events.append({"phase": phase, "time": start_time, "format": fmt})
 
-                rlm_intervals = build_intervals(rlm_status_events, final_end_time=time_end, final_end_format=reel_end)
+                rlm_intervals = build_intervals(
+                    rlm_status_events,
+                    final_end_time=time_end,
+                    final_end_format=reel_end,
+                )
                 for iv in rlm_intervals:
                     session.add(
                         RLMPhase(
@@ -427,7 +508,10 @@ def extract_one(zip_path: str, machine_name: str):
                     _insert_rlm_monitor_if_possible(mon, session, reel.reel_id)
 
             session.commit()
-            print(f"✅ Inserted Reel {reel.reel_id} ({machine_name}: {order_number}/{job_name}) and all related data.")
+            print(
+                f"✅ Inserted Reel {reel.reel_id} ({machine_name}: {order_number}/{job_name}) "
+                f"and all related data. save_images={save_images}, import_mode={import_mode}"
+            )
 
     except Exception as e:
         print(f"❌ Failed on {zip_path} for {machine_name}: {e}")
@@ -478,4 +562,4 @@ def _insert_rlm_monitor_if_possible(node: ET.Element, session: Session, reel_id:
 
 if __name__ == "__main__":
     test_file = "data/Press 5/2025-09-16_23-32_903286_11.zip"
-    extract_one(test_file, "Press 5")
+    extract_one(test_file, "Press 5", save_images=True, import_mode="full")
