@@ -339,7 +339,9 @@ class StatusOverviewService:
 
             bst_feet = self._feet_from_bst_reel(bst_reel, machine_name) if bst_reel else None
             rlm_feet = float(rlm_health.feet_total or 0.0) if rlm_health else None
-            if bst_is_current:
+            if rlm_is_current and last_activity and rlm_activity and last_activity == rlm_activity:
+                display_feet = rlm_feet
+            elif bst_is_current:
                 display_feet = bst_feet
             elif rlm_is_current:
                 display_feet = rlm_feet
@@ -414,11 +416,13 @@ class StatusOverviewService:
                 rlm=rlm,
                 bst_off=bst_off,
                 rlm_off=rlm_off,
+                bst_is_current=bst_is_current,
+                rlm_is_current=rlm_is_current,
                 bst_streak=bst_streak,
                 rlm_streak=rlm_streak,
                 last_activity=last_activity,
             )
-            metadata["jobName"] = self._display_job_name(bst_reel, rlm_reel)
+            metadata["jobName"] = display_reel["jobNumber"]
             metadata["lastReelFeet"] = self._format_feet(feet_value)
 
             active_rows = active_by_machine.get(key, [])
@@ -499,8 +503,8 @@ class StatusOverviewService:
                 "metrics": {
                     "lastReelFeet": self._format_feet(feet_value),
                 },
-                "bstBox": self._build_bst_box(bst_metrics, bst_display_off),
-                "rlmBox": self._build_rlm_box(rlm_health, rlm_display_off, rlm_reel),
+                "bstBox": self._build_bst_box(bst_metrics if bst_is_current else None, bst_display_off),
+                "rlmBox": self._build_rlm_box(rlm_health if rlm_is_current else None, rlm_display_off, rlm_reel if rlm_is_current else None),
                 "reelHistory": history_by_machine.get(key, []),
                 "alertId": active_row.id if active_row and is_alertable else None,
                 "issueKey": issue_key,
@@ -560,6 +564,8 @@ class StatusOverviewService:
         rlm: Dict[str, Any],
         bst_off: bool,
         rlm_off: bool,
+        bst_is_current: bool,
+        rlm_is_current: bool,
         bst_streak: int,
         rlm_streak: int,
         last_activity: Optional[datetime],
@@ -580,7 +586,7 @@ class StatusOverviewService:
         bst_reel = bst.get("latestReel")
         bst_metrics = bst.get("latestMetrics")
         bst_prev = bst.get("previousReliable")
-        if bst_reel and bst_metrics and bst_metrics["phaseSeconds"] > 0:
+        if bst_is_current and bst_reel and bst_metrics and bst_metrics["phaseSeconds"] > 0:
             metadata["bst"] = {
                 "reelNumber": bst_reel.reel_id,
                 "reelCode": bst_reel.reel_code,
@@ -601,7 +607,7 @@ class StatusOverviewService:
         rlm_reel = rlm.get("latestReel")
         rlm_health = rlm.get("latestHealth")
         rlm_prev = rlm.get("previousQualifying")
-        if rlm_reel and rlm_health:
+        if rlm_is_current and rlm_reel and rlm_health:
             density = float(rlm_health.points_per_1000_ft or 0.0)
             metadata["rlm"] = {
                 "reelNumber": rlm_reel.reel_id,
@@ -1026,6 +1032,13 @@ class StatusOverviewService:
             bst_metrics_by_id = bst.get("recentMetrics") or {}
             rlm_reels = rlm.get("recentRows") or []
             rlm_health_map = rlm.get("healthMap") or {}
+            display_reel = self._display_reel_info(
+                bst.get("latestReel"),
+                rlm.get("latestReel"),
+                self._latest_activity(bst.get("latestActivity"), rlm.get("latestActivity")),
+                bst.get("latestActivity"),
+                rlm.get("latestActivity"),
+            )
 
             rows: List[Dict[str, Any]] = []
             if bst_reels:
@@ -1057,8 +1070,56 @@ class StatusOverviewService:
                             machine_name,
                         )
                     )
+            rows = self._ensure_display_reel_history_first(rows, bst, rlm, display_reel, alert_rows_for_machine, machine_name)
             histories[key] = rows
         return histories
+
+    def _ensure_display_reel_history_first(
+        self,
+        rows: List[Dict[str, Any]],
+        bst: Dict[str, Any],
+        rlm: Dict[str, Any],
+        display_reel: Dict[str, Optional[str]],
+        alert_rows: List[StatusOverviewAlert],
+        machine_name: Optional[str],
+    ) -> List[Dict[str, Any]]:
+        display_key = self._normalize_reel_token(display_reel.get("reelNumber"))
+        if not display_key:
+            return rows
+        if rows and self._normalize_reel_token(rows[0].get("reelNumber")) == display_key:
+            return rows
+
+        bst_reel = bst.get("latestReel")
+        rlm_reel = rlm.get("latestReel")
+        current_bst_reel = bst_reel if self._bst_reel_is_current_display(bst_reel, display_reel) else None
+        current_rlm_reel = rlm_reel if self._rlm_reel_is_current_display(rlm_reel, display_reel) else None
+        if not current_bst_reel and not current_rlm_reel:
+            return rows
+
+        bst_metrics = None
+        if current_bst_reel:
+            bst_metrics = (bst.get("recentMetrics") or {}).get(current_bst_reel.reel_id) or bst.get("latestMetrics")
+        rlm_health = None
+        if current_rlm_reel:
+            rlm_health = (rlm.get("healthMap") or {}).get(current_rlm_reel.reel_db_id) or rlm.get("latestHealth")
+
+        current_row = self._serialize_reel_history_row(
+            0,
+            current_bst_reel,
+            bst_metrics,
+            current_rlm_reel,
+            rlm_health,
+            alert_rows,
+            machine_name,
+        )
+        remaining_rows = [
+            row
+            for row in rows
+            if self._normalize_reel_token(row.get("reelNumber")) != display_key
+        ]
+        for index, row in enumerate(remaining_rows, start=1):
+            row["label"] = f"Prior {index}"
+        return [current_row] + remaining_rows
 
     def _load_alert_reel_history(self, machine_id: Optional[int], machine_name: Optional[str], limit: int = 4) -> List[Dict[str, Any]]:
         machine_key = (machine_name or "").strip().lower()
@@ -1155,14 +1216,10 @@ class StatusOverviewService:
 
     def _match_rlm_reel(self, bst_reel: Reel, rlm_reels: List[RLMReel], index: int) -> Optional[RLMReel]:
         bst_code = self._normalize_reel_token(bst_reel.reel_code)
-        bst_job = self._normalize_reel_token(bst_reel.order_number or bst_reel.job_name)
         for rlm_reel in rlm_reels:
             if bst_code and self._normalize_reel_token(rlm_reel.reel_id) == bst_code:
                 return rlm_reel
-        for rlm_reel in rlm_reels:
-            if bst_job and self._normalize_reel_token(rlm_reel.job_name or rlm_reel.order_number) == bst_job:
-                return rlm_reel
-        return rlm_reels[index] if index < len(rlm_reels) else None
+        return None
 
     def _serialize_reel_history_row(
         self,
@@ -1184,6 +1241,10 @@ class StatusOverviewService:
             self._bst_local_time((bst_reel.time_end or bst_reel.time_start) if bst_reel else None),
             self._central_time((rlm_reel.production_end_dt or rlm_reel.production_start_dt) if rlm_reel else None),
         )
+        time_end = self._latest_activity(
+            self._bst_local_time(bst_reel.time_end if bst_reel else None),
+            self._central_time(rlm_reel.production_end_dt if rlm_reel else None),
+        )
         reel_number = (bst_reel.reel_code if bst_reel and bst_reel.reel_code else None) or (rlm_reel.reel_id if rlm_reel else None)
         job_number = (bst_reel.order_number or bst_reel.job_name if bst_reel else None) or (rlm_reel.job_name if rlm_reel else None)
         history_state = self._reel_history_state(alert_rows, machine_name, reel_number, bst_reel.reel_id if bst_reel else None, feet)
@@ -1197,6 +1258,7 @@ class StatusOverviewService:
             "rlmPoints": f"{rlm_points} pts" if rlm_points is not None else "--",
             "rlmDensity": f"{rlm_density:.1f}/1k ft" if rlm_density is not None else "--",
             "lastUpdated": self._iso_local(last_updated),
+            "timeEnd": self._iso_local(time_end),
             "state": history_state,
         }
 

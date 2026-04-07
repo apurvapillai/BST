@@ -341,11 +341,12 @@
               >
                 ${escapeHtml(row.reelNumber || "--")}
                 <span class="status-card-reel-tooltip" role="tooltip">
-                  <strong>Reel ${escapeHtml(row.reelNumber || "--")}</strong>
-                  <small>Job ${escapeHtml(row.jobNumber || "--")}</small>
-                  <small>Feet ${escapeHtml(row.feet || "--")}</small>
-                  <small>BST ${escapeHtml(row.bstPct || "--")}</small>
-                  <small>RLM ${escapeHtml(row.rlmPoints || "--")}</small>
+                  <strong>Reel - ${escapeHtml(row.reelNumber || "--")}</strong>
+                  <small>${escapeHtml(formatTime(row.timeEnd))}</small>
+                  <small>Job - ${escapeHtml(row.jobNumber || "--")}</small>
+                  <small>Feet - ${escapeHtml(row.feet || "--")}</small>
+                  <small>BST - ${escapeHtml(row.bstPct || "--")}</small>
+                  <small>RLM - ${escapeHtml(row.rlmPoints || "--")}</small>
                 </span>
               </span>
             `;
