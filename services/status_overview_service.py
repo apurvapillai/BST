@@ -330,16 +330,30 @@ class StatusOverviewService:
             bst_metrics = bst_latest_metrics if bst_latest_metrics and bst_latest_metrics["phaseSeconds"] > 0 else None
             rlm_health = rlm_latest["health"] if rlm_latest else None
 
+            bst_activity = bst.get("latestActivity")
+            rlm_activity = rlm.get("latestActivity")
+            last_activity = self._latest_activity(bst_activity, rlm_activity)
+            display_reel = self._display_reel_info(bst_reel, rlm_reel, last_activity, bst_activity, rlm_activity)
+            bst_is_current = self._bst_reel_is_current_display(bst_reel, display_reel)
+            rlm_is_current = self._rlm_reel_is_current_display(rlm_reel, display_reel)
+
             bst_feet = self._feet_from_bst_reel(bst_reel, machine_name) if bst_reel else None
             rlm_feet = float(rlm_health.feet_total or 0.0) if rlm_health else None
-            display_feet = bst_feet if bst_feet is not None else rlm_feet
+            if bst_is_current:
+                display_feet = bst_feet
+            elif rlm_is_current:
+                display_feet = rlm_feet
+            else:
+                display_feet = bst_feet if bst_feet is not None else rlm_feet
             meets_min_feet = bool(display_feet is not None and display_feet >= MAKE_READY_FEET_LIMIT)
             auto_make_ready = bool(display_feet is not None and display_feet < MAKE_READY_FEET_LIMIT)
-            bst_display_off = bool(bst_metrics and bst_metrics["activePct"] <= BST_OFF_ACTIVE_PCT)
+            bst_display_off = bool(bst_is_current and bst_metrics and bst_metrics["activePct"] <= BST_OFF_ACTIVE_PCT)
             bst_off = bool(bst_display_off and meets_min_feet)
 
             rlm_points = int(rlm_health.monitoring_points_total or 0) if rlm_health else 0
             rlm_display_off = bool(
+                rlm_is_current
+                and
                 rlm_health
                 and rlm_points <= RLM_OFF_MONITORING_POINTS
             )
@@ -348,12 +362,9 @@ class StatusOverviewService:
                 and meets_min_feet
             )
 
-            bst_streak = self._count_bst_off_streak(bst.get("reliableRows", []))
+            bst_streak = self._count_bst_off_streak(bst.get("reliableRows", []), machine_name)
             rlm_streak = self._count_rlm_off_streak(rlm.get("qualifyingRows", []))
 
-            bst_activity = bst.get("latestActivity")
-            rlm_activity = rlm.get("latestActivity")
-            last_activity = self._latest_activity(bst_activity, rlm_activity)
             minutes_since_activity = self._minutes_since(last_activity, now)
 
             title = ""
@@ -385,7 +396,6 @@ class StatusOverviewService:
                 state = "critical"
                 is_alertable = True
 
-            display_reel = self._display_reel_info(bst_reel, rlm_reel, last_activity, bst_activity, rlm_activity)
             alert_reel = self._alert_reel_info(source, bst_reel, rlm_reel, display_reel)
             current_reels[key] = {
                 "machineName": machine_name,
@@ -426,6 +436,8 @@ class StatusOverviewService:
             } if issue_key else None
             if title and is_alertable:
                 reel_key = self._alert_reel_key(machine_name, alert_reel["reelNumber"], alert_reel["jobNumber"])
+                if not self._alert_reel_is_current_display(alert_reel, display_reel):
+                    is_alertable = False
                 if candidate_preview and candidate_preview.get("reelId") is not None:
                     active_row = next((row for row in active_rows if row.reel_id == candidate_preview["reelId"]), None)
                 if not active_row and reel_key:
@@ -635,7 +647,7 @@ class StatusOverviewService:
         latest_by_reel_key = alert_context["latestByReelKey"]
         handled_active_ids = set()
         for candidate in candidates:
-            if candidate.get("reelId") is None:
+            if candidate.get("reelId") is None and not candidate.get("reelNumber"):
                 continue
             reel_key = self._alert_reel_key(candidate.get("machineName"), candidate.get("reelNumber"), candidate.get("jobNumber"))
             row = None
@@ -678,13 +690,17 @@ class StatusOverviewService:
             if row.id in handled_active_ids:
                 continue
             current_reel = current_reels.get((row.machine_name or "").strip().lower())
-            if self._active_row_is_current_reel(row, current_reel):
+            if not current_reel:
                 continue
-            row.alert_state = "SUPERSEDED"
+            if self._active_row_is_current_reel(row, current_reel):
+                row.alert_state = "RESOLVED"
+                row.resolved_comment = "Current reel is no longer alerting."
+            else:
+                row.alert_state = "SUPERSEDED"
+                row.resolved_comment = "Superseded by newer reel."
             row.is_active = False
             row.resolved_at = now
             row.resolved_by = "system"
-            row.resolved_comment = "Superseded by newer reel."
 
         session.commit()
         return self._load_alert_context(session, candidates)
@@ -733,18 +749,18 @@ class StatusOverviewService:
             return []
         issue_keys = {candidate["issueKey"] for candidate in candidates if candidate.get("issueKey")}
         reel_ids = {int(candidate["reelId"]) for candidate in candidates if candidate.get("reelId") is not None}
-        machine_names = {candidate["machineName"] for candidate in candidates if candidate.get("machineName")}
-        reel_numbers = {str(candidate["reelNumber"]) for candidate in candidates if candidate.get("reelNumber")}
+        reel_key_filters = [
+            (StatusOverviewAlert.machine_name == candidate["machineName"])
+            & (StatusOverviewAlert.reel_number == str(candidate["reelNumber"]))
+            for candidate in candidates
+            if candidate.get("machineName") and candidate.get("reelNumber")
+        ]
         filters = []
         if issue_keys:
             filters.append(StatusOverviewAlert.issue_key.in_(issue_keys))
         if reel_ids:
             filters.append(StatusOverviewAlert.reel_id.in_(reel_ids))
-        if machine_names and reel_numbers:
-            filters.append(
-                StatusOverviewAlert.machine_name.in_(machine_names)
-                & StatusOverviewAlert.reel_number.in_(reel_numbers)
-            )
+        filters.extend(reel_key_filters)
         if not filters:
             return []
         return (
@@ -779,11 +795,9 @@ class StatusOverviewService:
 
     def _normalize_alert_candidate_reel(self, session, candidate: Dict[str, Any]) -> None:
         reel_id = candidate.get("reelId")
-        reel = None
-        if reel_id is not None:
-            reel = session.query(Reel).filter(Reel.reel_id == int(reel_id)).first()
-        if not reel:
-            reel = self._find_bst_reel_for_alert_candidate(session, candidate)
+        if reel_id is None:
+            return
+        reel = session.query(Reel).filter(Reel.reel_id == int(reel_id)).first()
         if not reel:
             return
         candidate["reelId"] = reel.reel_id
@@ -831,14 +845,21 @@ class StatusOverviewService:
             return True
         if row.reel_id is not None:
             current_bst_reel_id = current_reel.get("bstReelId")
-            return current_bst_reel_id is None or int(row.reel_id) == int(current_bst_reel_id)
+            if current_bst_reel_id is None or int(row.reel_id) != int(current_bst_reel_id):
+                return False
+            current_display_reel = self._normalize_reel_token(current_reel.get("displayReelNumber"))
+            if not current_display_reel:
+                return True
+            row_reel = self._normalize_reel_token(row.reel_number)
+            current_bst_reel = self._normalize_reel_token(current_reel.get("bstReelNumber"))
+            return bool(row_reel == current_display_reel or current_bst_reel == current_display_reel)
         row_reel = self._normalize_reel_token(row.reel_number)
         current_rlm_reel = self._normalize_reel_token(current_reel.get("rlmReelNumber"))
         current_display_reel = self._normalize_reel_token(current_reel.get("displayReelNumber"))
-        if current_rlm_reel:
-            return row_reel == current_rlm_reel
         if current_display_reel:
             return row_reel == current_display_reel
+        if current_rlm_reel:
+            return row_reel == current_rlm_reel
         return True
 
     def _apply_alert_candidate(self, row: StatusOverviewAlert, candidate: Dict[str, Any]) -> None:
@@ -875,9 +896,8 @@ class StatusOverviewService:
         candidate_reel_id = candidate.get("reelId")
         if row.reel_id is not None and candidate_reel_id is not None:
             return row.reel_id == candidate_reel_id
-        else:
-            same_machine = self._normalize_reel_token(row.machine_name) == self._normalize_reel_token(candidate.get("machineName"))
-            same_reel = self._normalize_reel_token(row.reel_number) == self._normalize_reel_token(candidate.get("reelNumber"))
+        same_machine = self._normalize_reel_token(row.machine_name) == self._normalize_reel_token(candidate.get("machineName"))
+        same_reel = self._normalize_reel_token(row.reel_number) == self._normalize_reel_token(candidate.get("reelNumber"))
         return bool(same_machine and same_reel)
 
     def _alert_reel_key_from_row(self, row: StatusOverviewAlert) -> str:
@@ -1228,9 +1248,12 @@ class StatusOverviewService:
             key = (phase.phase or "unknown").strip().lower()
             accumulator[key] += max((phase.end_time - phase.start_time).total_seconds(), 0.0)
 
-    def _count_bst_off_streak(self, rows: List[Dict[str, Any]]) -> int:
+    def _count_bst_off_streak(self, rows: List[Dict[str, Any]], machine_name: Optional[str]) -> int:
         count = 0
         for row in rows:
+            feet = self._feet_from_bst_reel(row.get("reel"), machine_name)
+            if feet is not None and feet < MAKE_READY_FEET_LIMIT:
+                break
             if row["metrics"]["activePct"] <= BST_OFF_ACTIVE_PCT:
                 count += 1
             else:
@@ -1241,6 +1264,9 @@ class StatusOverviewService:
         count = 0
         for row in rows:
             health = row["health"]
+            feet = float(health.feet_total or 0.0)
+            if feet < MAKE_READY_FEET_LIMIT:
+                break
             if int(health.monitoring_points_total or 0) <= RLM_OFF_MONITORING_POINTS:
                 count += 1
             else:
@@ -1258,10 +1284,35 @@ class StatusOverviewService:
         if last_activity and rlm_time and last_activity == rlm_time and rlm_reel:
             return {"reelNumber": rlm_reel.reel_id, "jobNumber": self._rlm_reel_job_display(rlm_reel)}
         if bst_reel:
-            return {"reelNumber": str(bst_reel.reel_id), "jobNumber": self._bst_reel_job_display(bst_reel)}
+            return {"reelNumber": bst_reel.reel_code or str(bst_reel.reel_id), "jobNumber": self._bst_reel_job_display(bst_reel)}
         if rlm_reel:
             return {"reelNumber": rlm_reel.reel_id, "jobNumber": self._rlm_reel_job_display(rlm_reel)}
         return {"reelNumber": None, "jobNumber": None}
+
+    def _alert_reel_is_current_display(
+        self,
+        alert_reel: Dict[str, Optional[Any]],
+        display_reel: Dict[str, Optional[str]],
+    ) -> bool:
+        alert_reel_number = self._normalize_reel_token(alert_reel.get("reelNumber"))
+        display_reel_number = self._normalize_reel_token(display_reel.get("reelNumber"))
+        if not alert_reel_number or not display_reel_number:
+            return False
+        return alert_reel_number == display_reel_number
+
+    def _bst_reel_is_current_display(self, reel: Optional[Reel], display_reel: Dict[str, Optional[str]]) -> bool:
+        if not reel:
+            return False
+        display_reel_number = self._normalize_reel_token(display_reel.get("reelNumber"))
+        return display_reel_number in {
+            self._normalize_reel_token(reel.reel_code),
+            self._normalize_reel_token(reel.reel_id),
+        }
+
+    def _rlm_reel_is_current_display(self, reel: Optional[RLMReel], display_reel: Dict[str, Optional[str]]) -> bool:
+        if not reel:
+            return False
+        return self._normalize_reel_token(reel.reel_id) == self._normalize_reel_token(display_reel.get("reelNumber"))
 
     def _alert_reel_info(
         self,

@@ -309,7 +309,12 @@
     refs.cardGrid.querySelectorAll(".status-card[data-alert-id]").forEach((node) => {
       const alertId = Number(node.getAttribute("data-alert-id"));
       if (!alertId) return;
-      bindGuardedClick(node, () => openAlertModal(alertId, { returnTarget: null }));
+      node.addEventListener("click", (event) => {
+        if (event.target?.closest(".status-card-reel-strip")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        openAlertModal(alertId, { returnTarget: null });
+      });
     });
   }
 
