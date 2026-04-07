@@ -1,18 +1,22 @@
 (function () {
   const state = {
     board: null,
-    settings: null,
     refreshTimer: null,
     bannerTimer: null,
     bannerIndex: 0,
     selectedAlertId: null,
     alertModalReturnTarget: null,
     historyMachineFilter: "all",
+    boardRequestSeq: 0,
+    boardAbortController: null,
+    boardVersion: 0,
+    historyRenderedVersion: -1,
   };
 
   const refs = {
     overviewShell: document.getElementById("statusOverviewShell"),
     overviewLoading: document.getElementById("statusOverviewLoading"),
+    lastRefresh: document.getElementById("statusLastRefresh"),
     bannerTrack: document.getElementById("statusBannerTrack"),
     historyOpenBtn: document.getElementById("statusHistoryOpenBtn"),
     historyMachineFilter: document.getElementById("statusHistoryMachineFilter"),
@@ -20,7 +24,6 @@
     historySummary: document.getElementById("statusHistorySummary"),
     cardGrid: document.getElementById("statusCardGrid"),
     newAlerts: document.getElementById("statusAlertsNew"),
-    acknowledgedAlerts: document.getElementById("statusAlertsAcknowledged"),
     resolvedAlerts: document.getElementById("statusAlertsResolved"),
     historyModal: document.getElementById("statusHistoryModal"),
     alertModal: document.getElementById("statusAlertModal"),
@@ -29,33 +32,43 @@
     alertModalMessage: document.getElementById("statusAlertModalMessage"),
     alertFooter: document.getElementById("statusAlertFooter"),
     alertComment: document.getElementById("statusAlertComment"),
-    acknowledgeBtn: document.getElementById("statusAlertAcknowledgeBtn"),
+    makeReadyBtn: document.getElementById("statusAlertMakeReadyBtn"),
     resolveBtn: document.getElementById("statusAlertResolveBtn"),
-    settingsOpenBtn: document.getElementById("statusSettingsOpenBtn"),
-    settingsModal: document.getElementById("statusSettingsModal"),
-    settingsMachineSelect: document.getElementById("statusSettingsMachineSelect"),
-    settingsBstGreen: document.getElementById("settingsBstGreen"),
-    settingsBstYellow: document.getElementById("settingsBstYellow"),
-    settingsRlmFeet: document.getElementById("settingsRlmFeet"),
-    settingsRlmGreen: document.getElementById("settingsRlmGreen"),
-    settingsRlmYellow: document.getElementById("settingsRlmYellow"),
-    settingsApplyAllBtn: document.getElementById("statusSettingsApplyAllBtn"),
-    settingsMessage: document.getElementById("statusSettingsMessage"),
   };
 
   async function loadBoard() {
-    const res = await fetch("/statusOverview/api/overview");
-    if (!res.ok) throw new Error(`Request failed (${res.status})`);
-    state.board = await res.json();
-    render();
-  }
-
-  async function loadSettings() {
-    const currentMachineId = refs.settingsMachineSelect?.value || "all";
-    const res = await fetch("/statusOverview/api/settings");
-    if (!res.ok) throw new Error(`Request failed (${res.status})`);
-    state.settings = await res.json();
-    renderSettingsModal(currentMachineId);
+    const requestSeq = state.boardRequestSeq + 1;
+    state.boardRequestSeq = requestSeq;
+    if (state.boardAbortController) {
+      state.boardAbortController.abort();
+    }
+    const controller = new AbortController();
+    state.boardAbortController = controller;
+    try {
+      let res = await fetch("/statusOverview/api/overview/refresh", {
+        method: "POST",
+        signal: controller.signal,
+      });
+      if (!res.ok && !state.board) {
+        res = await fetch("/statusOverview/api/overview", { signal: controller.signal });
+      }
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      const board = await res.json();
+      if (requestSeq !== state.boardRequestSeq) return;
+      state.board = board;
+      state.boardVersion += 1;
+      render();
+    } catch (err) {
+      if (err?.name === "AbortError") return;
+      if (requestSeq === state.boardRequestSeq) {
+        renderLoadError(err);
+      }
+      throw err;
+    } finally {
+      if (state.boardAbortController === controller) {
+        state.boardAbortController = null;
+      }
+    }
   }
 
   function render() {
@@ -68,18 +81,40 @@
     }
     renderBanner(data.bannerAlerts || []);
     renderCards(data.cards || []);
-    renderHistory(data);
+    if (refs.historyModal?.open) {
+      renderHistory(data);
+    }
+    renderLastRefresh(data.generatedAt);
     scheduleRefresh();
   }
 
+  function renderLoadError(err) {
+    refs.overviewShell?.classList.remove("is-loading");
+    if (refs.overviewLoading) {
+      refs.overviewLoading.hidden = true;
+      refs.overviewLoading.style.display = "none";
+    }
+    if (!state.board) {
+      if (refs.bannerTrack) refs.bannerTrack.innerHTML = `<button type="button" class="status-banner-item healthy">Unable to load status board.</button>`;
+      if (refs.cardGrid) refs.cardGrid.innerHTML = `<div class="empty-state">Status board refresh failed. ${escapeHtml(err?.message || "Please retry.")}</div>`;
+    }
+    if (refs.lastRefresh) refs.lastRefresh.textContent = `Refresh failed ${formatTime(new Date().toISOString())}`;
+  }
+
+  function renderLastRefresh(value) {
+    if (!refs.lastRefresh) return;
+    refs.lastRefresh.textContent = `Last refresh ${formatTime(value || new Date().toISOString())}`;
+  }
+
   function renderHistory(data) {
+    if (state.historyRenderedVersion === state.boardVersion) return;
     renderHistoryMachineFilter(data.cards || []);
     renderHistoryTodayCounts(data.cards || [], data.alerts || {});
     const filteredAlerts = filterAlertGroups(data.alerts || {});
     renderHistorySummary(filteredAlerts);
     renderAlertSection(refs.newAlerts, filteredAlerts.new || [], "No active alerts");
-    renderAlertSection(refs.acknowledgedAlerts, filteredAlerts.acknowledged || [], "No acknowledged alerts");
-    renderAlertSection(refs.resolvedAlerts, filteredAlerts.resolved || [], "No recently resolved alerts");
+    renderAlertSection(refs.resolvedAlerts, filteredAlerts.resolved || [], "No recently closed alerts");
+    state.historyRenderedVersion = state.boardVersion;
   }
 
   function renderHistoryMachineFilter(cards) {
@@ -103,6 +138,7 @@
       bindGuardedClick(node, () => {
         const nextValue = node.getAttribute("data-history-machine") || "all";
         state.historyMachineFilter = state.historyMachineFilter === nextValue ? "all" : nextValue;
+        state.historyRenderedVersion = -1;
         renderHistory(state.board || {});
       });
     });
@@ -136,7 +172,7 @@
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
-    [alertGroups.new || [], alertGroups.acknowledged || [], alertGroups.resolved || []].forEach((group) => {
+    [alertGroups.new || [], alertGroups.resolved || []].forEach((group) => {
       group.forEach((alert) => {
         if (!alert?.id || seen.has(alert.id) || !isAlertFromToday(alert, todayStart)) return;
         seen.add(alert.id);
@@ -162,13 +198,11 @@
     if (state.historyMachineFilter === "all") {
       return {
         new: (alertGroups.new || []).slice(),
-        acknowledged: (alertGroups.acknowledged || []).slice(),
         resolved: (alertGroups.resolved || []).slice(),
       };
     }
     return {
       new: (alertGroups.new || []).filter((alert) => String(alert.machineName || "").trim() === state.historyMachineFilter),
-      acknowledged: (alertGroups.acknowledged || []).filter((alert) => String(alert.machineName || "").trim() === state.historyMachineFilter),
       resolved: (alertGroups.resolved || []).filter((alert) => String(alert.machineName || "").trim() === state.historyMachineFilter),
     };
   }
@@ -176,13 +210,12 @@
   function renderHistorySummary(alertGroups) {
     if (!refs.historySummary) return;
     const newAlerts = alertGroups.new || [];
-    const acknowledgedAlerts = alertGroups.acknowledged || [];
     const resolvedAlerts = alertGroups.resolved || [];
     const addressedResolved = resolvedAlerts.filter((alert) => {
-      const resolvedBy = String(alert.resolvedBy || "").toLowerCase();
-      return Boolean(alert.acknowledgedAt) || (resolvedBy && resolvedBy !== "system");
+      const alertState = String(alert.alertState || "").toUpperCase();
+      return alertState === "ACKNOWLEDGED" || alertState === "MAKE_READY";
     }).length;
-    const autoCleared = resolvedAlerts.filter((alert) => !alert.resolvedBy || String(alert.resolvedBy).toLowerCase() === "system").length;
+    const autoCleared = resolvedAlerts.filter((alert) => String(alert.alertState || "").toUpperCase() === "SUPERSEDED").length;
 
     refs.historySummary.innerHTML = `
       <article class="status-history-summary-card status-history-summary-card--active">
@@ -190,17 +223,12 @@
         <strong>${newAlerts.length}</strong>
         <small>${newAlerts.length === 1 ? "Requires attention now" : "Require attention now"}</small>
       </article>
-      <article class="status-history-summary-card status-history-summary-card--addressed">
-        <span class="status-history-summary-label">Being Addressed</span>
-        <strong>${acknowledgedAlerts.length}</strong>
-        <small>${acknowledgedAlerts.length === 1 ? "Alert is being worked" : "Alerts are being worked"}</small>
-      </article>
       <article class="status-history-summary-card status-history-summary-card--resolved">
-        <span class="status-history-summary-label">Resolved Recently</span>
+        <span class="status-history-summary-label">Closed Recently</span>
         <strong>${resolvedAlerts.length}</strong>
         <div class="status-history-summary-meta">
-          <span>Addressed: ${addressedResolved}</span>
-          <span>Auto Cleared: ${autoCleared}</span>
+          <span>Manual: ${addressedResolved}</span>
+          <span>Superseded: ${autoCleared}</span>
         </div>
       </article>
     `;
@@ -217,7 +245,7 @@
     const alert = alerts[state.bannerIndex];
     const sideMeta = `${alert.reelNumber ? `Reel ${escapeHtml(alert.reelNumber)}` : ""}${alert.jobNumber ? `${alert.reelNumber ? " - " : ""}Job ${escapeHtml(alert.jobNumber)}` : ""}`;
     refs.bannerTrack.innerHTML = `
-      <button type="button" class="status-banner-item ${alert.alertState === "ACKNOWLEDGED" ? "acknowledged" : "new"}" data-alert-id="${alert.id}">
+      <button type="button" class="status-banner-item new" data-alert-id="${alert.id}">
         <span class="status-banner-main">
           <span class="status-banner-title">${escapeHtml(alert.alertTitle || "")}</span>
           <span class="status-banner-machine">${escapeHtml(alert.machineName || "")}</span>
@@ -242,33 +270,36 @@
       .map(
         (card) => `
           <article id="machine-card-${slugify(card.machineKey)}" class="status-card ${escapeAttr(card.state)}" data-alert-id="${card.alertId || ""}">
-            <div class="status-card-header">
-              <div class="status-card-title-group">
-                <h3>${escapeHtml(card.machineName || "")}</h3>
+            <div class="status-card-content">
+              <div class="status-card-header">
+                <div class="status-card-title-group">
+                  <h3>${escapeHtml(card.machineName || "")}</h3>
+                </div>
+                <span class="status-card-header-time">Last Reel - ${escapeHtml(formatTime(card.lastUpdated))}</span>
               </div>
-              <span class="status-card-header-time">Last Reel - ${escapeHtml(formatTime(card.lastUpdated))}</span>
-            </div>
-            <div class="status-card-status-band">
-              <div class="status-card-status">${escapeHtml(card.statusText || "")}</div>
-            </div>
-            <div class="status-card-secondary">
-              <div class="status-card-info-panel">
-                <div class="status-card-meta-row">
-                  <span class="status-card-meta-label">Job</span>
-                  <span class="status-card-meta-value">${escapeHtml(card.jobNumber || "No job")}</span>
-                </div>
-                <div class="status-card-meta-row">
-                  <span class="status-card-meta-label">Reel</span>
-                  <span class="status-card-meta-value">${escapeHtml(card.reelNumber || "No reel")}</span>
-                </div>
-                <div class="status-card-meta-row">
-                  <span class="status-card-meta-label">Feet</span>
-                  <span class="status-card-meta-value">${escapeHtml(card.metrics?.lastReelFeet || "--")}</span>
-                </div>
+              <div class="status-card-status-band">
+                <div class="status-card-status">${escapeHtml(card.statusText || "")}</div>
               </div>
-              <div class="status-substatus-row">
-                ${renderBox(card.bstBox)}
-                ${renderBox(card.rlmBox)}
+              <div class="status-card-secondary">
+                <div class="status-card-info-panel">
+                  <div class="status-card-meta-row">
+                    <span class="status-card-meta-label">Job</span>
+                    <span class="status-card-meta-value">${escapeHtml(card.jobNumber || "No job")}</span>
+                  </div>
+                  <div class="status-card-meta-row">
+                    <span class="status-card-meta-label">Reel</span>
+                    <span class="status-card-meta-value">${escapeHtml(card.reelNumber || "No reel")}</span>
+                  </div>
+                  <div class="status-card-meta-row">
+                    <span class="status-card-meta-label">Feet</span>
+                    <span class="status-card-meta-value">${escapeHtml(card.metrics?.lastReelFeet || "--")}</span>
+                  </div>
+                </div>
+                <div class="status-substatus-row">
+                  ${renderBox(card.bstBox)}
+                  ${renderBox(card.rlmBox)}
+                </div>
+                ${renderCardReelHistory(card.reelHistory || [])}
               </div>
             </div>
           </article>
@@ -292,6 +323,33 @@
     `;
   }
 
+  function renderCardReelHistory(history) {
+    if (!history.length) return "";
+    return `
+      <div class="status-card-reel-strip">
+        ${history
+          .map((row) => {
+            return `
+              <span
+                class="status-card-reel-chip ${escapeAttr(row.state || "healthy")}"
+                tabindex="0"
+              >
+                ${escapeHtml(row.reelNumber || "--")}
+                <span class="status-card-reel-tooltip" role="tooltip">
+                  <strong>Reel ${escapeHtml(row.reelNumber || "--")}</strong>
+                  <small>Job ${escapeHtml(row.jobNumber || "--")}</small>
+                  <small>Feet ${escapeHtml(row.feet || "--")}</small>
+                  <small>BST ${escapeHtml(row.bstPct || "--")}</small>
+                  <small>RLM ${escapeHtml(row.rlmPoints || "--")}</small>
+                </span>
+              </span>
+            `;
+          })
+          .join("")}
+      </div>
+    `;
+  }
+
   function renderAlertSection(target, alerts, emptyMessage) {
     if (!target) return;
     if (!alerts.length) {
@@ -303,7 +361,7 @@
         (alert) => `
           <button type="button" class="status-alert-item ${escapeAttr((alert.alertState || "").toLowerCase())}" data-alert-id="${alert.id}">
             <span class="status-alert-item-header">
-              <span class="status-alert-item-title">${escapeHtml(alert.machineName || "")}</span>
+              <span class="status-alert-item-title">${escapeHtml(formatHistoryAlertHeading(alert))}</span>
               <span class="status-alert-item-created">${escapeHtml(formatTime(alert.createdAt))}</span>
             </span>
             <span class="status-alert-item-meta">${escapeHtml(alert.alertTitle || "")}</span>
@@ -318,27 +376,51 @@
     });
   }
 
+  function formatHistoryAlertHeading(alert) {
+    const machineName = String(alert.machineName || "").trim() || "Unknown";
+    const state = String(alert.alertState || "").toUpperCase();
+    if (state === "RESOLVED") return `${machineName} (RESOLVED)`;
+    if (state === "ACKNOWLEDGED") return `${machineName} (Acked)`;
+    if (state === "MAKE_READY") return `${machineName} (MAKE READY)`;
+    if (state === "SUPERSEDED") return `${machineName} (SUPERSEDED)`;
+    return machineName;
+  }
+
   async function openAlertModal(alertId, options = {}) {
+    const cachedAlert = findAlertInBoard(alertId);
+    if (cachedAlert) {
+      showAlertModal(cachedAlert, alertId, options);
+      return;
+    }
     const res = await fetch(`/statusOverview/api/alerts/${alertId}`);
     const data = await res.json();
     if (!res.ok || !data.ok) {
       setMessage(refs.alertModalMessage, data.message || "Unable to load alert.");
       return;
     }
+    showAlertModal(data.alert, alertId, options);
+  }
+
+  function findAlertInBoard(alertId) {
+    const groups = state.board?.alerts || {};
+    return [groups.new || [], groups.resolved || []].flat().find((alert) => Number(alert.id) === Number(alertId)) || null;
+  }
+
+  function showAlertModal(alert, alertId, options = {}) {
     state.selectedAlertId = alertId;
     state.alertModalReturnTarget = options.returnTarget || null;
-    const alert = data.alert;
+    const closed = isClosedAlertState(alert.alertState);
     refs.alertModalTitle.textContent = buildAlertModalTitle(alert);
     refs.alertModal.dataset.alertState = String(alert.alertState || "").toLowerCase();
     refs.alertModalBody.innerHTML = renderAlertModalBody(alert);
     refs.alertComment.value = "";
     setMessage(refs.alertModalMessage, "");
-    refs.acknowledgeBtn.hidden = alert.alertState !== "NEW";
-    refs.resolveBtn.hidden = alert.alertState === "RESOLVED";
-    refs.acknowledgeBtn.disabled = alert.alertState !== "NEW";
-    refs.resolveBtn.disabled = alert.alertState === "RESOLVED";
-    refs.alertFooter.hidden = alert.alertState === "RESOLVED";
-    refs.alertFooter.style.display = alert.alertState === "RESOLVED" ? "none" : "";
+    refs.makeReadyBtn.hidden = closed;
+    refs.resolveBtn.hidden = closed;
+    refs.makeReadyBtn.disabled = closed;
+    refs.resolveBtn.disabled = closed;
+    refs.alertFooter.hidden = closed;
+    refs.alertFooter.style.display = closed ? "none" : "";
     if (state.alertModalReturnTarget === "history") {
       refs.historyModal?.close();
     }
@@ -348,9 +430,14 @@
   function buildAlertModalTitle(alert) {
     const machine = String(alert.machineName || "").trim();
     const title = String(alert.alertTitle || "Alert").trim();
-    const resolvedSuffix = String(alert.alertState || "").toUpperCase() === "RESOLVED" ? " (RESOLVED)" : "";
+    const alertState = String(alert.alertState || "").toUpperCase();
+    const resolvedSuffix = alertState === "RESOLVED" ? " (RESOLVED)" : alertState === "MAKE_READY" ? " (MAKE READY)" : alertState === "ACKNOWLEDGED" ? " (Acked)" : alertState === "SUPERSEDED" ? " (SUPERSEDED)" : "";
     if (machine && title) return `${machine.toUpperCase()} - ${title}${resolvedSuffix}`;
     return `${title || "Alert"}${resolvedSuffix}`;
+  }
+
+  function isClosedAlertState(alertState) {
+    return ["ACKNOWLEDGED", "MAKE_READY", "RESOLVED", "SUPERSEDED"].includes(String(alertState || "").toUpperCase());
   }
 
   function renderAlertModalBody(alert) {
@@ -358,16 +445,16 @@
     const bst = metadata.bst || {};
     const rlm = metadata.rlm || {};
     const summaryLines = buildAlertSummaryLines(alert, bst, rlm);
+    const closeComment = alert.acknowledgeComment || alert.resolvedComment;
+    const closeLabel = String(alert.alertState || "").toUpperCase() === "ACKNOWLEDGED" ? "Acknowledged Comment" : "Close Comment";
     const noteMarkup = [
-      alert.acknowledgeComment ? `<div class="status-alert-note status-alert-note--acknowledged"><label>Acknowledge Comment</label><strong>${escapeHtml(alert.acknowledgeComment)}</strong></div>` : "",
-      alert.resolvedComment ? `<div class="status-alert-note status-alert-note--resolved"><label>Resolved Comment</label><strong>${escapeHtml(alert.resolvedComment)}</strong></div>` : "",
+      closeComment ? `<div class="status-alert-note status-alert-note--resolved"><label>${escapeHtml(closeLabel)}</label><strong>${escapeHtml(closeComment)}</strong></div>` : "",
     ]
       .filter(Boolean)
       .join("");
     return `
       <section class="status-alert-meta-grid">
         ${renderMetaCard("Created", formatTime(alert.createdAt))}
-        ${renderMetaCard("Resolved", alert.resolvedAt ? formatTime(alert.resolvedAt) : "Open")}
       </section>
       <section class="status-alert-summary-card">
         <h4>Alert Summary</h4>
@@ -428,12 +515,9 @@
 
   async function submitAlertAction(action) {
     if (!state.selectedAlertId) return;
+    const alertId = state.selectedAlertId;
     const comment = (refs.alertComment.value || "").trim();
-    if (!comment) {
-      setMessage(refs.alertModalMessage, "Comment is required.");
-      return;
-    }
-    const res = await fetch(`/statusOverview/api/alerts/${state.selectedAlertId}/${action}`, {
+    const res = await fetch(`/statusOverview/api/alerts/${alertId}/${action}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ comment }),
@@ -441,72 +525,49 @@
     const data = await res.json();
     setMessage(refs.alertModalMessage, data.message || "");
     if (!res.ok || !data.ok) return;
+    if (action === "make-ready") {
+      applyOptimisticMakeReady(alertId);
+    } else if (action === "acknowledge") {
+      applyOptimisticAcknowledged(alertId);
+    }
     refs.alertModal.close();
     state.alertModalReturnTarget = null;
-    await loadBoard();
+    loadBoard().catch((err) => console.error(err));
   }
 
-  function renderSettingsModal(selectedMachineId = "all") {
-    if (!state.settings || !refs.settingsMachineSelect) return;
-    const machineOptions = [{ id: "all", name: "All Machines" }].concat(state.settings.machines || []);
-    refs.settingsMachineSelect.innerHTML = machineOptions
-      .map((machine) => `<option value="${escapeAttr(machine.id)}">${escapeHtml(machine.name)}</option>`)
-      .join("");
-    const optionValues = new Set(machineOptions.map((machine) => String(machine.id)));
-    const nextSelection = optionValues.has(String(selectedMachineId)) ? String(selectedMachineId) : "all";
-    refs.settingsMachineSelect.value = nextSelection;
-    applySettingsForm(nextSelection);
+  function applyOptimisticMakeReady(alertId) {
+    const cards = state.board?.cards || [];
+    const card = cards.find((item) => Number(item.alertId) === Number(alertId));
+    if (!card) return;
+    card.state = "make-ready";
+    card.statusText = "Make Ready";
+    card.workflowBadge = "Make Ready";
+    card.alertId = null;
+    markCurrentReelChip(card, "make-ready");
+    render();
   }
 
-  function applySettingsForm(machineId) {
-    if (!state.settings) return;
-    const values = machineId === "all"
-      ? state.settings.global
-      : state.settings.overrides?.[String(machineId)] || state.settings.global;
-    refs.settingsBstGreen.value = values.bst_green_pct;
-    refs.settingsBstYellow.value = values.bst_yellow_pct;
-    refs.settingsRlmFeet.value = values.rlm_min_qualifying_feet;
-    refs.settingsRlmGreen.value = values.rlm_green_pts_per_1000_ft;
-    refs.settingsRlmYellow.value = values.rlm_yellow_pts_per_1000_ft;
-    setMessage(refs.settingsMessage, "");
+  function markCurrentReelChip(card, chipState) {
+    const history = card.reelHistory || [];
+    const currentReel = String(card.reelNumber || "").trim().toLowerCase();
+    const chip = history.find((row) => String(row.reelNumber || "").trim().toLowerCase() === currentReel) || history[0];
+    if (chip) chip.state = chipState;
   }
 
-  function collectSettingsFormValues() {
-    return {
-      bst_green_pct: Number(refs.settingsBstGreen.value),
-      bst_yellow_pct: Number(refs.settingsBstYellow.value),
-      bst_critical_active_pct: Number(refs.settingsBstYellow.value) / 2 || 5,
-      rlm_min_qualifying_feet: Number(refs.settingsRlmFeet.value),
-      rlm_green_pts_per_1000_ft: Number(refs.settingsRlmGreen.value),
-      rlm_yellow_pts_per_1000_ft: Number(refs.settingsRlmYellow.value),
-      rlm_min_points_per_1000_ft: Number(refs.settingsRlmYellow.value) / 1.5 || 8,
-    };
+  function applyOptimisticAcknowledged(alertId) {
+    const cards = state.board?.cards || [];
+    const card = cards.find((item) => Number(item.alertId) === Number(alertId));
+    if (!card) return;
+    card.state = "critical";
+    card.statusText = appendStatusSuffix(card.statusText || "Alert", "Acked");
+    card.workflowBadge = "Acknowledged";
+    card.alertId = null;
+    render();
   }
 
-  async function saveSettings(action) {
-    const machineId = refs.settingsMachineSelect.value;
-    const url =
-      action === "apply-all"
-        ? "/statusOverview/api/settings/apply-all"
-        : action === "reset"
-          ? "/statusOverview/api/settings/reset"
-          : "/statusOverview/api/settings/save";
-    const payload = action === "reset"
-      ? { machineId }
-      : action === "apply-all"
-        ? { values: collectSettingsFormValues() }
-        : { machineId, values: collectSettingsFormValues() };
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    setMessage(refs.settingsMessage, data.message || "");
-    if (!res.ok || !data.ok) return;
-    await loadSettings();
-    await loadBoard();
-    applySettingsForm(refs.settingsMachineSelect.value);
+  function appendStatusSuffix(value, suffix) {
+    const text = String(value || "").replace(/\s+\((ACKNOWLEDGED|ACKED|RESOLVED|SUPERSEDED|MAKE READY)\)$/i, "");
+    return `${text} (${suffix})`;
   }
 
   async function focusAlert(alertId) {
@@ -527,19 +588,16 @@
   function scheduleRefresh() {
     if (state.refreshTimer) clearTimeout(state.refreshTimer);
     state.refreshTimer = window.setTimeout(() => {
-      Promise.all([loadBoard(), loadSettings()]).catch((err) => console.error(err));
+      loadBoard().catch((err) => console.error(err));
     }, 300000);
   }
 
   function bindEvents() {
-    bindGuardedClick(refs.acknowledgeBtn, () => submitAlertAction("acknowledge").catch((err) => console.error(err)));
-    bindGuardedClick(refs.resolveBtn, () => submitAlertAction("resolve").catch((err) => console.error(err)));
-    bindGuardedClick(refs.historyOpenBtn, () => refs.historyModal?.showModal());
-    bindGuardedClick(refs.settingsOpenBtn, () => refs.settingsModal?.showModal());
-    refs.settingsMachineSelect?.addEventListener("change", (event) => applySettingsForm(event.target.value));
-    bindGuardedClick(refs.settingsApplyAllBtn, () => {
-      const action = refs.settingsMachineSelect?.value === "all" ? "apply-all" : "save";
-      saveSettings(action).catch((err) => console.error(err));
+    bindGuardedClick(refs.resolveBtn, () => submitAlertAction("acknowledge").catch((err) => console.error(err)));
+    bindGuardedClick(refs.makeReadyBtn, () => submitAlertAction("make-ready").catch((err) => console.error(err)));
+    bindGuardedClick(refs.historyOpenBtn, () => {
+      refs.historyModal?.showModal();
+      renderHistory(state.board || {});
     });
     document.querySelectorAll("[data-close]").forEach((node) => {
       bindGuardedClick(node, () => {
@@ -601,7 +659,7 @@
   }
 
   function escapeAttr(value) {
-    return String(value ?? "");
+    return escapeHtml(value);
   }
 
   function slugify(value) {
@@ -614,6 +672,6 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     bindEvents();
-    Promise.all([loadBoard(), loadSettings()]).catch((err) => console.error(err));
+    loadBoard().catch((err) => console.error(err));
   });
 })();

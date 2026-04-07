@@ -28,40 +28,9 @@ def status_overview_api():
     return jsonify(service.get_board_payload())
 
 
-@status_overview_bp.route("/statusOverview/api/settings")
-def status_overview_settings():
-    return jsonify(service.get_settings_payload())
-
-
-@status_overview_bp.route("/statusOverview/api/settings/save", methods=["POST"])
-def status_overview_settings_save():
-    payload = request.get_json(silent=True) or {}
-    machine_id = payload.get("machineId")
-    try:
-        machine_id = int(machine_id) if machine_id not in (None, "", "all") else None
-    except (TypeError, ValueError):
-        return jsonify({"ok": False, "message": "Invalid machine selection."}), 400
-    ok, message = service.save_settings(machine_id, payload.get("values") or {}, _request_actor(payload))
-    return jsonify({"ok": ok, "message": message}), (200 if ok else 400)
-
-
-@status_overview_bp.route("/statusOverview/api/settings/apply-all", methods=["POST"])
-def status_overview_settings_apply_all():
-    payload = request.get_json(silent=True) or {}
-    ok, message = service.apply_to_all(payload.get("values") or {}, _request_actor(payload))
-    return jsonify({"ok": ok, "message": message}), (200 if ok else 400)
-
-
-@status_overview_bp.route("/statusOverview/api/settings/reset", methods=["POST"])
-def status_overview_settings_reset():
-    payload = request.get_json(silent=True) or {}
-    machine_id = payload.get("machineId")
-    try:
-        machine_id = int(machine_id) if machine_id not in (None, "", "all") else None
-    except (TypeError, ValueError):
-        return jsonify({"ok": False, "message": "Invalid machine selection."}), 400
-    ok, message = service.reset_settings(machine_id, _request_actor(payload))
-    return jsonify({"ok": ok, "message": message}), (200 if ok else 400)
+@status_overview_bp.route("/statusOverview/api/overview/refresh", methods=["POST"])
+def status_overview_refresh_api():
+    return jsonify(service.get_board_payload(sync_alerts=True))
 
 
 @status_overview_bp.route("/statusOverview/api/alerts/<int:alert_id>")
@@ -76,11 +45,18 @@ def status_overview_alert(alert_id: int):
 def status_overview_acknowledge(alert_id: int):
     payload = request.get_json(silent=True) or {}
     ok, message = service.acknowledge_alert(alert_id, _request_actor(payload), payload.get("comment", ""))
-    return jsonify({"ok": ok, "message": message}), (200 if ok else 400 if "required" in message else 404)
+    return jsonify({"ok": ok, "message": message}), (200 if ok else 404)
 
 
 @status_overview_bp.route("/statusOverview/api/alerts/<int:alert_id>/resolve", methods=["POST"])
 def status_overview_resolve(alert_id: int):
     payload = request.get_json(silent=True) or {}
-    ok, message = service.resolve_alert(alert_id, _request_actor(payload), payload.get("comment", ""))
-    return jsonify({"ok": ok, "message": message}), (200 if ok else 400 if "required" in message else 404)
+    ok, message = service.acknowledge_alert(alert_id, _request_actor(payload), payload.get("comment", ""))
+    return jsonify({"ok": ok, "message": message}), (200 if ok else 404)
+
+
+@status_overview_bp.route("/statusOverview/api/alerts/<int:alert_id>/make-ready", methods=["POST"])
+def status_overview_make_ready(alert_id: int):
+    payload = request.get_json(silent=True) or {}
+    ok, message = service.make_ready_alert(alert_id, _request_actor(payload), payload.get("comment", ""))
+    return jsonify({"ok": ok, "message": message}), (200 if ok else 404)

@@ -21,12 +21,12 @@
             <div class="status-overview-spinner" aria-hidden="true"></div>
             <span>Loading status board...</span>
           </div>
+          <div id="statusLastRefresh" class="status-last-refresh" aria-live="polite">Last refresh --</div>
           <section class="status-banner" aria-label="Active critical alerts">
             <div class="status-banner-frame">
               <div id="statusBannerTrack" class="status-banner-track"></div>
             </div>
             <button id="statusHistoryOpenBtn" type="button" class="status-history-btn" hidden>Alert History</button>
-            <button id="statusSettingsOpenBtn" type="button" class="status-settings-btn">Alert Settings</button>
           </section>
 
           <section class="status-board-section">
@@ -46,11 +46,11 @@
               <div id="statusAlertFooter" class="status-alert-footer">
                 <label class="status-alert-form-field">
                   Comment
-                  <textarea id="statusAlertComment" rows="4" placeholder="Add an operational note for acknowledge or resolve"></textarea>
+                  <textarea id="statusAlertComment" rows="4" placeholder="Add an operational note for Make Ready or Acknowledged"></textarea>
                 </label>
                 <div class="status-alert-modal-actions">
-                  <button id="statusAlertAcknowledgeBtn" type="button">Working on it</button>
-                  <button id="statusAlertResolveBtn" type="button" class="danger">Solved</button>
+                  <button id="statusAlertMakeReadyBtn" type="button" class="make-ready">Make Ready</button>
+                  <button id="statusAlertResolveBtn" type="button">Acknowledge</button>
                 </div>
               </div>
               <p id="statusAlertModalMessage" class="status-alert-modal-message"></p>
@@ -61,7 +61,7 @@
             <div class="modal-header status-history-header">
               <div class="status-history-header-copy">
                 <h3>Alert History Today</h3>
-                <p>Review active alerts and anything resolved since 12:00 AM.</p>
+                <p>Review active alerts and anything closed since 12:00 AM.</p>
               </div>
               <button class="close-btn status-history-close" data-close="statusHistoryModal" type="button" aria-label="Close alert history">✕</button>
             </div>
@@ -84,13 +84,7 @@
                 </article>
                 <article class="status-history-column">
                   <div class="status-history-title-row">
-                    <h4>Being Addressed</h4>
-                  </div>
-                  <div id="statusAlertsAcknowledged" class="status-alert-list status-history-list"></div>
-                </article>
-                <article class="status-history-column">
-                  <div class="status-history-title-row">
-                    <h4>Resolved Recently</h4>
+                    <h4>Closed Recently</h4>
                   </div>
                   <div id="statusAlertsResolved" class="status-alert-list status-history-list"></div>
                 </article>
@@ -98,59 +92,6 @@
             </div>
           </dialog>
 
-          <dialog id="statusSettingsModal" class="modal status-settings-modal">
-            <div class="modal-header status-settings-header">
-              <div class="status-settings-header-copy">
-                <h3>Alert Settings</h3>
-              </div>
-              <button class="close-btn status-settings-close" data-close="statusSettingsModal" type="button" aria-label="Close alert settings">✕</button>
-            </div>
-            <div class="modal-body status-settings-body">
-              <section class="status-settings-card status-settings-machine-card">
-                <h4>Machine</h4>
-                <label class="status-alert-form-field">
-                  <select id="statusSettingsMachineSelect"></select>
-                </label>
-              </section>
-
-              <section class="status-settings-section status-settings-card">
-                <h4>BST Settings</h4>
-                <div class="status-settings-grid status-settings-grid--bst">
-                  <label class="status-alert-form-field">
-                    Green Threshold %
-                    <input id="settingsBstGreen" type="number" step="0.1">
-                  </label>
-                  <label class="status-alert-form-field">
-                    Yellow Threshold %
-                    <input id="settingsBstYellow" type="number" step="0.1">
-                  </label>
-                </div>
-              </section>
-
-              <section class="status-settings-section status-settings-card">
-                <h4>RLM Settings</h4>
-                <div class="status-settings-grid status-settings-grid--rlm">
-                  <label class="status-alert-form-field">
-                    Min Qualifying Reel Feet
-                    <input id="settingsRlmFeet" type="number" step="0.1">
-                  </label>
-                  <label class="status-alert-form-field">
-                    Green Pts per 1k
-                    <input id="settingsRlmGreen" type="number" step="0.1">
-                  </label>
-                  <label class="status-alert-form-field">
-                    Yellow Pts per 1k
-                    <input id="settingsRlmYellow" type="number" step="0.1">
-                  </label>
-                </div>
-              </section>
-
-              <div class="status-settings-actions">
-                <button id="statusSettingsApplyAllBtn" type="button">Apply</button>
-              </div>
-              <p id="statusSettingsMessage" class="status-alert-modal-message"></p>
-            </div>
-          </dialog>
         </div>
       </div>
     </div>

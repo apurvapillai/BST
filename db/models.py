@@ -11,6 +11,7 @@ from sqlalchemy import (
     Boolean,
     Text,
     JSON,
+    Index,
 )
 from sqlalchemy.orm import relationship
 from db.connection import Base
@@ -343,6 +344,12 @@ class StatusOverviewSetting(Base):
 # -----------------------
 class StatusOverviewAlert(Base):
     __tablename__ = "status_overview_alerts"
+    __table_args__ = (
+        Index("idx_status_alert_active_state_created", "is_active", "alert_state", "created_at"),
+        Index("idx_status_alert_state_updated", "alert_state", "updated_at"),
+        Index("idx_status_alert_machine_reel", "machine_name", "reel_number"),
+        Index("idx_status_alert_reel_updated", "reel_id", "updated_at"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     issue_key = Column(String(255), nullable=False, index=True)
