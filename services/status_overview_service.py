@@ -334,14 +334,22 @@ class StatusOverviewService:
             rlm_activity = rlm.get("latestActivity")
             last_activity = self._latest_activity(bst_activity, rlm_activity)
             display_reel = self._display_reel_info(bst_reel, rlm_reel, last_activity, bst_activity, rlm_activity)
+            if self._display_needs_synced_bst_fallback(display_reel, bst_reel, bst_metrics, bst, rlm_reel):
+                fallback = bst.get("latestReliable")
+                if fallback:
+                    bst_reel = fallback["reel"]
+                    bst_metrics = fallback["metrics"]
+                    bst_activity = self._bst_local_time(bst_reel.time_end or bst_reel.time_start)
+                    last_activity = self._latest_activity(bst_activity, None)
+                    display_reel = self._display_reel_info(bst_reel, None, last_activity, bst_activity, None)
+                    rlm_reel = None
+                    rlm_health = None
             bst_is_current = self._bst_reel_is_current_display(bst_reel, display_reel)
             rlm_is_current = self._rlm_reel_is_current_display(rlm_reel, display_reel)
 
             bst_feet = self._feet_from_bst_reel(bst_reel, machine_name) if bst_reel else None
             rlm_feet = float(rlm_health.feet_total or 0.0) if rlm_health else None
-            if rlm_is_current and last_activity and rlm_activity and last_activity == rlm_activity:
-                display_feet = rlm_feet
-            elif bst_is_current:
+            if bst_is_current:
                 display_feet = bst_feet
             elif rlm_is_current:
                 display_feet = rlm_feet
@@ -1039,6 +1047,19 @@ class StatusOverviewService:
                 bst.get("latestActivity"),
                 rlm.get("latestActivity"),
             )
+            bst_latest = bst.get("latestReel")
+            bst_latest_metrics = bst.get("latestMetrics")
+            usable_bst_metrics = bst_latest_metrics if bst_latest_metrics and bst_latest_metrics["phaseSeconds"] > 0 else None
+            if self._display_needs_synced_bst_fallback(display_reel, bst_latest, usable_bst_metrics, bst, rlm.get("latestReel")):
+                fallback = bst.get("latestReliable")
+                if fallback:
+                    display_reel = self._display_reel_info(
+                        fallback["reel"],
+                        None,
+                        self._bst_local_time(fallback["reel"].time_end or fallback["reel"].time_start),
+                        self._bst_local_time(fallback["reel"].time_end or fallback["reel"].time_start),
+                        None,
+                    )
 
             rows: List[Dict[str, Any]] = []
             if bst_reels:
@@ -1350,6 +1371,28 @@ class StatusOverviewService:
         if rlm_reel:
             return {"reelNumber": rlm_reel.reel_id, "jobNumber": self._rlm_reel_job_display(rlm_reel)}
         return {"reelNumber": None, "jobNumber": None}
+
+    def _display_needs_synced_bst_fallback(
+        self,
+        display_reel: Dict[str, Optional[str]],
+        bst_reel: Optional[Reel],
+        bst_metrics: Optional[Dict[str, float]],
+        bst: Dict[str, Any],
+        rlm_reel: Optional[RLMReel],
+    ) -> bool:
+        if not rlm_reel or not bst.get("latestReliable"):
+            return False
+        display_key = self._normalize_reel_token(display_reel.get("reelNumber"))
+        rlm_key = self._normalize_reel_token(rlm_reel.reel_id)
+        if not display_key or display_key != rlm_key:
+            return False
+        if not bst_reel:
+            return True
+        bst_keys = {
+            self._normalize_reel_token(bst_reel.reel_code),
+            self._normalize_reel_token(bst_reel.reel_id),
+        }
+        return display_key not in bst_keys or not bst_metrics
 
     def _alert_reel_is_current_display(
         self,
