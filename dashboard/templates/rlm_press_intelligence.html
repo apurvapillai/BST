@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RLM Press Intelligence</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/rlm_press_intelligence.css') }}">
+</head>
+<body class="rlm-intelligence-page">
+  <div class="app-layout">
+    {% include 'partials/sidebar.html' %}
+    <div class="app-main">
+      <div class="app-shell">
+        {% set header_eyebrow = 'ProcessGuard AI - Five Star Management' %}
+        {% set header_title = 'RLM Press Intelligence' %}
+        {% include 'partials/app_header.html' %}
+
+        <main class="rlm-intelligence-app"
+              data-default-start="{{ default_start_str }}"
+              data-default-end="{{ default_end_str }}">
+          <section class="filters filters--with-header rlm-intel-filters" aria-labelledby="rlmIntelFiltersTitle">
+            <div class="filters-header">
+              <div>
+                <p class="kpi-section__title">Executive Filters</p>
+                <small id="rlmIntelFiltersTitle">Pick a date window, optional job, and minimum reel feet for the press comparison.</small>
+              </div>
+              <button type="button" class="filters-clear-btn" id="rlmIntelApply">Apply Filters</button>
+            </div>
+            <div class="filters-body">
+              <div class="filter-grid rlm-intel-filter-grid">
+                <div class="filter-card">
+                  <label for="rlmIntelStart">Start date</label>
+                  <input type="date" id="rlmIntelStart" value="{{ default_start_str }}">
+                </div>
+                <div class="filter-card">
+                  <label for="rlmIntelEnd">End date</label>
+                  <input type="date" id="rlmIntelEnd" value="{{ default_end_str }}">
+                </div>
+                <div class="filter-card">
+                  <label for="rlmIntelJob">Job</label>
+                  <input type="text" id="rlmIntelJob" placeholder="Optional job filter">
+                </div>
+                <div class="filter-card">
+                  <label for="rlmIntelMinFeet">Min reel feet</label>
+                  <input type="number" id="rlmIntelMinFeet" min="0" step="10" placeholder="Optional">
+                </div>
+              </div>
+            </div>
+            <div class="filter-chips hidden" id="rlmIntelFilterChips"></div>
+            <p class="rlm-intel-status" id="rlmIntelStatus">Ready.</p>
+          </section>
+
+          <section class="rlm-intel-panel" aria-labelledby="rlmIntelOverallRankingTitle">
+            <div class="rlm-intel-panel__header">
+              <div>
+                <p class="rlm-intel-eyebrow">Overall Ranking</p>
+                <h2 id="rlmIntelOverallRankingTitle">Best-to-Worst Press Ranking</h2>
+              </div>
+            </div>
+            <div class="rlm-intel-overview-grid" id="rlmIntelOverviewRankings"></div>
+          </section>
+
+          <section class="rlm-intel-panel rlm-intel-panel--collapsible is-collapsed" id="rlmIntelLeaderboardsPanel" aria-labelledby="rlmIntelLeaderboardsTitle">
+            <div class="rlm-intel-panel__header">
+              <div>
+                <p class="rlm-intel-eyebrow">Overall Ranking</p>
+                <h2 id="rlmIntelLeaderboardsTitle">Detailed Leaderboard</h2>
+              </div>
+              <button type="button" class="filters-clear-btn rlm-intel-expand-btn" id="rlmIntelLeaderboardsToggle" aria-expanded="false" aria-controls="rlmIntelLeaderboards">Expand</button>
+            </div>
+            <div class="rlm-intel-leaderboard-grid" id="rlmIntelLeaderboards"></div>
+          </section>
+
+          <section class="rlm-intel-panel" aria-labelledby="rlmIntelHeatmapTitle">
+            <div class="rlm-intel-panel__header">
+              <div>
+                <p class="rlm-intel-eyebrow">Issue Heatmap</p>
+                <h2 id="rlmIntelHeatmapTitle">Normalized Plant Signals</h2>
+              </div>
+            </div>
+            <div class="rlm-intel-heatmap" id="rlmIntelHeatmap"></div>
+          </section>
+
+          <section class="rlm-intel-panel" aria-labelledby="rlmIntelTrendsTitle">
+            <div class="rlm-intel-panel__header">
+              <div>
+                <p class="rlm-intel-eyebrow">Press Trends</p>
+                <h2 id="rlmIntelTrendsTitle">Press Performance Trends</h2>
+              </div>
+            </div>
+            <div class="rlm-intel-trend-selector" id="rlmIntelTrendSelector"></div>
+            <div class="rlm-intel-category-trends" id="rlmIntelCategoryTrends"></div>
+          </section>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/nav.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/rlm_press_intelligence.js') }}"></script>
+</body>
+</html>

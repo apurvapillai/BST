@@ -57,9 +57,11 @@
           isActive = Boolean(activeTab) && tab === activeTab;
         }
       } else if (route === "rlm-detail") {
-        isActive = path.startsWith("/rlm") && !path.startsWith("/rlm/live");
+        isActive = path.startsWith("/rlm") && !path.startsWith("/rlm/live") && !path.startsWith("/rlm/press-intelligence");
       } else if (route === "rlm-live") {
         isActive = path.startsWith("/rlm/live");
+      } else if (route === "rlm-press-intelligence") {
+        isActive = path.startsWith("/rlm/press-intelligence");
       } else if (route === "dashboard-live") {
         isActive = path.startsWith("/dashboard/live");
       } else if (route === "status-overview") {
