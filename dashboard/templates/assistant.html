@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Assistant Workspace</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/rlm_assistant.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/assistant.css') }}">
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body class="assistant-page">
+  <div class="app-layout">
+    {% include 'partials/sidebar.html' %}
+    <div class="app-main">
+      <div class="app-shell">
+        {% set header_eyebrow = 'ProcessGuard AI - Five Star Management' %}
+        {% set header_title = 'Assistant Workspace' %}
+        {% include 'partials/app_header.html' %}
+
+        <main class="assistant-workspace"
+              data-default-start="{{ default_start_date }}"
+              data-default-end="{{ default_end_date }}">
+          <section class="filters filters--with-header assistant-context-bar" aria-labelledby="assistantContextTitle">
+            <div class="filters-header">
+              <div>
+                <p class="kpi-section__title">Assistant Context</p>
+                <small id="assistantContextTitle">Control scope, date window, execution mode, and diagnostics for this standalone workspace.</small>
+              </div>
+            </div>
+            <div class="filters-body">
+              <div class="filter-grid assistant-context-grid">
+                <div class="filter-card">
+                  <label for="assistantDataMode">Data Mode</label>
+                  <select id="assistantDataMode">
+                    <option value="rlm-only" selected>RLM Only</option>
+                    <option value="defects-only" disabled>Defects Only (Coming Soon)</option>
+                    <option value="combined" disabled>Combined (Coming Soon)</option>
+                  </select>
+                </div>
+
+                <div class="filter-card">
+                  <label for="assistantStart">Start Date</label>
+                  <input type="date" id="assistantStart" value="{{ default_start_date }}">
+                </div>
+
+                <div class="filter-card">
+                  <label for="assistantEnd">End Date</label>
+                  <input type="date" id="assistantEnd" value="{{ default_end_date }}">
+                </div>
+
+                <div class="filter-card assistant-context-toggle-card">
+                  <label>Execution Mode</label>
+                  <div class="rlm-assistant-mode-toggle assistant-segmented-control" role="group" aria-label="Assistant mode">
+                    <label class="rlm-assistant-mode-toggle__option assistant-segmented-control__option">
+                      <input type="radio" name="assistantMode" value="deterministic" checked>
+                      <span>Determi-<br>nistic</span>
+                    </label>
+                    <label class="rlm-assistant-mode-toggle__option assistant-segmented-control__option">
+                      <input type="radio" name="assistantMode" value="llm-assisted">
+                      <span>LLM Assisted</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="filter-card assistant-context-toggle-card">
+                  <label>Diagnostics</label>
+                  <label class="rlm-assistant-debug-toggle assistant-binary-toggle">
+                    <input type="checkbox" id="assistantDiagnostics">
+                    <span class="assistant-binary-toggle__track">
+                      <span class="assistant-binary-toggle__option assistant-binary-toggle__option--off">Off</span>
+                      <span class="assistant-binary-toggle__option assistant-binary-toggle__option--on">On</span>
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <div class="assistant-context-summary-strip">
+            <div class="filter-chips" id="assistantContextSummary"></div>
+          </div>
+
+          <section class="assistant-chat-shell">
+            <div class="assistant-chat-layout">
+              <section class="panel assistant-chat-panel">
+                <div class="assistant-chat-panel__header">
+                  <div>
+                    <p class="kpi-section__title">Conversation</p>
+                    <small>Messages stay grounded in structured assistant analytics.</small>
+                  </div>
+                </div>
+                <div id="assistantHistory" class="assistant-chat-history rlm-assistant-empty-state">
+                  <h3>Start a conversation</h3>
+                  <p>Start with a discovery question, comparison, recent jobs, or a process question. Follow-up prompts will then move deeper into the same investigation.</p>
+                  <div class="assistant-empty-prompts" id="assistantEmptyPromptGroups"></div>
+                </div>
+
+                <div class="assistant-composer-bar">
+                  <div class="rlm-assistant-composer assistant-composer-bar__inner">
+                    <label class="rlm-assistant-composer__label" for="assistantInput">Ask the assistant</label>
+                    <div class="rlm-assistant-composer__row">
+                      <textarea id="assistantInput" class="rlm-assistant-composer__input" placeholder="Example: What changed on Press 8 today?"></textarea>
+                      <div class="assistant-composer-bar__actions">
+                        <button type="button" id="assistantNewChat" class="filters-clear-btn assistant-composer-bar__reset">New chat</button>
+                        <button type="button" id="assistantSend" class="filters-clear-btn rlm-assistant-composer__send">Send</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/nav.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/assistant_page.js') }}"></script>
+</body>
+</html>

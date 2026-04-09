@@ -32,6 +32,8 @@ from db.models import (
     HeatmapRegion,
 )
 from services.dashboard_live_service import DashboardLiveService
+from routes.assistant import build_assistant_chat_response
+from services.rlm_assistant_service import RLMAssistantService
 
 
 DAYS_DEFAULT_RANGE = 2
@@ -75,6 +77,7 @@ REFERENCE_CHECK_ALIGNMENT_LIGHT_WEIGHT = 0.06
 
 dashboard_bp = Blueprint("dashboard", __name__)
 dashboard_live_service = DashboardLiveService()
+rlm_assistant_service = RLMAssistantService()
 
 
 # --------------------------------------------------------------------------- #
@@ -1463,6 +1466,14 @@ def dashboard_home():
         default_end_date=default_end_date,
         default_job=default_job,
     )
+
+
+@dashboard_bp.route("/api/rlm-assistant/chat", methods=["POST"])
+def dashboard_rlm_assistant_chat():
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Invalid JSON payload."}), 400
+    return jsonify(build_assistant_chat_response(payload, service=rlm_assistant_service))
 
 
 @dashboard_bp.route("/live")

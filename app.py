@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from flask import Flask
+from routes.assistant import assistant_bp
 from routes.dashboard import dashboard_bp
 from routes.insights import insights_bp
 from routes.insights_api import insights_api
@@ -44,6 +45,7 @@ def create_app() -> Flask:
     )
 
     # Blueprints
+    app.register_blueprint(assistant_bp, url_prefix="/assistant")
     app.register_blueprint(dashboard_bp, url_prefix="/dashboard")
     app.register_blueprint(insights_bp, url_prefix="/insights")
     app.register_blueprint(insights_api, url_prefix="/api/insights")
