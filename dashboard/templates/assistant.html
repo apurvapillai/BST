@@ -81,6 +81,31 @@
             <div class="filter-chips" id="assistantContextSummary"></div>
           </div>
 
+          <section class="panel assistant-rankings-panel" aria-labelledby="assistantRankingsTodayTitle">
+            <div class="assistant-rankings-panel__header">
+              <div>
+                <h2 class="assistant-rankings-panel__title" id="assistantRankingsTodayTitle">Press rankings today</h2>
+              </div>
+            </div>
+            {% if today_press_rankings %}
+            <div class="assistant-rankings-grid">
+              {% for card in today_press_rankings %}
+              <button type="button"
+                      class="assistant-ranking-card rlm-assistant-prompt-chip"
+                      data-prompt="Use {{ card.press_label }}">
+                <div class="assistant-ranking-card__body">
+                  <h3 class="assistant-ranking-card__title">{{ card.rank }} - {{ card.press_label }}</h3>
+                  <p class="assistant-ranking-card__metric"><span>Total feet today</span><strong>{{ card.feet_total }}</strong></p>
+                  <p class="assistant-ranking-card__metric"><span>Bad feet % today</span><strong>{{ card.bad_feet_pct }}</strong></p>
+                </div>
+              </button>
+              {% endfor %}
+            </div>
+            {% else %}
+            <p class="assistant-rankings-empty">Today's press ranking snapshot is unavailable.</p>
+            {% endif %}
+          </section>
+
           <section class="assistant-chat-shell">
             <div class="assistant-chat-layout">
               <section class="panel assistant-chat-panel">
@@ -92,7 +117,7 @@
                 </div>
                 <div id="assistantHistory" class="assistant-chat-history rlm-assistant-empty-state">
                   <h3>Start a conversation</h3>
-                  <p>Start with a discovery question, comparison, recent jobs, or a process question. Follow-up prompts will then move deeper into the same investigation.</p>
+                  <p>Start with a performance question, ranking question, recent jobs, or a process question. Follow-up prompts will then move deeper into the same investigation.</p>
                   <div class="assistant-empty-prompts" id="assistantEmptyPromptGroups"></div>
                 </div>
 
@@ -100,7 +125,7 @@
                   <div class="rlm-assistant-composer assistant-composer-bar__inner">
                     <label class="rlm-assistant-composer__label" for="assistantInput">Ask the assistant</label>
                     <div class="rlm-assistant-composer__row">
-                      <textarea id="assistantInput" class="rlm-assistant-composer__input" placeholder="Example: What changed on Press 8 today?"></textarea>
+                      <textarea id="assistantInput" class="rlm-assistant-composer__input" placeholder="Example: How is Press 8 performing?"></textarea>
                       <div class="assistant-composer-bar__actions">
                         <button type="button" id="assistantNewChat" class="filters-clear-btn assistant-composer-bar__reset">New chat</button>
                         <button type="button" id="assistantSend" class="filters-clear-btn rlm-assistant-composer__send">Send</button>

@@ -6562,6 +6562,22 @@ class RLMAssistantService:
         if any(
             phrase in lowered
             for phrase in (
+                " which press is performing the best ",
+                " which press is the best ",
+                " which press is strongest ",
+                " who is the best press ",
+            )
+        ):
+            return {
+                "kind": "ranking_summary",
+                "summary_focus": "best",
+                "limit": 1,
+                "tools": ["get_press_rankings"],
+                "validationError": None,
+            }
+        if any(
+            phrase in lowered
+            for phrase in (
                 " which press is performing the worst ",
                 " which press is the worst ",
                 " which press is weakest ",

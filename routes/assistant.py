@@ -10,8 +10,10 @@ from db.models import Machine
 from services.rlm_assistant_service import (
     EXECUTION_MODE_DETERMINISTIC,
     EXECUTION_MODE_LLM,
+    KNOWN_MACHINE_ID_TO_PRESS_LABEL,
     RLMAssistantService,
 )
+from services.rlm_press_intelligence_service import PressIntelligenceFilters
 
 
 assistant_bp = Blueprint("assistant", __name__)
@@ -22,6 +24,56 @@ def _default_window() -> tuple[str, str]:
     end = datetime.utcnow().date()
     start = end - timedelta(days=2)
     return start.isoformat(), end.isoformat()
+
+
+def _format_feet(value: Any) -> str:
+    try:
+        feet = float(value or 0.0)
+    except (TypeError, ValueError):
+        return "--"
+    return f"{feet:,.0f} ft"
+
+
+def _format_pct(value: Any) -> str:
+    try:
+        pct = float(value)
+    except (TypeError, ValueError):
+        return "--"
+    return f"{pct:.2f}%"
+
+
+def _assistant_press_rankings_today() -> list[Dict[str, Any]]:
+    now = datetime.utcnow()
+    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    try:
+        intelligence = assistant_service.press_service.get_press_intelligence(
+            PressIntelligenceFilters(start=start, end=now)
+        )
+    except Exception:
+        return []
+
+    rows = list(intelligence.get("pressRankings") or [])
+    rows.sort(
+        key=lambda row: (
+            row.get("estimatedBadFeetPct") is None,
+            float(row.get("estimatedBadFeetPct") or 0.0),
+            str(row.get("machineName") or ""),
+        )
+    )
+
+    cards: list[Dict[str, Any]] = []
+    for index, row in enumerate(rows[:10], start=1):
+        machine_id = int(row.get("machineId") or 0) if row.get("machineId") is not None else None
+        press_label = str(row.get("machineName") or "").strip() or KNOWN_MACHINE_ID_TO_PRESS_LABEL.get(machine_id, f"Press {machine_id}")
+        cards.append(
+            {
+                "rank": index,
+                "press_label": press_label,
+                "feet_total": _format_feet(row.get("feetTotal")),
+                "bad_feet_pct": _format_pct(row.get("estimatedBadFeetPct")),
+            }
+        )
+    return cards
 
 
 def _base_filters(filters: Dict[str, Any]) -> Dict[str, Any]:
@@ -96,11 +148,13 @@ def assistant_home():
     start_date, end_date = _default_window()
     with SessionLocal() as session:
         machines = session.query(Machine).order_by(Machine.name.asc()).all()
+    today_press_rankings = _assistant_press_rankings_today()
     return render_template(
         "assistant.html",
         machines=machines,
         default_start_date=start_date,
         default_end_date=end_date,
+        today_press_rankings=today_press_rankings,
     )
 
 

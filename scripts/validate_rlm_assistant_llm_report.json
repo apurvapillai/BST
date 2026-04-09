@@ -1,30 +1,30 @@
 {
-  "generatedAtUtc": "2026-04-09T05:18:52.178021+00:00",
-  "suiteFilter": "phase2d_follow_up",
+  "generatedAtUtc": "2026-04-09T15:03:07.735707+00:00",
+  "suiteFilter": "starter",
   "cases": [
     {
-      "name": "phase2d_concentration_follow_up",
-      "suite": "phase2d_follow_up",
-      "prompt": "Show bad feet for Press 5 in the last 10 reels -> Was this just a few reels or the whole job?",
+      "name": "how_is_press_8_performing",
+      "suite": "starter",
+      "prompt": "How is Press 8 performing?",
       "mode": "deterministic",
       "recommended_mode": "deterministic",
-      "expected_tool": "get_rlm_metric_analysis",
+      "expected_tool": "get_press_status",
       "expected_machine_count": 1,
-      "expects_metric": true,
+      "expects_metric": false,
       "expected_outcome": "should_pass",
-      "actual_tool": "get_rlm_metric_analysis",
+      "actual_tool": "get_press_status",
       "actual_tools": [
-        "get_rlm_metric_analysis"
+        "get_press_status"
       ],
       "requested_mode": "deterministic",
       "execution_mode": "deterministic",
       "fallback_reason": null,
-      "title": "Press 5 Bad Feet",
-      "summary": "Press 5 bad feet is 16140 ft. Trend is worsening. Production impact was sustained across much of the run rather than driven by only a few reels.",
+      "title": "Press 8 is healthy in the selected window.",
+      "summary": "Filtered repeat length metrics look stable",
       "expected_vs_actual": {
-        "expected_tool": "get_rlm_metric_analysis",
+        "expected_tool": "get_press_status",
         "actual_tools": [
-          "get_rlm_metric_analysis"
+          "get_press_status"
         ],
         "expected_outcome": "should_pass",
         "actual_outcome": "passed",
@@ -32,12 +32,97 @@
         "outcome_matches_expectation": true
       },
       "validation": {
-        "prompt_presses": [],
+        "prompt_presses": [
+          8
+        ],
+        "response_presses": [
+          8
+        ],
+        "actual_tools": [
+          "get_press_status"
+        ],
+        "actual_machine_ids": [
+          8
+        ],
+        "entity_ok": true,
+        "entity_error": null,
+        "routing_ok": true,
+        "machine_count_ok": true,
+        "machine_ids_ok": true,
+        "metric_ok": true,
+        "fallback": false,
+        "correctness_score": 1.0,
+        "routing_score": 1.0,
+        "entity_consistency": 1.0,
+        "passed": true,
+        "failure_category": null,
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "diagnostics": {
+        "finalResolvedRequest": {
+          "kind": "status",
+          "domain": "auto",
+          "metric_key": null,
+          "category_key": null,
+          "comparison_mode": "none",
+          "comparison_target": null,
+          "grouping": null,
+          "output_shape": "summary",
+          "machine_id": 4,
+          "machine_ids": [],
+          "job": "",
+          "analysisScope": null,
+          "min_reel_feet": null,
+          "effective_start": "2026-04-09",
+          "effective_end": "2026-04-09",
+          "trendRequested": null
+        },
+        "activeStickyFilters": {
+          "pressId": 4
+        },
+        "usedConversationContext": false
+      }
+    },
+    {
+      "name": "how_is_press_5_performing_in_the_last_10_reels",
+      "suite": "starter",
+      "prompt": "How is Press 5 performing in the last 10 reels?",
+      "mode": "deterministic",
+      "recommended_mode": "deterministic",
+      "expected_tool": "get_press_status",
+      "expected_machine_count": 1,
+      "expects_metric": false,
+      "expected_outcome": "should_pass",
+      "actual_tool": "get_press_status",
+      "actual_tools": [
+        "get_press_status"
+      ],
+      "requested_mode": "deterministic",
+      "execution_mode": "deterministic",
+      "fallback_reason": null,
+      "title": "Press 5 is healthy in the selected window.",
+      "summary": "Filtered repeat length metrics look stable",
+      "expected_vs_actual": {
+        "expected_tool": "get_press_status",
+        "actual_tools": [
+          "get_press_status"
+        ],
+        "expected_outcome": "should_pass",
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "validation": {
+        "prompt_presses": [
+          5
+        ],
         "response_presses": [
           5
         ],
         "actual_tools": [
-          "get_rlm_metric_analysis"
+          "get_press_status"
         ],
         "actual_machine_ids": [
           5
@@ -59,39 +144,299 @@
         "outcome_matches_expectation": true
       },
       "diagnostics": {
-        "usedConversationContext": true,
-        "overriddenFields": [
-          "grouping"
-        ],
         "finalResolvedRequest": {
-          "kind": "activity",
+          "kind": "status",
           "domain": "auto",
-          "metric_key": "rlm_bad_feet",
+          "metric_key": null,
           "category_key": null,
           "comparison_mode": "none",
           "comparison_target": null,
-          "grouping": "concentration",
+          "grouping": null,
           "output_shape": "summary",
           "machine_id": 1,
           "machine_ids": [],
           "job": "",
-          "analysisScope": {
-            "kind": "reels",
-            "count": 10,
-            "label": "last 10 reels"
-          },
+          "analysisScope": null,
           "min_reel_feet": null,
           "effective_start": "2026-04-09",
           "effective_end": "2026-04-09",
-          "trendRequested": false
+          "trendRequested": null
         },
-        "explanationSummary": "Primary driver: production impact. Issue shape: sustained. Comparison confidence: high."
+        "activeStickyFilters": {
+          "pressId": 1,
+          "reelScope": {
+            "kind": "reels",
+            "count": 10,
+            "label": "last 10 reels"
+          }
+        },
+        "usedConversationContext": false
       }
     },
     {
-      "name": "phase2d_spikes_follow_up",
-      "suite": "phase2d_follow_up",
-      "prompt": "Show bad feet for Press 5 in the last 10 reels -> Was it broadly unstable or just spikes?",
+      "name": "which_press_is_performing_the_worst_right_now",
+      "suite": "starter",
+      "prompt": "Which press is performing the worst right now?",
+      "mode": "deterministic",
+      "recommended_mode": "deterministic",
+      "expected_tool": "get_press_rankings",
+      "expected_machine_count": 1,
+      "expects_metric": false,
+      "expected_outcome": "should_pass",
+      "actual_tool": "get_press_rankings",
+      "actual_tools": [
+        "get_press_rankings",
+        "get_press_category_breakdown"
+      ],
+      "requested_mode": "deterministic",
+      "execution_mode": "deterministic",
+      "fallback_reason": null,
+      "title": "Press 15 is the weakest press today.",
+      "summary": "Press 15 is currently the weakest press today, with 8.10% bad feet and 9.40 pts/1k ft.",
+      "expected_vs_actual": {
+        "expected_tool": "get_press_rankings",
+        "actual_tools": [
+          "get_press_rankings",
+          "get_press_category_breakdown"
+        ],
+        "expected_outcome": "should_pass",
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "validation": {
+        "prompt_presses": [],
+        "response_presses": [
+          15
+        ],
+        "actual_tools": [
+          "get_press_rankings",
+          "get_press_category_breakdown"
+        ],
+        "actual_machine_ids": [
+          15
+        ],
+        "entity_ok": true,
+        "entity_error": null,
+        "routing_ok": true,
+        "machine_count_ok": true,
+        "machine_ids_ok": true,
+        "metric_ok": true,
+        "fallback": false,
+        "correctness_score": 1.0,
+        "routing_score": 1.0,
+        "entity_consistency": 1.0,
+        "passed": true,
+        "failure_category": null,
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "diagnostics": {
+        "finalResolvedRequest": {
+          "kind": "ranking_summary",
+          "domain": "auto",
+          "metric_key": null,
+          "category_key": null,
+          "comparison_mode": "ranking",
+          "comparison_target": null,
+          "grouping": null,
+          "output_shape": "summary",
+          "machine_id": null,
+          "machine_ids": [],
+          "job": "",
+          "analysisScope": null,
+          "min_reel_feet": null,
+          "effective_start": "2026-04-09",
+          "effective_end": "2026-04-09",
+          "trendRequested": null
+        },
+        "activeStickyFilters": {},
+        "usedConversationContext": false
+      }
+    },
+    {
+      "name": "which_press_is_performing_the_best_today",
+      "suite": "starter",
+      "prompt": "Which press is performing the best today?",
+      "mode": "deterministic",
+      "recommended_mode": "deterministic",
+      "expected_tool": "get_press_rankings",
+      "expected_machine_count": 1,
+      "expects_metric": false,
+      "expected_outcome": "should_pass",
+      "actual_tool": "get_press_rankings",
+      "actual_tools": [
+        "get_press_rankings",
+        "get_press_category_breakdown"
+      ],
+      "requested_mode": "deterministic",
+      "execution_mode": "deterministic",
+      "fallback_reason": null,
+      "title": "Press 6 is the strongest press today.",
+      "summary": "Press 6 is currently the strongest press today, with 1.40% bad feet and 25.20 pts/1k ft.",
+      "expected_vs_actual": {
+        "expected_tool": "get_press_rankings",
+        "actual_tools": [
+          "get_press_rankings",
+          "get_press_category_breakdown"
+        ],
+        "expected_outcome": "should_pass",
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "validation": {
+        "prompt_presses": [],
+        "response_presses": [
+          6
+        ],
+        "actual_tools": [
+          "get_press_rankings",
+          "get_press_category_breakdown"
+        ],
+        "actual_machine_ids": [
+          6
+        ],
+        "entity_ok": true,
+        "entity_error": null,
+        "routing_ok": true,
+        "machine_count_ok": true,
+        "machine_ids_ok": true,
+        "metric_ok": true,
+        "fallback": false,
+        "correctness_score": 1.0,
+        "routing_score": 1.0,
+        "entity_consistency": 1.0,
+        "passed": true,
+        "failure_category": null,
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "diagnostics": {
+        "finalResolvedRequest": {
+          "kind": "ranking_summary",
+          "domain": "auto",
+          "metric_key": null,
+          "category_key": null,
+          "comparison_mode": "ranking",
+          "comparison_target": null,
+          "grouping": null,
+          "output_shape": "summary",
+          "machine_id": null,
+          "machine_ids": [],
+          "job": "",
+          "analysisScope": null,
+          "min_reel_feet": null,
+          "effective_start": "2026-04-09",
+          "effective_end": "2026-04-09",
+          "trendRequested": null
+        },
+        "activeStickyFilters": {
+          "timeScope": {
+            "kind": "time",
+            "preset": "today",
+            "label": "today"
+          }
+        },
+        "usedConversationContext": false
+      }
+    },
+    {
+      "name": "compare_press_5_to_press_6",
+      "suite": "starter",
+      "prompt": "Compare Press 5 to Press 6",
+      "mode": "deterministic",
+      "recommended_mode": "deterministic",
+      "expected_tool": "compare_presses",
+      "expected_machine_count": 2,
+      "expects_metric": false,
+      "expected_outcome": "should_pass",
+      "actual_tool": "compare_presses",
+      "actual_tools": [
+        "compare_presses",
+        "get_press_category_breakdown"
+      ],
+      "requested_mode": "deterministic",
+      "execution_mode": "deterministic",
+      "fallback_reason": null,
+      "title": "Press 5 vs Press 6: Press 5 is currently stronger on bad-feet rate.",
+      "summary": "Press 5 is at 1.40% estimated bad feet versus 4.80% for Press 6.",
+      "expected_vs_actual": {
+        "expected_tool": "compare_presses",
+        "actual_tools": [
+          "compare_presses",
+          "get_press_category_breakdown"
+        ],
+        "expected_outcome": "should_pass",
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "validation": {
+        "prompt_presses": [
+          5,
+          6
+        ],
+        "response_presses": [
+          5,
+          6
+        ],
+        "actual_tools": [
+          "compare_presses",
+          "get_press_category_breakdown"
+        ],
+        "actual_machine_ids": [
+          5,
+          6
+        ],
+        "entity_ok": true,
+        "entity_error": null,
+        "routing_ok": true,
+        "machine_count_ok": true,
+        "machine_ids_ok": true,
+        "metric_ok": true,
+        "fallback": false,
+        "correctness_score": 1.0,
+        "routing_score": 1.0,
+        "entity_consistency": 1.0,
+        "passed": true,
+        "failure_category": null,
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "diagnostics": {
+        "finalResolvedRequest": {
+          "kind": "compare",
+          "domain": "auto",
+          "metric_key": null,
+          "category_key": null,
+          "comparison_mode": "press_vs_press",
+          "comparison_target": "better",
+          "grouping": null,
+          "output_shape": "summary",
+          "machine_id": null,
+          "machine_ids": [
+            1,
+            2
+          ],
+          "job": "",
+          "analysisScope": null,
+          "min_reel_feet": null,
+          "effective_start": "2026-04-09",
+          "effective_end": "2026-04-09",
+          "trendRequested": null
+        },
+        "activeStickyFilters": {},
+        "usedConversationContext": false
+      }
+    },
+    {
+      "name": "compare_press_5_to_average",
+      "suite": "starter",
+      "prompt": "Compare Press 5 to Average",
       "mode": "deterministic",
       "recommended_mode": "deterministic",
       "expected_tool": "get_rlm_metric_analysis",
@@ -105,8 +450,8 @@
       "requested_mode": "deterministic",
       "execution_mode": "deterministic",
       "fallback_reason": null,
-      "title": "Press 5 Bad Feet",
-      "summary": "Press 5 bad feet is 16140 ft. Trend is worsening. Production impact was sustained across much of the run rather than driven by only a few reels.",
+      "title": "Press 5 is worse than peer average across 9 presses on bad feet %.",
+      "summary": "Primary driver: Bad Feet Pct. Issue shape: isolated. Comparison confidence: medium. Press 5 is worse on bad feet % than the average of 9 peer presses: 11.82% versus 5.51%. Comparison confidence is medium. Trend is worsening. Production impact was concentrated in a smaller set of reels rather than evenly spread across the run.",
       "expected_vs_actual": {
         "expected_tool": "get_rlm_metric_analysis",
         "actual_tools": [
@@ -118,7 +463,9 @@
         "outcome_matches_expectation": true
       },
       "validation": {
-        "prompt_presses": [],
+        "prompt_presses": [
+          5
+        ],
         "response_presses": [
           5
         ],
@@ -145,58 +492,53 @@
         "outcome_matches_expectation": true
       },
       "diagnostics": {
-        "usedConversationContext": true,
-        "overriddenFields": [
-          "grouping"
-        ],
         "finalResolvedRequest": {
           "kind": "activity",
           "domain": "auto",
-          "metric_key": "rlm_bad_feet",
+          "metric_key": "rlm_bad_feet_pct",
           "category_key": null,
-          "comparison_mode": "none",
-          "comparison_target": null,
-          "grouping": "concentration",
+          "comparison_mode": "press_vs_average",
+          "comparison_target": "better",
+          "grouping": "decision",
           "output_shape": "summary",
           "machine_id": 1,
           "machine_ids": [],
           "job": "",
-          "analysisScope": {
-            "kind": "reels",
-            "count": 10,
-            "label": "last 10 reels"
-          },
+          "analysisScope": null,
           "min_reel_feet": null,
           "effective_start": "2026-04-09",
           "effective_end": "2026-04-09",
-          "trendRequested": false
+          "trendRequested": null
         },
-        "explanationSummary": "Primary driver: production impact. Issue shape: sustained. Comparison confidence: high."
+        "activeStickyFilters": {
+          "pressId": 1
+        },
+        "usedConversationContext": false
       }
     },
     {
-      "name": "phase2d_recovery_follow_up",
-      "suite": "phase2d_follow_up",
-      "prompt": "Show delta behavior for Press 5 in the last 10 reels -> Did it recover?",
+      "name": "what_jobs_ran_on_press_8_in_the_last_24_hours",
+      "suite": "starter",
+      "prompt": "What jobs ran on Press 8 in the last 24 hours?",
       "mode": "deterministic",
       "recommended_mode": "deterministic",
-      "expected_tool": "get_rlm_metric_analysis",
+      "expected_tool": "get_press_job_list",
       "expected_machine_count": 1,
-      "expects_metric": true,
+      "expects_metric": false,
       "expected_outcome": "should_pass",
-      "actual_tool": "get_rlm_metric_analysis",
+      "actual_tool": "get_press_job_list",
       "actual_tools": [
-        "get_rlm_metric_analysis"
+        "get_press_job_list"
       ],
       "requested_mode": "deterministic",
       "execution_mode": "deterministic",
       "fallback_reason": null,
-      "title": "Press 5 Delta Behavior",
-      "summary": "Press 5 delta behavior is 1.91 mm. Trend is worsening. The run was mostly good except for a short deviation spike averaging 2.23 mm across 1 reels.",
+      "title": "Jobs run on Press 8",
+      "summary": "Press 8 ran 2 jobs in the selected scope.",
       "expected_vs_actual": {
-        "expected_tool": "get_rlm_metric_analysis",
+        "expected_tool": "get_press_job_list",
         "actual_tools": [
-          "get_rlm_metric_analysis"
+          "get_press_job_list"
         ],
         "expected_outcome": "should_pass",
         "actual_outcome": "passed",
@@ -204,12 +546,108 @@
         "outcome_matches_expectation": true
       },
       "validation": {
-        "prompt_presses": [],
+        "prompt_presses": [
+          8
+        ],
+        "response_presses": [
+          8
+        ],
+        "actual_tools": [
+          "get_press_job_list"
+        ],
+        "actual_machine_ids": [
+          8
+        ],
+        "entity_ok": true,
+        "entity_error": null,
+        "routing_ok": true,
+        "machine_count_ok": true,
+        "machine_ids_ok": true,
+        "metric_ok": true,
+        "fallback": false,
+        "correctness_score": 1.0,
+        "routing_score": 1.0,
+        "entity_consistency": 1.0,
+        "passed": true,
+        "failure_category": null,
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "diagnostics": {
+        "finalResolvedRequest": {
+          "kind": "job_list",
+          "domain": "auto",
+          "metric_key": null,
+          "category_key": null,
+          "comparison_mode": "none",
+          "comparison_target": null,
+          "grouping": null,
+          "output_shape": "summary",
+          "machine_id": 4,
+          "machine_ids": [],
+          "job": "",
+          "analysisScope": {
+            "kind": "time",
+            "unit": "hours",
+            "value": 24,
+            "label": "last 24 hours"
+          },
+          "min_reel_feet": null,
+          "effective_start": "2026-04-08T15:03:07",
+          "effective_end": "2026-04-09T15:03:07",
+          "trendRequested": null
+        },
+        "activeStickyFilters": {
+          "timeScope": {
+            "kind": "time",
+            "unit": "hours",
+            "value": 24,
+            "label": "last 24 hours"
+          },
+          "pressId": 4
+        },
+        "usedConversationContext": false
+      }
+    },
+    {
+      "name": "show_me_recent_jobs_for_press_5",
+      "suite": "starter",
+      "prompt": "Show me recent jobs for Press 5",
+      "mode": "deterministic",
+      "recommended_mode": "deterministic",
+      "expected_tool": "get_press_job_list",
+      "expected_machine_count": 1,
+      "expects_metric": false,
+      "expected_outcome": "should_pass",
+      "actual_tool": "get_press_job_list",
+      "actual_tools": [
+        "get_press_job_list"
+      ],
+      "requested_mode": "deterministic",
+      "execution_mode": "deterministic",
+      "fallback_reason": null,
+      "title": "Jobs run on Press 5",
+      "summary": "Press 5 ran 2 jobs in the selected scope.",
+      "expected_vs_actual": {
+        "expected_tool": "get_press_job_list",
+        "actual_tools": [
+          "get_press_job_list"
+        ],
+        "expected_outcome": "should_pass",
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "validation": {
+        "prompt_presses": [
+          5
+        ],
         "response_presses": [
           5
         ],
         "actual_tools": [
-          "get_rlm_metric_analysis"
+          "get_press_job_list"
         ],
         "actual_machine_ids": [
           5
@@ -231,10 +669,172 @@
         "outcome_matches_expectation": true
       },
       "diagnostics": {
-        "usedConversationContext": true,
-        "overriddenFields": [
-          "grouping"
+        "finalResolvedRequest": {
+          "kind": "job_list",
+          "domain": "auto",
+          "metric_key": null,
+          "category_key": null,
+          "comparison_mode": "none",
+          "comparison_target": null,
+          "grouping": null,
+          "output_shape": "summary",
+          "machine_id": 1,
+          "machine_ids": [],
+          "job": "",
+          "analysisScope": null,
+          "min_reel_feet": null,
+          "effective_start": "2026-04-09",
+          "effective_end": "2026-04-09",
+          "trendRequested": null
+        },
+        "activeStickyFilters": {
+          "pressId": 1
+        },
+        "usedConversationContext": false
+      }
+    },
+    {
+      "name": "show_speed_instability_for_press_14",
+      "suite": "starter",
+      "prompt": "Show speed instability for Press 14",
+      "mode": "deterministic",
+      "recommended_mode": "deterministic",
+      "expected_tool": "get_press_metric_trend",
+      "expected_machine_count": 1,
+      "expects_metric": true,
+      "expected_outcome": "should_pass",
+      "actual_tool": "get_press_metric_trend",
+      "actual_tools": [
+        "get_press_metric_trend"
+      ],
+      "requested_mode": "deterministic",
+      "execution_mode": "deterministic",
+      "fallback_reason": null,
+      "title": "Press 14 speed instability is trending worse in the selected window.",
+      "summary": "It is trending worse over the selected scope. Metric trend is available for the selected window.",
+      "expected_vs_actual": {
+        "expected_tool": "get_press_metric_trend",
+        "actual_tools": [
+          "get_press_metric_trend"
         ],
+        "expected_outcome": "should_pass",
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "validation": {
+        "prompt_presses": [
+          14
+        ],
+        "response_presses": [
+          14
+        ],
+        "actual_tools": [
+          "get_press_metric_trend"
+        ],
+        "actual_machine_ids": [
+          14
+        ],
+        "entity_ok": true,
+        "entity_error": null,
+        "routing_ok": true,
+        "machine_count_ok": true,
+        "machine_ids_ok": true,
+        "metric_ok": true,
+        "fallback": false,
+        "correctness_score": 1.0,
+        "routing_score": 1.0,
+        "entity_consistency": 1.0,
+        "passed": true,
+        "failure_category": null,
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "diagnostics": {
+        "finalResolvedRequest": {
+          "kind": "trend",
+          "domain": "auto",
+          "metric_key": "speed_instability",
+          "category_key": null,
+          "comparison_mode": "none",
+          "comparison_target": null,
+          "grouping": null,
+          "output_shape": "summary",
+          "machine_id": 9,
+          "machine_ids": [],
+          "job": "",
+          "analysisScope": null,
+          "min_reel_feet": null,
+          "effective_start": "2026-04-09",
+          "effective_end": "2026-04-09",
+          "trendRequested": null
+        },
+        "activeStickyFilters": {
+          "pressId": 9
+        },
+        "usedConversationContext": false
+      }
+    },
+    {
+      "name": "show_delta_behavior_for_press_7",
+      "suite": "starter",
+      "prompt": "Show delta behavior for Press 7",
+      "mode": "deterministic",
+      "recommended_mode": "deterministic",
+      "expected_tool": "get_rlm_metric_analysis",
+      "expected_machine_count": 1,
+      "expects_metric": true,
+      "expected_outcome": "should_pass",
+      "actual_tool": "get_rlm_metric_analysis",
+      "actual_tools": [
+        "get_rlm_metric_analysis"
+      ],
+      "requested_mode": "deterministic",
+      "execution_mode": "deterministic",
+      "fallback_reason": null,
+      "title": "Press 7 Delta Behavior",
+      "summary": "Press 7 delta behavior is 0.72 mm. Trend is worsening. The run had one main deviation episode in the end averaging 1.02 mm across 9 reels.",
+      "expected_vs_actual": {
+        "expected_tool": "get_rlm_metric_analysis",
+        "actual_tools": [
+          "get_rlm_metric_analysis"
+        ],
+        "expected_outcome": "should_pass",
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "validation": {
+        "prompt_presses": [
+          7
+        ],
+        "response_presses": [
+          7
+        ],
+        "actual_tools": [
+          "get_rlm_metric_analysis"
+        ],
+        "actual_machine_ids": [
+          7
+        ],
+        "entity_ok": true,
+        "entity_error": null,
+        "routing_ok": true,
+        "machine_count_ok": true,
+        "machine_ids_ok": true,
+        "metric_ok": true,
+        "fallback": false,
+        "correctness_score": 1.0,
+        "routing_score": 1.0,
+        "entity_consistency": 1.0,
+        "passed": true,
+        "failure_category": null,
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "diagnostics": {
         "finalResolvedRequest": {
           "kind": "activity",
           "domain": "auto",
@@ -242,32 +842,36 @@
           "category_key": null,
           "comparison_mode": "none",
           "comparison_target": null,
-          "grouping": "episodes",
+          "grouping": null,
           "output_shape": "summary",
-          "machine_id": 1,
+          "machine_id": 3,
           "machine_ids": [],
           "job": "",
-          "analysisScope": {
-            "kind": "reels",
-            "count": 10,
-            "label": "last 10 reels"
-          },
+          "analysisScope": null,
           "min_reel_feet": null,
           "effective_start": "2026-04-09",
           "effective_end": "2026-04-09",
           "trendRequested": false
         },
-        "explanationSummary": "Primary driver: Delta Behavior. Issue shape: sustained. Comparison confidence: high. Cross-signal note: Speed Instability Partially Lined Up With Delta Problems on 4 of 10 qualified reels in the top quartile of both signals."
+        "activeStickyFilters": {
+          "pressId": 3
+        },
+        "usedConversationContext": false
       }
     }
   ],
   "summary": {
-    "total_cases": 3,
-    "passed_cases": 3,
+    "total_cases": 10,
+    "passed_cases": 10,
     "failed_cases": 0,
     "overall_pass_rate": 1.0,
     "entity_consistency_rate": 1.0,
     "tool_accuracy": {
+      "compare_presses": 1.0,
+      "get_press_job_list": 1.0,
+      "get_press_metric_trend": 1.0,
+      "get_press_rankings": 1.0,
+      "get_press_status": 1.0,
       "get_rlm_metric_analysis": 1.0
     },
     "failure_categories": {},
@@ -275,7 +879,15 @@
     "top_failing_patterns": [],
     "tools_with_lowest_accuracy": [
       {
-        "tool": "get_rlm_metric_analysis",
+        "tool": "compare_presses",
+        "accuracy": 1.0
+      },
+      {
+        "tool": "get_press_job_list",
+        "accuracy": 1.0
+      },
+      {
+        "tool": "get_press_metric_trend",
         "accuracy": 1.0
       }
     ],
@@ -285,9 +897,9 @@
       "entity_consistency": 1.0
     },
     "suite_summary": {
-      "phase2d_follow_up": {
-        "total": 3,
-        "passed": 3,
+      "starter": {
+        "total": 10,
+        "passed": 10,
         "failed": 0,
         "pass_rate": 1.0,
         "entity_consistency_rate": 1.0,

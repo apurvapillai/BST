@@ -1,33 +1,38 @@
 (function () {
   const STARTER_PROMPT_GROUPS = [
     {
-      title: "Discovery",
+      title: "Performance",
       prompts: [
-        "What changed on Press 8 today?",
-        "Investigate Press 5 in the last 10 reels",
+        "How is Press 8 performing?",
+        "How is Press 5 performing in the last 10 reels?",
+      ],
+    },
+    {
+      title: "Ranking",
+      prompts: [
         "Which press is performing the worst right now?",
+        "Which press is performing the best today?",
       ],
     },
     {
       title: "Compare",
       prompts: [
-        "Compare Press 6 and Press 8",
-        "Compare Press 5 to average",
-        "Which press has the weakest monitoring coverage today?",
+        "Compare Press 5 to Press 6",
+        "Compare Press 5 to Average",
       ],
     },
     {
       title: "Jobs",
       prompts: [
-        "What jobs ran on Press 5 in the last 24 hours?",
-        "Show me the recent jobs for Press 8",
+        "What jobs ran on Press 8 in the last 24 hours?",
+        "Show me recent jobs for Press 5",
       ],
     },
     {
       title: "Process",
       prompts: [
-        "Show delta behavior for Press 7",
         "Show speed instability for Press 14",
+        "Show delta behavior for Press 7",
       ],
     },
   ];
