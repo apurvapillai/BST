@@ -21,8 +21,9 @@ from db.rlm_live_models import (
     RLMLiveSystemConfig,
     RLMBase,
 )
+from services.rlm_reel_footage import compute_reel_feet_from_range
+from services.rlm_repeat_length_service import RLMRepeatLengthService
 
-FEET_PER_FORMAT_UNIT = 3.0417
 SEVERITY_ORDER = {"healthy": 0, "info": 1, "warning": 2, "critical": 3, "idle": 0, "stale": 2}
 LOCAL_TIMEZONE = ZoneInfo("America/Chicago")
 STATE_LABELS = {
@@ -53,9 +54,12 @@ class ReelHealth:
     production_start: Optional[datetime]
     feet_total: float
     monitoring_points_total: int
+    matched_monitoring_points: int
+    unmatched_monitoring_points: int
     monitoring_points_bad: int
     monitoring_points_good: int
     oob_point_pct: float
+    good_point_pct: float
     bad_feet_pct: float
     feet_bad: float
     feet_good: float
@@ -93,6 +97,7 @@ def initialize_live_tables() -> None:
 
 class RLMLiveService:
     def __init__(self) -> None:
+        self.repeat_length_service = RLMRepeatLengthService()
         initialize_live_tables()
         self.focus_window_minutes = 30
         self.logger = logging.getLogger(__name__)
@@ -624,11 +629,17 @@ class RLMLiveService:
             "feetTotal": health.feet_total,
             "feetBad": health.feet_bad,
             "feetGood": health.feet_good,
+            "estimatedBadFeet": health.feet_bad,
+            "estimatedGoodFeet": health.feet_good,
             "badFeetPct": health.bad_feet_pct,
             "monitoringPointsTotal": health.monitoring_points_total,
+            "matchedMonitoringPoints": health.matched_monitoring_points,
+            "unmatchedMonitoringPoints": health.unmatched_monitoring_points,
             "monitoringPointsBad": health.monitoring_points_bad,
             "monitoringPointsGood": health.monitoring_points_good,
             "oobPointPct": health.oob_point_pct,
+            "badPointPct": health.oob_point_pct,
+            "goodPointPct": health.good_point_pct,
             "pointsPer1000Ft": health.points_per_1000_ft,
             "avgDelta": health.avg_delta,
             "avgAbsDelta": health.avg_abs_delta,
@@ -1050,11 +1061,17 @@ class RLMLiveService:
                 "feetTotal": latest_health.feet_total,
                 "feetBad": latest_health.feet_bad,
                 "feetGood": latest_health.feet_good,
+                "estimatedBadFeet": latest_health.feet_bad,
+                "estimatedGoodFeet": latest_health.feet_good,
                 "badFeetPct": latest_health.bad_feet_pct,
                 "monitoringPointsTotal": latest_health.monitoring_points_total,
+                "matchedMonitoringPoints": latest_health.matched_monitoring_points,
+                "unmatchedMonitoringPoints": latest_health.unmatched_monitoring_points,
                 "monitoringPointsBad": latest_health.monitoring_points_bad,
                 "monitoringPointsGood": latest_health.monitoring_points_good,
                 "oobPointPct": latest_health.oob_point_pct,
+                "badPointPct": latest_health.oob_point_pct,
+                "goodPointPct": latest_health.good_point_pct,
                 "pointsPer1000Ft": latest_health.points_per_1000_ft,
                 "avgDelta": latest_health.avg_delta,
                 "avgAbsDelta": latest_health.avg_abs_delta,
@@ -1083,66 +1100,35 @@ class RLMLiveService:
             .filter(RLMReel.reel_db_id.in_(reel_ids))
             .all()
         )
-        mon_rows = (
-            session.query(
-                RLMMonitoring.reel_db_id,
-                RLMMonitoring.curlength,
-                RLMMonitoring.webspeed,
-            )
-            .filter(RLMMonitoring.reel_db_id.in_(reel_ids))
-            .all()
-        )
-        tol_rows = (
-            session.query(RLMTolerance)
-            .filter(RLMTolerance.reel_db_id.in_(reel_ids))
-            .order_by(RLMTolerance.reel_db_id.asc(), RLMTolerance.tol_sequence.desc())
-            .all()
-        )
-        monitoring_by_reel: Dict[int, List[Tuple[Optional[float], Optional[float]]]] = defaultdict(list)
-        for reel_db_id, curlength, webspeed in mon_rows:
-            monitoring_by_reel[reel_db_id].append((self._to_float(curlength), self._to_float(webspeed)))
-        latest_tol: Dict[int, RLMTolerance] = {}
-        for tol in tol_rows:
-            if tol.reel_db_id not in latest_tol:
-                latest_tol[tol.reel_db_id] = tol
+        repeat_length = self.repeat_length_service.fetch_reel_batch(session, reel_ids)
 
         out: Dict[int, ReelHealth] = {}
         for reel in reels:
             threshold = thresholds[reel.machine_id]
-            points = monitoring_by_reel.get(reel.reel_db_id, [])
-            tol = latest_tol.get(reel.reel_db_id)
-            nominal = self._to_float(getattr(tol, "nom_length", None))
-            err_shrink = abs(self._to_float(getattr(tol, "err_shrink", None)) or 0.0) if tol else None
-            err_expand = abs(self._to_float(getattr(tol, "err_expand", None)) or 0.0) if tol else None
-            feet_total = self._feet_from_reel(reel)
-            monitoring_points_total = len(points)
-            bad_deltas = []
-            deltas = []
-            speeds = []
-            for curlength, webspeed in points:
-                if webspeed is not None:
-                    speeds.append(webspeed)
-                if nominal is None or curlength is None:
-                    continue
-                delta = curlength - nominal
-                deltas.append(delta)
-                lower = -(err_shrink or 0.0)
-                upper = err_expand or 0.0
-                if delta < lower or delta > upper:
-                    bad_deltas.append(delta)
-            monitoring_points_bad = len(bad_deltas)
-            monitoring_points_good = max(monitoring_points_total - monitoring_points_bad, 0)
-            oob_point_pct = (monitoring_points_bad / monitoring_points_total * 100.0) if monitoring_points_total else 0.0
-            bad_feet_pct = oob_point_pct if monitoring_points_total else 0.0
-            feet_bad = feet_total * (bad_feet_pct / 100.0)
-            feet_good = max(feet_total - feet_bad, 0.0)
-            avg_delta = self._mean(deltas)
-            avg_abs_delta = self._mean([abs(x) for x in deltas])
-            delta_std = self._stddev(deltas)
-            avg_webspeed = self._mean(speeds)
-            min_webspeed = min(speeds) if speeds else None
-            max_webspeed = max(speeds) if speeds else None
-            webspeed_range = (max_webspeed - min_webspeed) if speeds else None
+            reel_repeat = repeat_length.get(reel.reel_db_id, {})
+            reel_summary = self.repeat_length_service.build_reel_summary(reel, reel_repeat)
+            latest_tol = reel_repeat.get("latestTolerance") or {}
+            nominal = self._to_float(latest_tol.get("nominalLength"))
+            err_shrink = abs(self._to_float(latest_tol.get("errShrink")) or 0.0) if latest_tol else None
+            err_expand = abs(self._to_float(latest_tol.get("errExpand")) or 0.0) if latest_tol else None
+            feet_total = float(reel_summary.get("feet_total") or 0.0)
+            monitoring_points_total = int(reel_repeat.get("monitoringPointsTotal") or 0)
+            matched_monitoring_points = int(reel_summary.get("matched_monitoring_points") or 0)
+            unmatched_monitoring_points = int(reel_summary.get("unmatched_monitoring_points") or 0)
+            monitoring_points_bad = int(reel_summary.get("bad_monitoring_points") or 0)
+            monitoring_points_good = int(reel_summary.get("good_monitoring_points") or 0)
+            oob_point_pct = float(reel_summary.get("bad_point_pct") or 0.0)
+            good_point_pct = float(reel_summary.get("good_point_pct") or 0.0)
+            bad_feet_pct = float(reel_summary.get("bad_point_pct") or 0.0) if matched_monitoring_points else 0.0
+            feet_bad = float(reel_summary.get("estimated_bad_feet") or 0.0)
+            feet_good = float(reel_summary.get("estimated_good_feet") or max(feet_total - feet_bad, 0.0))
+            avg_delta = reel_repeat.get("avgDelta")
+            avg_abs_delta = reel_repeat.get("avgAbsDelta")
+            delta_std = reel_repeat.get("deltaStd")
+            avg_webspeed = reel_repeat.get("avgWebspeed")
+            min_webspeed = reel_repeat.get("minWebspeed")
+            max_webspeed = reel_repeat.get("maxWebspeed")
+            webspeed_range = (max_webspeed - min_webspeed) if min_webspeed is not None and max_webspeed is not None else None
             points_per_1000_ft = (monitoring_points_total / feet_total * 1000.0) if feet_total else None
             is_qualifying = feet_total >= threshold.min_qualifying_feet
             has_zero_monitoring = monitoring_points_total == 0
@@ -1179,9 +1165,12 @@ class RLMLiveService:
                 production_start=reel.production_start_dt,
                 feet_total=feet_total,
                 monitoring_points_total=monitoring_points_total,
+                matched_monitoring_points=matched_monitoring_points,
+                unmatched_monitoring_points=unmatched_monitoring_points,
                 monitoring_points_bad=monitoring_points_bad,
                 monitoring_points_good=monitoring_points_good,
                 oob_point_pct=round(oob_point_pct, 2),
+                good_point_pct=round(good_point_pct, 2),
                 bad_feet_pct=round(bad_feet_pct, 2),
                 feet_bad=round(feet_bad, 2),
                 feet_good=round(feet_good, 2),
@@ -1382,11 +1371,8 @@ class RLMLiveService:
             return None
 
     def _feet_from_reel(self, reel: RLMReel) -> float:
-        start = self._to_float(reel.reel_start)
-        end = self._to_float(reel.reel_end)
-        if start is None or end is None:
-            return 0.0
-        return abs(end - start) * FEET_PER_FORMAT_UNIT
+        feet = compute_reel_feet_from_range(reel.reel_start, reel.reel_end)
+        return feet if feet is not None else 0.0
 
     def _mean(self, values: List[Optional[float]]) -> Optional[float]:
         vals = [v for v in values if v is not None]
@@ -1569,12 +1555,19 @@ class RLMLiveService:
             "productionStart": self._iso(health.production_start),
             "productionStartLocal": self._format_raw_timestamp(health.production_start),
             "feetTotal": health.feet_total,
+            "estimatedBadFeet": health.feet_bad,
+            "estimatedGoodFeet": health.feet_good,
             "qualifying": health.is_qualifying_reel,
             "monitored": health.monitoring_points_total > 0,
             "monitoringPointsTotal": health.monitoring_points_total,
+            "matchedMonitoringPoints": health.matched_monitoring_points,
+            "unmatchedMonitoringPoints": health.unmatched_monitoring_points,
             "monitoringPointsBad": health.monitoring_points_bad,
+            "monitoringPointsGood": health.monitoring_points_good,
             "badFeetPct": health.bad_feet_pct,
             "oobPointPct": health.oob_point_pct,
+            "badPointPct": health.oob_point_pct,
+            "goodPointPct": health.good_point_pct,
             "avgDelta": health.avg_delta,
             "deltaStd": health.delta_std,
             "hasZeroMonitoring": health.has_zero_monitoring,

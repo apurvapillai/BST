@@ -116,7 +116,7 @@ class AssistantRequestResolver:
         elif not self.service._is_valid_machine_id(legacy_after.get("pressId")) and self.service._is_valid_machine_id(normalized_filters.get("machine_id")):
             legacy_after["pressId"] = self.service._to_int(normalized_filters.get("machine_id"))
 
-        job_value = self._parse_job(message) or normalized_filters.get("job") or merged.get("job")
+        job_value = self._parse_job(message) or (resolved_intent or {}).get("job") or normalized_filters.get("job") or merged.get("job")
         if job_value:
             legacy_after["job"] = job_value
         if any(token in self.service._normalize_message(message) for token in (" clear job filter ", " clear the job filter ")):
@@ -145,7 +145,7 @@ class AssistantRequestResolver:
         sticky_press_id = sticky_filters.press_id
         if not explicit_press_ids and self.service._is_valid_machine_id(sticky_press_id):
             kind = str(resolved_intent.get("kind") or "")
-            if kind in {"status", "trend", "reel_summary", "ranking", "job_list", "activity", "discovery"}:
+            if kind in {"status", "trend", "reel_summary", "ranking", "job_list", "job_analysis", "activity", "discovery"}:
                 resolved_intent = dict(resolved_intent)
                 resolved_intent["machine_id"] = sticky_press_id
             elif kind == "compare":

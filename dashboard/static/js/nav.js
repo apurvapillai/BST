@@ -57,11 +57,20 @@
           isActive = Boolean(activeTab) && tab === activeTab;
         }
       } else if (route === "rlm-detail") {
-        isActive = path.startsWith("/rlm") && !path.startsWith("/rlm/live") && !path.startsWith("/rlm/press-intelligence");
+        isActive =
+          path.startsWith("/rlm") &&
+          !path.startsWith("/rlm/live") &&
+          !path.startsWith("/rlm/press-intelligence") &&
+          !path.startsWith("/rlm/job-comparison") &&
+          !path.startsWith("/rlm/delta-trends");
       } else if (route === "rlm-live") {
         isActive = path.startsWith("/rlm/live");
       } else if (route === "rlm-press-intelligence") {
         isActive = path.startsWith("/rlm/press-intelligence");
+      } else if (route === "rlm-job-comparison") {
+        isActive = path.startsWith("/rlm/job-comparison");
+      } else if (route === "rlm-delta-trends") {
+        isActive = path.startsWith("/rlm/delta-trends");
       } else if (route === "dashboard-live") {
         isActive = path.startsWith("/dashboard/live");
       } else if (route === "status-overview") {
@@ -121,6 +130,17 @@
 
     if (!sidebar) return;
 
+    const notifyLayoutChange = () => {
+      window.dispatchEvent(
+        new CustomEvent("bst:layoutchange", {
+          detail: {
+            sidebarCollapsed: body.classList.contains("sidebar-collapsed"),
+            sidebarOpen: body.classList.contains("sidebar-open"),
+          },
+        })
+      );
+    };
+
     const setCollapsed = (collapsed) => {
       body.classList.toggle("sidebar-collapsed", collapsed);
       if (toggleBtn) {
@@ -131,6 +151,7 @@
       } catch (err) {
         // ignore storage errors
       }
+      notifyLayoutChange();
     };
 
     const getStoredCollapsed = () => {
@@ -146,11 +167,13 @@
     const closeMobile = () => {
       body.classList.remove("sidebar-open");
       if (toggleBtn) toggleBtn.setAttribute("aria-expanded", "false");
+      notifyLayoutChange();
     };
 
     const openMobile = () => {
       body.classList.add("sidebar-open");
       if (toggleBtn) toggleBtn.setAttribute("aria-expanded", "true");
+      notifyLayoutChange();
     };
 
     if (toggleBtn) {
@@ -175,6 +198,7 @@
       if (!mediaQuery.matches) {
         closeMobile();
       }
+      notifyLayoutChange();
     });
 
     return { closeMobile, mediaQuery };

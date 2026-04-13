@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RLM Delta Trends</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/rlm_delta_trends.css') }}">
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body class="rlm-delta-trends-page">
+  <div class="app-layout">
+    {% include 'partials/sidebar.html' %}
+    <div class="app-main">
+      <div class="app-shell">
+        {% set header_eyebrow = 'ProcessGuard AI - Five Star Management' %}
+        {% set header_title = 'RLM Delta Trends' %}
+        {% include 'partials/app_header.html' %}
+
+        <main class="rlm-delta-trends-app"
+              data-default-start="{{ default_start_str }}"
+              data-default-end="{{ default_end_str }}">
+          <div class="delta-trends-loading-overlay hidden" id="deltaTrendsLoadingOverlay" aria-hidden="true">
+            <div class="delta-trends-loading-overlay__dialog" role="status" aria-live="polite" aria-busy="true">
+              <div class="delta-trends-loading-overlay__spinner"></div>
+              <p id="deltaTrendsLoadingText">Loading trend data…</p>
+            </div>
+          </div>
+          <section class="filters filters--with-header delta-trends-filters" aria-labelledby="deltaTrendsFiltersTitle">
+            <div class="filters-header">
+              <div>
+                <p class="kpi-section__title">Global Filters</p>
+                <small id="deltaTrendsFiltersTitle">Compare delta behavior across presses, then narrow specific presses to selected jobs and orders.</small>
+              </div>
+              <div class="delta-trends-header-actions">
+                <button type="button" class="filters-clear-btn filters-clear-btn--ghost" id="deltaTrendsSelectAll">All presses</button>
+                <button type="button" class="filters-clear-btn filters-clear-btn--ghost" id="deltaTrendsClearAll">Clear</button>
+              </div>
+            </div>
+            <div class="filters-body">
+              <div class="filter-grid delta-trends-filter-grid">
+                <div class="filter-card">
+                  <label for="deltaTrendsStart">Start date/time</label>
+                  <input type="datetime-local" id="deltaTrendsStart" value="{{ default_start_str }}">
+                </div>
+                <div class="filter-card">
+                  <label for="deltaTrendsEnd">End date/time</label>
+                  <input type="datetime-local" id="deltaTrendsEnd" value="{{ default_end_str }}">
+                </div>
+                <div class="filter-card delta-trends-filter-card">
+                  <label>Current view</label>
+                  <div class="delta-trends-selection-summary" id="deltaTrendsSelectionSummary">Loading presses…</div>
+                </div>
+              </div>
+              <div class="delta-trends-selector-card">
+                <div class="delta-trends-selector-card__header">
+                  <div>
+                    <p class="delta-trends-selector-card__eyebrow">Press / Job Selection</p>
+                    <h3>Select presses and optional job overrides</h3>
+                  </div>
+                  <span class="delta-trends-selector-card__hint">If a press has no checked jobs, all jobs for that press are included.</span>
+                </div>
+                <div id="deltaTrendsMachineSelector" class="delta-trends-machine-selector"></div>
+              </div>
+              <div class="filter-chips delta-trends-global-filter-chips" id="deltaTrendsGlobalFilterChips"></div>
+            </div>
+          </section>
+
+          <section class="delta-trends-local-filters" aria-labelledby="deltaTrendsLocalFiltersTitle">
+            <div class="delta-trends-local-filters__header">
+              <div>
+                <p class="delta-trends-local-filters__eyebrow">Local Trend Filters</p>
+                <h2 id="deltaTrendsLocalFiltersTitle">Trend-specific controls</h2>
+              </div>
+            </div>
+            <p class="delta-trends-local-filters__subtitle">Use these filters for reel-foot filtering and manual delta chart bounds. Blank values stay on auto.</p>
+            <div class="delta-trends-local-filter-grid">
+              <div class="filter-card delta-trends-local-filter-group">
+                <div>
+                  <label for="deltaTrendsMinFeet">Minimum reel feet</label>
+                  <small class="delta-trends-local-filter-help">Exclude short reels from the trend view. Leave blank to keep all reels.</small>
+                </div>
+                <input type="number" id="deltaTrendsMinFeet" min="0" step="10" placeholder="Auto">
+              </div>
+              <div class="filter-card delta-trends-local-filter-group">
+                <div>
+                  <label for="deltaTrendsYMin">Trend Y Range</label>
+                  <small class="delta-trends-local-filter-help">Set manual chart bounds for delta. Leave either side blank to keep that bound on auto.</small>
+                </div>
+                <div class="delta-trends-local-filter-pair">
+                  <input type="number" id="deltaTrendsYMin" step="0.001" placeholder="Y min">
+                  <input type="number" id="deltaTrendsYMax" step="0.001" placeholder="Y max">
+                </div>
+              </div>
+              <div class="filter-card delta-trends-local-filter-group">
+                <div>
+                  <label for="deltaTrendsErrShrink">Error Bounds</label>
+                  <small class="delta-trends-local-filter-help">Override auto per-press shrink and expansion limits used to mark out-of-bounds points.</small>
+                </div>
+                <div class="delta-trends-local-filter-pair">
+                  <input type="number" id="deltaTrendsErrShrink" step="0.001" placeholder="Error shrink">
+                  <input type="number" id="deltaTrendsErrExpand" step="0.001" placeholder="Error expansion">
+                </div>
+              </div>
+              <div class="filter-card delta-trends-local-filter-card">
+                <label>&nbsp;</label>
+                <button type="button" class="filters-clear-btn delta-trends-apply-btn" id="deltaTrendsApply">Apply Filters</button>
+              </div>
+            </div>
+            <div class="delta-trends-critical-controls" aria-label="Critical trend display controls">
+              <article class="delta-trends-critical-card">
+                <div>
+                  <h3>Reel Markers</h3>
+                  <p>Show or hide vertical reel-start lines on the individual press detail trends.</p>
+                </div>
+                <div class="delta-trends-segmented-control" id="deltaTrendsReelToggle">
+                  <button type="button" data-value="off">Hide</button>
+                  <button type="button" data-value="on">Show</button>
+                </div>
+              </article>
+              <article class="delta-trends-critical-card">
+                <div>
+                  <h3>OOB Markers</h3>
+                  <p>Keep the red out-of-bounds circles visible or remove them from every trend.</p>
+                </div>
+                <div class="delta-trends-segmented-control" id="deltaTrendsOobToggle">
+                  <button type="button" data-value="off">Hide</button>
+                  <button type="button" data-value="on">Show</button>
+                </div>
+              </article>
+              <article class="delta-trends-critical-card">
+                <div>
+                  <h3>Time Gaps</h3>
+                  <p>Choose between compressed sequence spacing or real elapsed time with dotted gap bridges.</p>
+                </div>
+                <div class="delta-trends-segmented-control" id="deltaTrendsCompressToggle">
+                  <button type="button" data-value="off">Real Time</button>
+                  <button type="button" data-value="on">Compressed</button>
+                </div>
+              </article>
+            </div>
+            <div class="filter-chips delta-trends-local-filter-chips" id="deltaTrendsLocalFilterChips"></div>
+          </section>
+
+          <section class="delta-trends-panel">
+            <div class="delta-trends-panel__header">
+              <div>
+                <p class="delta-trends-panel__eyebrow">Cross-Press Comparison</p>
+                <h2>Combined Delta Trend</h2>
+              </div>
+              <p class="delta-trends-panel__subtitle" id="deltaTrendsCombinedSubtitle">All selected presses in one view.</p>
+            </div>
+            <div class="delta-trends-chart-card">
+              <div id="deltaTrendsCombinedChart" class="delta-trends-chart"></div>
+            </div>
+            <div class="delta-trends-summary-card">
+              <div class="delta-trends-summary-card__header">
+                <div>
+                  <p class="delta-trends-panel__eyebrow">Press Summary</p>
+                  <h3>Combined Trend Stats</h3>
+                </div>
+                <div class="delta-trends-summary-card__actions">
+                  <p class="delta-trends-panel__subtitle">Filtered rollup by press for the same trend view shown above.</p>
+                  <button type="button" class="filters-clear-btn delta-trends-summary-toggle" id="deltaTrendsSummaryToggle" aria-expanded="false">Expand Table</button>
+                </div>
+              </div>
+              <div id="deltaTrendsCombinedTable" class="delta-trends-summary-table"></div>
+            </div>
+          </section>
+
+          <section class="delta-trends-panel">
+            <div class="delta-trends-panel__header">
+              <div>
+                <p class="delta-trends-panel__eyebrow">Press Detail</p>
+                <h2>Per-Press Delta Trends</h2>
+              </div>
+              <p class="delta-trends-panel__subtitle" id="deltaTrendsDetailSubtitle">Each selected press rendered with its own filtered delta view.</p>
+            </div>
+            <div id="deltaTrendsMachinePanels" class="delta-trends-machine-panels"></div>
+          </section>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/nav.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/rlm_delta_trends.js') }}"></script>
+</body>
+</html>

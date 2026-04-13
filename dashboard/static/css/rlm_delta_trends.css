@@ -1,0 +1,900 @@
+.rlm-delta-trends-page {
+  background:
+    radial-gradient(circle at top left, rgba(14, 165, 233, 0.08), transparent 32%),
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.08), transparent 28%),
+    linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.95));
+}
+
+body.dark-mode .rlm-delta-trends-page {
+  background:
+    radial-gradient(circle at top left, rgba(14, 165, 233, 0.14), transparent 30%),
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.14), transparent 26%),
+    linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(2, 6, 23, 0.96));
+}
+
+.rlm-delta-trends-app {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.delta-trends-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 5.5rem 1rem 1rem;
+  background: rgba(241, 245, 249, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.delta-trends-loading-overlay.hidden {
+  display: none;
+}
+
+.delta-trends-loading-overlay__dialog {
+  min-width: min(320px, 92vw);
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 1rem 1.15rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.96));
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.16);
+  color: var(--text-primary);
+}
+
+.delta-trends-loading-overlay__dialog p {
+  margin: 0;
+  font-size: 0.96rem;
+  font-weight: 600;
+}
+
+.delta-trends-loading-overlay__spinner {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 3px solid rgba(37, 99, 235, 0.16);
+  border-top-color: #2563eb;
+  animation: delta-trends-spin 0.8s linear infinite;
+  flex: 0 0 20px;
+}
+
+@keyframes delta-trends-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.delta-trends-filters {
+  margin-bottom: 0;
+}
+
+.delta-trends-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.delta-trends-filter-grid {
+  align-items: stretch;
+}
+
+.delta-trends-filter-card {
+  justify-content: center;
+}
+
+.delta-trends-selection-summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.45;
+}
+
+.delta-trends-local-filters,
+.delta-trends-selector-card,
+.delta-trends-panel,
+.delta-trends-chart-card,
+.delta-machine-panel {
+  background: linear-gradient(160deg, var(--surface) 0%, var(--surface-alt) 100%);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.08);
+}
+
+.delta-trends-local-filters {
+  padding: 1rem 1.15rem 1.15rem;
+}
+
+.delta-trends-local-filters__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.55rem;
+}
+
+.delta-trends-local-filters__eyebrow {
+  margin: 0 0 0.2rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--text-secondary);
+}
+
+.delta-trends-local-filters__header h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1.05rem;
+}
+
+.delta-trends-local-filters__subtitle {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.delta-trends-local-filter-grid {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1.35fr)
+    minmax(0, 1.7fr)
+    minmax(0, 1.7fr)
+    minmax(112px, 1fr);
+  align-items: stretch;
+  gap: 0.9rem;
+  margin-top: 0.95rem;
+}
+
+.delta-trends-local-filter-group {
+  justify-content: flex-start;
+  gap: 0.7rem;
+  padding: 0.9rem 1rem;
+}
+
+.delta-trends-local-filter-help {
+  display: block;
+  margin-top: 0.24rem;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.delta-trends-local-filter-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.delta-trends-local-filter-card {
+  justify-content: flex-end;
+}
+
+.delta-trends-local-filter-card .filters-clear-btn {
+  width: 100%;
+}
+
+.delta-trends-apply-btn {
+  background: linear-gradient(180deg, #2563eb, #1d4ed8);
+  border-color: rgba(29, 78, 216, 0.9);
+  color: #ffffff;
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.2);
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.delta-trends-apply-btn:hover {
+  background: linear-gradient(180deg, #1d4ed8, #1e40af);
+  border-color: #1e40af;
+  color: #ffffff;
+  box-shadow: 0 16px 30px rgba(29, 78, 216, 0.28);
+  transform: translateY(-1px);
+}
+
+.delta-trends-apply-btn:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.28);
+  outline-offset: 2px;
+}
+
+.delta-trends-local-filter-chips {
+  margin-top: 0.85rem;
+}
+
+.delta-trends-critical-controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin-top: 0.95rem;
+}
+
+.delta-trends-critical-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 0.95rem;
+  background: linear-gradient(180deg, rgba(255,255,255,0.86), rgba(248,250,252,0.92));
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.05);
+}
+
+.delta-trends-critical-card h3 {
+  margin: 0;
+  font-size: 0.98rem;
+  color: var(--text-primary);
+}
+
+.delta-trends-critical-card p {
+  margin: 0.2rem 0 0;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.delta-trends-segmented-control {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.delta-trends-segmented-control button {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 0.8rem;
+  background: rgba(248, 250, 252, 0.95);
+  color: var(--text-secondary);
+  font-weight: 700;
+  font-size: 0.86rem;
+  padding: 0.72rem 0.8rem;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.delta-trends-segmented-control button:hover {
+  border-color: rgba(37, 99, 235, 0.32);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.08);
+}
+
+.delta-trends-segmented-control button.is-selected {
+  background: linear-gradient(180deg, #60a5fa, #3b82f6);
+  border-color: rgba(59, 130, 246, 0.88);
+  color: #ffffff;
+  box-shadow: 0 14px 24px rgba(59, 130, 246, 0.2);
+}
+
+.delta-trends-segmented-control button:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.28);
+  outline-offset: 2px;
+}
+
+.delta-trends-selector-card {
+  padding: 1rem 1.1rem 1.15rem;
+}
+
+.delta-trends-global-filter-chips {
+  margin-top: 0.9rem;
+}
+
+.delta-trends-selector-card__header,
+.delta-trends-panel__header,
+.delta-machine-panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.delta-trends-selector-card__header {
+  margin-bottom: 1rem;
+}
+
+.delta-trends-selector-card__eyebrow,
+.delta-trends-panel__eyebrow,
+.delta-machine-panel__eyebrow {
+  margin: 0 0 0.2rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--text-secondary);
+}
+
+.delta-trends-selector-card__header h3,
+.delta-trends-panel__header h2,
+.delta-machine-panel__header h3 {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.delta-trends-selector-card__hint,
+.delta-trends-panel__subtitle,
+.delta-machine-panel__subtitle {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.delta-machine-panel__subtitle {
+  margin-top: 0.85rem;
+}
+
+.delta-machine-panel__timeline {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+}
+
+.delta-machine-panel__timeline-label {
+  margin: 0;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+}
+
+.delta-machine-panel__timeline-bar {
+  position: relative;
+  width: 100%;
+  min-height: 52px;
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+  background: linear-gradient(180deg, rgba(248,250,252,0.92), rgba(241,245,249,0.92));
+  overflow: visible;
+}
+
+.delta-machine-panel__timeline-segment {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 1%;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 0.74rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem 0.35rem;
+  cursor: default;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
+  z-index: 1;
+}
+
+.delta-machine-panel__timeline-segment:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 28px rgba(15, 23, 42, 0.16);
+  filter: saturate(1.05);
+  z-index: 4;
+}
+
+.delta-machine-panel__timeline-segment span {
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.delta-machine-panel__timeline-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+}
+
+.delta-machine-panel__timeline-tooltip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 12px);
+  transform: translate(-50%, 8px);
+  width: min(300px, 42vw);
+  min-width: 220px;
+  padding: 0.85rem 0.9rem;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(241, 245, 249, 0.96)),
+    linear-gradient(135deg, color-mix(in srgb, var(--timeline-accent, #2563eb) 12%, white), rgba(255,255,255,0.96));
+  color: var(--text-primary);
+  text-align: left;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s ease;
+}
+
+.delta-machine-panel__timeline-tooltip::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  width: 14px;
+  height: 14px;
+  background: inherit;
+  border-right: 1px solid rgba(148, 163, 184, 0.24);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.24);
+  rotate: 45deg;
+}
+
+.delta-machine-panel__timeline-segment:hover .delta-machine-panel__timeline-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translate(-50%, 0);
+}
+
+.delta-machine-panel__timeline-tooltip-eyebrow {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+
+.delta-machine-panel__timeline-tooltip-title {
+  margin-top: 0.2rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.delta-machine-panel__timeline-tooltip-time {
+  margin-top: 0.3rem;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.delta-machine-panel__timeline-tooltip-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.delta-machine-panel__timeline-tooltip-metric span {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.delta-machine-panel__timeline-tooltip-metric strong {
+  display: block;
+  margin-top: 0.12rem;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.delta-machine-panel__stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  justify-content: flex-end;
+}
+
+.delta-machine-panel__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 110px;
+  padding: 0.65rem 0.78rem;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 0.85rem;
+  background: linear-gradient(180deg, rgba(255,255,255,0.9), rgba(248,250,252,0.9));
+}
+
+.delta-machine-panel__stat strong {
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  line-height: 1.2;
+}
+
+.delta-machine-panel__stat small {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.delta-trends-machine-selector {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.9rem;
+}
+
+.delta-machine-select-card {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 0.95rem;
+  background: rgba(255, 255, 255, 0.72);
+  padding: 0.95rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.delta-machine-select-card.is-disabled {
+  opacity: 0.62;
+}
+
+.delta-machine-select-card__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.delta-machine-select-card__label {
+  display: flex;
+  gap: 0.7rem;
+  align-items: flex-start;
+  flex: 1 1 auto;
+  cursor: pointer;
+}
+
+.delta-machine-select-card__label input {
+  margin-top: 0.2rem;
+}
+
+.delta-machine-select-card__label strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.delta-machine-select-card__label span {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.delta-machine-select-card__expand {
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  background: rgba(248, 250, 252, 0.88);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.delta-machine-select-card__summary {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+}
+
+.delta-machine-select-card__jobs {
+  display: none;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding-top: 0.15rem;
+}
+
+.delta-machine-select-card.is-expanded .delta-machine-select-card__jobs {
+  display: flex;
+}
+
+.delta-machine-select-card__all {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 0.58rem 0.68rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(248,250,252,0.9));
+}
+
+.delta-machine-select-card__job-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 0.2rem;
+}
+
+.delta-machine-select-card__job {
+  display: flex;
+  gap: 0.4rem;
+  align-items: flex-start;
+  padding: 0.58rem 0.68rem;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: linear-gradient(180deg, rgba(255,255,255,0.88), rgba(248,250,252,0.9));
+  font-size: 0.88rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease, background 0.16s ease;
+}
+
+.delta-machine-select-card__job:hover,
+.delta-machine-select-card__all:hover {
+  border-color: rgba(37, 99, 235, 0.24);
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.07);
+  transform: translateY(-1px);
+}
+
+.delta-machine-select-card__job.is-selected {
+  border-color: rgba(37, 99, 235, 0.34);
+  background:
+    linear-gradient(180deg, rgba(219, 234, 254, 0.88), rgba(239, 246, 255, 0.98)),
+    linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.04));
+  box-shadow: 0 14px 28px rgba(37, 99, 235, 0.12);
+}
+
+.delta-machine-select-card__job input,
+.delta-machine-select-card__all input,
+.delta-machine-select-card__label input {
+  accent-color: #2563eb;
+  inline-size: 14px;
+  block-size: 14px;
+  margin: 0.08rem 0 0;
+  flex: 0 0 14px;
+}
+
+.delta-machine-select-card__job-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.16rem;
+}
+
+.delta-machine-select-card__job-copy strong {
+  font-size: 0.92rem;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+
+.delta-machine-select-card__job small {
+  display: block;
+  color: var(--text-secondary);
+  margin-top: 0.12rem;
+}
+
+.delta-trends-panel {
+  padding: 1rem 1.15rem 1.2rem;
+}
+
+.delta-trends-chart-card {
+  margin-top: 1rem;
+  padding: 0.55rem;
+}
+
+.delta-trends-chart-card--secondary {
+  padding: 0.95rem 0.95rem 0.65rem;
+}
+
+.delta-trends-chart-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.delta-trends-chart-card__header h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.delta-trends-chart-card__description {
+  margin: 0 0 0.35rem;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.delta-trends-summary-card {
+  margin-top: 1rem;
+  padding: 0.85rem 0.9rem 0.95rem;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 0.95rem;
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.delta-trends-summary-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.8rem;
+}
+
+.delta-trends-summary-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.delta-trends-summary-toggle {
+  background: linear-gradient(180deg, #2563eb, #1d4ed8);
+  border-color: rgba(29, 78, 216, 0.9);
+  color: #ffffff;
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.18);
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.delta-trends-summary-toggle:hover {
+  background: linear-gradient(180deg, #1d4ed8, #1e40af);
+  border-color: #1e40af;
+  color: #ffffff;
+  box-shadow: 0 16px 30px rgba(29, 78, 216, 0.26);
+  transform: translateY(-1px);
+}
+
+.delta-trends-summary-toggle:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.28);
+  outline-offset: 2px;
+}
+
+.delta-trends-summary-card__header h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.delta-trends-summary-table.is-collapsed {
+  display: none;
+}
+
+.delta-trends-summary-table table {
+  min-width: 980px;
+}
+
+.delta-trends-chart,
+.delta-machine-panel__chart {
+  min-height: 420px;
+}
+
+.delta-trends-machine-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.delta-machine-panel {
+  padding: 1rem 1.1rem 1.2rem;
+}
+
+.delta-machine-panel__chart-wrap {
+  margin-top: 0.9rem;
+}
+
+.delta-trends-empty {
+  padding: 1.4rem;
+  border: 1px dashed rgba(148, 163, 184, 0.4);
+  border-radius: 0.85rem;
+  background: rgba(248, 250, 252, 0.86);
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+body.dark-mode .delta-trends-critical-card,
+body.dark-mode .delta-machine-select-card,
+body.dark-mode .delta-trends-summary-card,
+body.dark-mode .delta-machine-panel__stat,
+body.dark-mode .delta-machine-panel__timeline-bar {
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.92), rgba(15, 23, 42, 0.9));
+  border-color: rgba(148, 163, 184, 0.18);
+  box-shadow: 0 14px 28px rgba(2, 6, 23, 0.34);
+}
+
+body.dark-mode .delta-trends-segmented-control button,
+body.dark-mode .delta-machine-select-card__expand,
+body.dark-mode .delta-machine-select-card__all,
+body.dark-mode .delta-machine-select-card__job,
+body.dark-mode .delta-trends-empty {
+  background: rgba(15, 23, 42, 0.88);
+  border-color: rgba(148, 163, 184, 0.22);
+  color: var(--text-secondary);
+}
+
+body.dark-mode .delta-trends-segmented-control button:hover,
+body.dark-mode .delta-machine-select-card__all:hover,
+body.dark-mode .delta-machine-select-card__job:hover,
+body.dark-mode .delta-machine-select-card__expand:hover {
+  border-color: rgba(59, 130, 246, 0.42);
+  color: var(--text-primary);
+  box-shadow: 0 12px 22px rgba(2, 6, 23, 0.3);
+}
+
+body.dark-mode .delta-machine-select-card__job.is-selected {
+  border-color: rgba(96, 165, 250, 0.46);
+  background:
+    linear-gradient(180deg, rgba(30, 64, 175, 0.38), rgba(15, 23, 42, 0.96)),
+    linear-gradient(135deg, rgba(37, 99, 235, 0.14), rgba(14, 165, 233, 0.08));
+  box-shadow: 0 14px 28px rgba(30, 64, 175, 0.18);
+}
+
+body.dark-mode .delta-trends-empty {
+  background: rgba(15, 23, 42, 0.86);
+}
+
+body.dark-mode .delta-trends-loading-overlay {
+  background: rgba(2, 6, 23, 0.66);
+}
+
+body.dark-mode .delta-trends-loading-overlay__dialog {
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.96));
+  border-color: rgba(148, 163, 184, 0.18);
+  box-shadow: 0 24px 52px rgba(2, 6, 23, 0.42);
+}
+
+body.dark-mode .delta-machine-panel__timeline-tooltip {
+  background:
+    linear-gradient(180deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.96)),
+    linear-gradient(135deg, color-mix(in srgb, var(--timeline-accent, #60a5fa) 12%, rgba(15, 23, 42, 0.98)), rgba(15,23,42,0.96));
+  border-color: rgba(148, 163, 184, 0.18);
+}
+
+@media (max-width: 900px) {
+  .delta-trends-header-actions,
+  .delta-trends-local-filters__header,
+  .delta-trends-summary-card__header,
+  .delta-trends-chart-card__header,
+  .delta-trends-selector-card__header,
+  .delta-trends-panel__header,
+  .delta-machine-panel__header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .delta-trends-header-actions .filters-clear-btn,
+  .delta-trends-header-actions .rlm-trend-gap-toggle {
+    width: 100%;
+  }
+
+  .delta-trends-machine-selector {
+    grid-template-columns: 1fr;
+  }
+
+  .delta-trends-local-filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .delta-trends-critical-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .delta-trends-chart,
+  .delta-machine-panel__chart {
+    min-height: 360px;
+  }
+
+  .delta-machine-panel__timeline {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

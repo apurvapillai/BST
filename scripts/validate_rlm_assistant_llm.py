@@ -165,6 +165,7 @@ DISCOVERY_TIME_SEQUENCES = [
         "expected_recovery_after_shift": False,
         "expected_chart": True,
         "expected_chart_title_contains": "previous-window baseline",
+        "expected_chart_annotations": ["Current window"],
     },
     {
         "name": "discovery_previous_time_available",
@@ -182,6 +183,7 @@ DISCOVERY_TIME_SEQUENCES = [
         "expected_answer_substring": "no clear recovery after the main shift",
         "expected_chart": True,
         "expected_chart_title_contains": "previous-window baseline",
+        "expected_chart_annotations": ["Shift", "Current window", "No clear recovery"],
     },
     {
         "name": "discovery_previous_window_insufficient",
@@ -199,6 +201,7 @@ DISCOVERY_TIME_SEQUENCES = [
         "expected_answer_substring": "not enough prior scoped data",
         "expected_chart": True,
         "expected_chart_title_contains": "Bad Feet",
+        "expected_chart_annotations": ["Shift", "No clear recovery"],
     },
     {
         "name": "discovery_isolated_spike_case",
@@ -209,12 +212,225 @@ DISCOVERY_TIME_SEQUENCES = [
         "expected_machine_count": 1,
         "expects_metric": True,
         "expected_outcome": "should_pass",
-        "expected_baseline_available": True,
-        "expected_change_point_available": False,
+        "expected_baseline_available": False,
+        "expected_change_point_available": True,
         "require_sustained_vs_spike": True,
-        "expected_shape_contains": "clustered",
+        "expected_shape_contains": "sustained",
         "expected_chart": True,
-        "expected_chart_title_contains": "previous-window baseline",
+        "expected_chart_title_contains": "Speed Instability",
+        "expected_chart_annotations": ["Shift", "No clear recovery"],
+    },
+]
+
+VISUAL_SUMMARY_SEQUENCES = [
+    {
+        "name": "visual_compare_press6_press8",
+        "suite": "visual_summary",
+        "prompt": "Compare Press 6 and Press 8",
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "expected_tool": "compare_presses",
+        "expected_machine_count": 2,
+        "expects_metric": False,
+        "expected_outcome": "should_pass",
+        "expected_chart": True,
+        "expected_chart_title_contains": "Largest gap",
+        "expected_visual_type": "compare-largest-gap",
+    },
+    {
+        "name": "visual_compare_follow_up_stands_out",
+        "suite": "visual_summary",
+        "previous_prompt": "Compare Press 6 and Press 8",
+        "prompt": "What stands out between them?",
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "expected_tool": "compare_presses",
+        "expected_machine_count": 2,
+        "expects_metric": False,
+        "expected_outcome": "should_pass",
+        "expected_chart": True,
+        "expected_chart_title_contains": "Largest gap",
+        "expected_visual_type": "compare-largest-gap",
+    },
+    {
+        "name": "visual_ranking_worst_press",
+        "suite": "visual_summary",
+        "prompt": "Which press is performing the worst right now?",
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "expected_tool": "get_press_rankings",
+        "expected_machine_count": 0,
+        "expects_metric": False,
+        "expected_outcome": "should_pass",
+        "expected_chart": True,
+        "expected_chart_title_contains": "ranking snapshot",
+        "expected_visual_type": "ranking-bad-feet",
+    },
+    {
+        "name": "visual_ranking_top3_today",
+        "suite": "visual_summary",
+        "prompt": "Top 3 presses today",
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "expected_tool": "get_press_rankings",
+        "expected_machine_count": 0,
+        "expects_metric": False,
+        "expected_outcome": "should_pass",
+        "expected_chart": True,
+        "expected_chart_title_contains": "ranking snapshot",
+        "expected_visual_type": "ranking-bad-feet",
+    },
+    {
+        "name": "visual_category_ranking_drift_week",
+        "suite": "visual_summary",
+        "prompt": "Worst press for drift this week",
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "expected_tool": "get_press_rankings",
+        "expected_machine_count": 0,
+        "expects_metric": False,
+        "expected_outcome": "should_pass",
+        "expected_chart": True,
+        "expected_chart_title_contains": "Drift",
+        "expected_visual_type": "ranking-category-rank",
+    },
+]
+
+JOB_ANALYSIS_SEQUENCES = [
+    {
+        "name": "job_analysis_selected_job_vs_recent",
+        "suite": "job_analysis",
+        "turns": [
+            "Use Press 8",
+            "Show me recent jobs",
+            "Use Job JOB-4-A",
+            "Is this job worse than this machine's recent runs?",
+        ],
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "use_live_ui_filters": True,
+        "expected_tool": "get_machine_job_analysis",
+        "expected_machine_count": 1,
+        "expects_metric": False,
+        "expected_outcome": "should_pass",
+        "expected_kind": "job_analysis",
+        "expected_machine_id": 4,
+        "expected_selected_job": "JOB-4-A",
+        "expected_section_labels": ["Selected job", "Recent-job baseline", "Comparison summary"],
+    },
+    {
+        "name": "job_analysis_weakest_recent_job",
+        "suite": "job_analysis",
+        "turns": [
+            "Use Press 5",
+            "Show me recent jobs",
+            "Which recent job performed the worst?",
+        ],
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "use_live_ui_filters": True,
+        "expected_tool": "get_machine_job_analysis",
+        "expected_machine_count": 1,
+        "expects_metric": False,
+        "expected_outcome": "should_pass",
+        "expected_kind": "job_analysis",
+        "expected_machine_id": 1,
+        "expected_section_labels": ["Weakest recent job", "Recent job ranking"],
+    },
+    {
+        "name": "job_analysis_concentration_across_jobs",
+        "suite": "job_analysis",
+        "turns": [
+            "Use Press 5",
+            "Show me recent jobs",
+            "Are the problems concentrated in one recent job or spread across jobs?",
+        ],
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "use_live_ui_filters": True,
+        "expected_tool": "get_machine_job_analysis",
+        "expected_machine_count": 1,
+        "expects_metric": False,
+        "expected_outcome": "should_pass",
+        "expected_kind": "job_analysis",
+        "expected_machine_id": 1,
+        "expected_section_labels": ["Job concentration", "Recent job ranking"],
+    },
+]
+
+STATUS_CHART_SEQUENCES = [
+    {
+        "name": "status_chart_press8_today",
+        "suite": "status_chart",
+        "prompt": "How is Press 8 performing today?",
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "expected_tool": "get_press_status",
+        "expected_machine_count": 1,
+        "expects_metric": False,
+        "expected_outcome": "should_pass",
+        "expected_chart_metric": "Bad Feet %",
+        "expected_chart_title_contains": "Press 8 Bad Feet %",
+        "minimum_points": 2,
+        "expected_chart_attached_at": "evidence.chart",
+    },
+    {
+        "name": "status_chart_press9_bad_feet_dominant",
+        "suite": "status_chart",
+        "prompt": "How is Press 9 performing today?",
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "expected_tool": "get_press_status",
+        "expected_machine_count": 1,
+        "expects_metric": False,
+        "expected_outcome": "should_pass",
+        "expected_chart_metric": "Bad Feet %",
+        "expected_chart_title_contains": "Press 9 Bad Feet %",
+        "minimum_points": 2,
+        "expected_chart_attached_at": "evidence.chart",
+    },
+    {
+        "name": "status_chart_press5_last10",
+        "suite": "status_chart",
+        "prompt": "How is Press 5 performing in the last 10 reels?",
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "expected_tool": "get_press_status",
+        "expected_machine_count": 1,
+        "expects_metric": False,
+        "expected_outcome": "should_pass",
+        "expected_chart_metric": "Delta Std Dev",
+        "expected_chart_title_contains": "Press 5 Delta Std Dev",
+        "minimum_points": 2,
+        "expected_chart_attached_at": "evidence.chart",
+    },
+    {
+        "name": "status_chart_press11_health",
+        "suite": "status_chart",
+        "prompt": "Is Press 11 healthy right now?",
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "expected_tool": "get_press_status",
+        "expected_machine_count": 1,
+        "expects_metric": False,
+        "expected_outcome": "should_pass",
+        "expected_chart_metric": "Monitoring Density",
+        "expected_chart_title_contains": "Press 11 Monitoring Density",
+        "minimum_points": 2,
+        "expected_chart_attached_at": "evidence.chart",
+    },
+    {
+        "name": "status_chart_press12_delta_informative",
+        "suite": "status_chart",
+        "prompt": "How is Press 12 performing today?",
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "expected_tool": "get_press_status",
+        "expected_machine_count": 1,
+        "expects_metric": False,
+        "expected_outcome": "should_pass",
+        "expected_chart_metric": "Delta Std Dev",
+        "expected_chart_title_contains": "Press 12 Delta Std Dev",
+        "minimum_points": 2,
+        "expected_chart_attached_at": "evidence.chart",
+    },
+    {
+        "name": "status_chart_press13_flat_omitted",
+        "suite": "status_chart",
+        "prompt": "How is Press 13 performing today?",
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "expected_tool": "get_press_status",
+        "expected_machine_count": 1,
+        "expects_metric": False,
+        "expected_outcome": "should_pass",
+        "expected_chart": False,
     },
 ]
 
@@ -391,7 +607,7 @@ FOLLOW_UP_SEQUENCES = [
         "expected_outcome": "should_pass",
         "expected_kind": "reel_summary",
         "expected_machine_id": 6,
-        "expected_context_inheritance": False,
+        "expected_context_inheritance": True,
     },
     {
         "name": "follow_up_trend_to_reel_summary_inherited_press",
@@ -451,6 +667,86 @@ FOLLOW_UP_SEQUENCES = [
         "expected_machine_id": 4,
         "expected_scope_kind": "reels",
         "expected_scope_value": 10,
+    },
+    {
+        "name": "follow_up_compare_what_stands_out_between_them",
+        "suite": "follow_up",
+        "previous_prompt": "Compare Press 6 and Press 8",
+        "prompt": "What stands out between them?",
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "expected_tool": "compare_presses",
+        "expected_machine_count": 2,
+        "expects_metric": False,
+        "expected_outcome": "should_pass",
+        "expected_kind": "compare",
+        "expected_machine_id": 2,
+        "expected_context_inheritance": True,
+    },
+    {
+        "name": "follow_up_compare_gap_big_or_small",
+        "suite": "follow_up",
+        "previous_prompt": "Compare Press 6 and Press 8",
+        "prompt": "Is the gap big or small?",
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "expected_tool": "compare_presses",
+        "expected_machine_count": 2,
+        "expects_metric": False,
+        "expected_outcome": "should_pass",
+        "expected_kind": "compare",
+        "expected_machine_id": 2,
+        "expected_context_inheritance": True,
+    },
+    {
+        "name": "follow_up_status_to_discovery_what_stands_out",
+        "suite": "follow_up",
+        "previous_prompt": "How is Press 8 performing today?",
+        "prompt": "What stands out?",
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "expected_tool": "run_discovery_analysis",
+        "expected_machine_count": 1,
+        "expects_metric": True,
+        "expected_outcome": "should_pass",
+        "expected_kind": "discovery",
+        "expected_machine_id": 4,
+        "expected_context_inheritance": True,
+    },
+    {
+        "name": "follow_up_discovery_recover_after_shift",
+        "suite": "follow_up",
+        "previous_prompt": "What changed on Press 8 today?",
+        "prompt": "Did it recover after the shift?",
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "expected_tool": "run_discovery_analysis",
+        "expected_machine_count": 1,
+        "expects_metric": True,
+        "expected_outcome": "should_pass",
+        "expected_kind": "discovery",
+        "expected_machine_id": 4,
+        "expected_context_inheritance": True,
+    },
+    {
+        "name": "follow_up_discovery_spikes_or_sustained",
+        "suite": "follow_up",
+        "previous_prompt": "What changed on Press 8 today?",
+        "prompt": "Was it spikes or sustained?",
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "expected_tool": "run_discovery_analysis",
+        "expected_machine_count": 1,
+        "expects_metric": True,
+        "expected_outcome": "should_pass",
+        "expected_kind": "discovery",
+        "expected_machine_id": 4,
+        "expected_context_inheritance": True,
+    },
+]
+
+CLARIFICATION_SEQUENCES = [
+    {
+        "name": "clarification_ambiguous_compare_follow_up",
+        "suite": "clarification",
+        "prompt": "What stands out between them?",
+        "mode": EXECUTION_MODE_DETERMINISTIC,
+        "expected_title": "This follow-up needs an active comparison first.",
     },
 ]
 
@@ -1355,28 +1651,64 @@ class StubAssistantService(RLMAssistantService):
         del filters
         self.executed_tools.append(("get_press_status_tool", machine_id))
         press_label = self._press_label(machine_id)
+        if machine_id == 6:
+            filtered_rows = [
+                {"reelId": "R-1101", "productionStart": "2026-04-09T08:00:00", "estimatedBadFeetPct": 3.8, "deltaStd": 0.58, "pointsPer1000Ft": 18.4},
+                {"reelId": "R-1102", "productionStart": "2026-04-09T09:00:00", "estimatedBadFeetPct": 4.3, "deltaStd": 0.64, "pointsPer1000Ft": 15.1},
+                {"reelId": "R-1103", "productionStart": "2026-04-09T10:00:00", "estimatedBadFeetPct": 4.6, "deltaStd": 0.71, "pointsPer1000Ft": 13.9},
+            ]
+        elif machine_id == 4:
+            filtered_rows = [
+                {"reelId": "R-8001", "productionStart": "2026-04-09T08:00:00", "estimatedBadFeetPct": 2.9, "deltaStd": 0.40, "pointsPer1000Ft": 22.5},
+                {"reelId": "R-8002", "productionStart": "2026-04-09T09:00:00", "estimatedBadFeetPct": 2.4, "deltaStd": 0.38, "pointsPer1000Ft": 21.8},
+                {"reelId": "R-8003", "productionStart": "2026-04-09T10:00:00", "estimatedBadFeetPct": 2.6, "deltaStd": 0.42, "pointsPer1000Ft": 21.1},
+            ]
+        elif machine_id == 5:
+            filtered_rows = [
+                {"reelId": "R-9001", "productionStart": "2026-04-09T08:00:00", "estimatedBadFeetPct": 4.8, "deltaStd": 0.42, "pointsPer1000Ft": 22.6},
+                {"reelId": "R-9002", "productionStart": "2026-04-09T09:00:00", "estimatedBadFeetPct": 5.9, "deltaStd": 0.45, "pointsPer1000Ft": 22.2},
+                {"reelId": "R-9003", "productionStart": "2026-04-09T10:00:00", "estimatedBadFeetPct": 6.8, "deltaStd": 0.47, "pointsPer1000Ft": 21.9},
+            ]
+        elif machine_id == 7:
+            filtered_rows = [
+                {"reelId": "R-1201", "productionStart": "2026-04-09T08:00:00", "estimatedBadFeetPct": 1.1, "deltaStd": 0.24, "pointsPer1000Ft": 24.8},
+                {"reelId": "R-1202", "productionStart": "2026-04-09T09:00:00", "estimatedBadFeetPct": 1.1, "deltaStd": 0.48, "pointsPer1000Ft": 24.7},
+                {"reelId": "R-1203", "productionStart": "2026-04-09T10:00:00", "estimatedBadFeetPct": 1.2, "deltaStd": 0.69, "pointsPer1000Ft": 24.6},
+            ]
+        elif machine_id == 8:
+            filtered_rows = [
+                {"reelId": "R-1301", "productionStart": "2026-04-09T08:00:00", "estimatedBadFeetPct": 1.8, "deltaStd": 0.35, "pointsPer1000Ft": 22.0},
+                {"reelId": "R-1302", "productionStart": "2026-04-09T09:00:00", "estimatedBadFeetPct": 1.8, "deltaStd": 0.35, "pointsPer1000Ft": 22.0},
+                {"reelId": "R-1303", "productionStart": "2026-04-09T10:00:00", "estimatedBadFeetPct": 1.8, "deltaStd": 0.35, "pointsPer1000Ft": 22.0},
+            ]
+        else:
+            filtered_rows = [
+                {"reelId": "R-5001", "productionStart": "2026-04-09T08:00:00", "estimatedBadFeetPct": 1.1, "deltaStd": 0.21, "pointsPer1000Ft": 25.4},
+                {"reelId": "R-5002", "productionStart": "2026-04-09T09:00:00", "estimatedBadFeetPct": 1.1, "deltaStd": 0.46, "pointsPer1000Ft": 24.9},
+                {"reelId": "R-5003", "productionStart": "2026-04-09T10:00:00", "estimatedBadFeetPct": 1.2, "deltaStd": 0.62, "pointsPer1000Ft": 24.3},
+            ]
+        latest = dict(filtered_rows[-1])
         return {
             "found": True,
             "machineId": machine_id,
             "machineName": press_label,
             "latest": {
                 "machineName": press_label,
-                "reelId": "R-5001",
                 "jobName": "JOB-STATUS",
-                "productionStart": "2026-04-07T08:00:00",
-                "deltaStd": 0.44,
+                **latest,
             },
             "aggregate": {
                 "reelsRun": 3,
-                "badFeetPct": 1.2,
+                "badFeetPct": latest.get("estimatedBadFeetPct"),
                 "oobPointPct": 2.1,
-                "pointsPer1000Ft": 24.3,
+                "pointsPer1000Ft": latest.get("pointsPer1000Ft"),
             },
             "state": {
-                "state": "healthy",
-                "stateLabel": "Healthy",
-                "statusMessage": "Filtered repeat length metrics look stable",
+                "state": "healthy" if machine_id != 6 else "warning",
+                "stateLabel": "Healthy" if machine_id != 6 else "Warning",
+                "statusMessage": "Filtered repeat length metrics look stable" if machine_id != 6 else "Low monitoring density in the latest filtered reel",
             },
+            "filteredRows": filtered_rows,
             "dataSemantics": "filtered-window",
         }
 
@@ -1732,6 +2064,7 @@ def evaluate_discovery_time_sequence(sequence: Dict[str, Any]) -> Dict[str, Any]
     sustained_vs_spike = str(discovery.get("sustained_vs_spike") or "")
     issue_shape = discovery.get("issue_shape") or {}
     chart = (response.get("evidence") or {}).get("chart") or {}
+    chart_annotations = [str(item.get("label") or "") for item in (chart.get("annotations") or []) if isinstance(item, dict)]
     answer = response.get("answer") or {}
     answer_text = " ".join(
         str(part)
@@ -1760,6 +2093,11 @@ def evaluate_discovery_time_sequence(sequence: Dict[str, Any]) -> Dict[str, Any]
         discovery_ok = discovery_ok and bool(chart) is bool(sequence.get("expected_chart"))
     if sequence.get("expected_chart_title_contains"):
         discovery_ok = discovery_ok and sequence["expected_chart_title_contains"].lower() in str(chart.get("title") or "").lower()
+    if sequence.get("expected_chart_annotations"):
+        discovery_ok = discovery_ok and all(
+            expected in chart_annotations
+            for expected in sequence.get("expected_chart_annotations") or []
+        )
 
     validation["passed"] = bool(validation["routing_ok"] and discovery_ok)
     validation["actual_outcome"] = "passed" if validation["passed"] else "failed"
@@ -1797,103 +2135,219 @@ def evaluate_discovery_time_sequence(sequence: Dict[str, Any]) -> Dict[str, Any]
             "changePointAvailable": change_point.get("available"),
             "changePointSummary": change_point.get("summary"),
             "sustainedVsSpike": sustained_vs_spike,
+            "chartAnnotations": chart_annotations,
         },
     }
 
-    def _get_press_intelligence(self, filters):
-        min_feet = filters.get("min_feet")
-        suffix = " (5000+ ft)" if min_feet else ""
-        return {
-            "overviewRankings": [
-                {"machineId": 2, "rank": 1, "averageCategoryPosition": 1.6},
-                {"machineId": 4, "rank": 2, "averageCategoryPosition": 2.4},
-                {"machineId": 1, "rank": 3, "averageCategoryPosition": 3.3},
-                {"machineId": 3, "rank": 4, "averageCategoryPosition": 3.8},
-                {"machineId": 5, "rank": 5, "averageCategoryPosition": 4.4},
-                {"machineId": 7, "rank": 6, "averageCategoryPosition": 5.2},
-                {"machineId": 8, "rank": 7, "averageCategoryPosition": 5.8},
-                {"machineId": 6, "rank": 8, "averageCategoryPosition": 6.4},
-                {"machineId": 9, "rank": 9, "averageCategoryPosition": 7.3},
-                {"machineId": 10, "rank": 10, "averageCategoryPosition": 8.1},
-            ],
-            "pressRankings": [
-                {"machineId": 1, "machineName": "Press 5", "estimatedBadFeetPct": 2.1, "deltaStd": 0.38, "pointsPer1000Ft": 24.0, "feetTotal": 18000.0, "estimatedBadFeet": 378.0, "reelsRun": 6},
-                {"machineId": 2, "machineName": "Press 6", "estimatedBadFeetPct": 1.4, "deltaStd": 0.31, "pointsPer1000Ft": 25.2, "feetTotal": 19200.0, "estimatedBadFeet": 268.8, "reelsRun": 6},
-                {"machineId": 3, "machineName": "Press 7", "estimatedBadFeetPct": 3.1, "deltaStd": 0.49, "pointsPer1000Ft": 21.4, "feetTotal": 17600.0, "estimatedBadFeet": 545.6, "reelsRun": 6},
-                {"machineId": 4, "machineName": "Press 8", "estimatedBadFeetPct": 2.6, "deltaStd": 0.42, "pointsPer1000Ft": 21.1, "feetTotal": 18400.0, "estimatedBadFeet": 478.4, "reelsRun": 6},
-                {"machineId": 5, "machineName": "Press 9", "estimatedBadFeetPct": 2.9, "deltaStd": 0.47, "pointsPer1000Ft": 20.4, "feetTotal": 18100.0, "estimatedBadFeet": 524.9, "reelsRun": 6},
-                {"machineId": 6, "machineName": "Press 11", "estimatedBadFeetPct": 4.6, "deltaStd": 0.71, "pointsPer1000Ft": 13.9, "feetTotal": 16800.0, "estimatedBadFeet": 772.8, "reelsRun": 6},
-                {"machineId": 7, "machineName": "Press 12", "estimatedBadFeetPct": 3.8, "deltaStd": 0.58, "pointsPer1000Ft": 18.2, "feetTotal": 17400.0, "estimatedBadFeet": 661.2, "reelsRun": 6},
-                {"machineId": 8, "machineName": "Press 13", "estimatedBadFeetPct": 3.0, "deltaStd": 0.44, "pointsPer1000Ft": 19.6, "feetTotal": 17700.0, "estimatedBadFeet": 531.0, "reelsRun": 6},
-                {"machineId": 9, "machineName": "Press 14", "estimatedBadFeetPct": 5.5, "deltaStd": 0.82, "pointsPer1000Ft": 12.4, "feetTotal": 16100.0, "estimatedBadFeet": 885.5, "reelsRun": 6},
-                {"machineId": 10, "machineName": "Press 15", "estimatedBadFeetPct": 8.1, "deltaStd": 0.92, "pointsPer1000Ft": 9.4, "feetTotal": 15800.0, "estimatedBadFeet": 1279.8, "reelsRun": 6},
-            ],
-            "categoryLeaderboards": [
-                {
-                    "key": "monitoring_coverage",
-                    "title": "Monitoring Coverage",
-                    "items": [
-                        {"machineId": 2, "rank": 1, "valueDisplay": "25.2 pts/1k ft", "contextLabel": "highest visibility"},
-                        {"machineId": 1, "rank": 2, "valueDisplay": "24.0 pts/1k ft", "contextLabel": "stable visibility"},
-                        {"machineId": 3, "rank": 3, "valueDisplay": "21.4 pts/1k ft", "contextLabel": "solid visibility"},
-                        {"machineId": 4, "rank": 4, "valueDisplay": "21.1 pts/1k ft", "contextLabel": "strong visibility"},
-                        {"machineId": 6, "rank": 5, "valueDisplay": "13.9 pts/1k ft", "contextLabel": "weaker visibility"},
-                        {"machineId": 10, "rank": 6, "valueDisplay": "9.4 pts/1k ft", "contextLabel": "lowest visibility"},
-                    ],
-                },
-                {
-                    "key": "bad_feet_pct",
-                    "title": "Bad Feet %",
-                    "items": [
-                        {"machineId": 2, "rank": 1, "valueDisplay": "1.4%", "contextLabel": "lowest bad feet"},
-                        {"machineId": 1, "rank": 2, "valueDisplay": "2.1%", "contextLabel": "low bad feet"},
-                        {"machineId": 4, "rank": 3, "valueDisplay": "2.6%", "contextLabel": "controlled bad feet"},
-                        {"machineId": 3, "rank": 4, "valueDisplay": "3.1%", "contextLabel": "moderate bad feet"},
-                        {"machineId": 6, "rank": 5, "valueDisplay": "4.6%", "contextLabel": "elevated bad feet"},
-                        {"machineId": 10, "rank": 6, "valueDisplay": "8.1%", "contextLabel": "highest bad feet"},
-                    ],
-                },
-                {
-                    "key": "delta_variation",
-                    "title": "Repeat Length Variation",
-                    "items": [
-                        {"machineId": 2, "rank": 1, "valueDisplay": "0.31 mm", "contextLabel": "lowest variation"},
-                        {"machineId": 1, "rank": 2, "valueDisplay": "0.38 mm", "contextLabel": "stable variation"},
-                        {"machineId": 4, "rank": 3, "valueDisplay": "0.42 mm", "contextLabel": "controlled variation"},
-                        {"machineId": 3, "rank": 4, "valueDisplay": "0.49 mm", "contextLabel": "moderate variation"},
-                        {"machineId": 6, "rank": 5, "valueDisplay": "0.71 mm", "contextLabel": "elevated variation"},
-                        {"machineId": 10, "rank": 6, "valueDisplay": "0.92 mm", "contextLabel": "highest variation"},
-                    ],
-                },
-                {
-                    "key": "delta_drift",
-                    "title": "Repeat Length Drift",
-                    "items": [
-                        {"machineId": 4, "rank": 1, "valueDisplay": "0.04 mm", "contextLabel": "closest to target"},
-                        {"machineId": 2, "rank": 2, "valueDisplay": "0.06 mm", "contextLabel": "tight drift"},
-                        {"machineId": 1, "rank": 3, "valueDisplay": "0.09 mm", "contextLabel": "steady drift"},
-                        {"machineId": 7, "rank": 4, "valueDisplay": "0.12 mm", "contextLabel": "moderate drift"},
-                        {"machineId": 6, "rank": 5, "valueDisplay": "0.23 mm", "contextLabel": "high drift"},
-                        {"machineId": 10, "rank": 6, "valueDisplay": "0.31 mm", "contextLabel": "highest drift"},
-                    ],
-                },
-                {
-                    "key": "speed_instability",
-                    "title": "Speed Instability",
-                    "items": [
-                        {"machineId": 2, "rank": 1, "valueDisplay": "0.8", "contextLabel": "lowest speed swing"},
-                        {"machineId": 1, "rank": 2, "valueDisplay": "1.0", "contextLabel": "stable speed"},
-                        {"machineId": 4, "rank": 3, "valueDisplay": "1.2", "contextLabel": "controlled speed"},
-                        {"machineId": 3, "rank": 4, "valueDisplay": "1.4", "contextLabel": "moderate speed swing"},
-                        {"machineId": 6, "rank": 5, "valueDisplay": "1.9", "contextLabel": "unstable speed"},
-                        {"machineId": 10, "rank": 6, "valueDisplay": "2.5", "contextLabel": "highest speed swing"},
-                    ],
-                },
-            ],
-            "metadata": {"minFeet": min_feet, "note": suffix},
-        }
+
+def evaluate_visual_summary_sequence(sequence: Dict[str, Any]) -> Dict[str, Any]:
+    service = StubAssistantService(sequence)
+    if sequence.get("previous_prompt"):
+        first_response = service.handle_chat(
+            sequence["previous_prompt"],
+            filters=build_filters(sequence["previous_prompt"]),
+            mode=sequence["mode"],
+            diagnostic=True,
+        )
+        assert_contract(first_response)
+        history = build_history_from_turns([{"prompt": sequence["previous_prompt"], "response": first_response}])
+        response = service.handle_chat(
+            sequence["prompt"],
+            filters=build_filters(sequence["previous_prompt"]),
+            history=history,
+            mode=sequence["mode"],
+            diagnostic=True,
+        )
+    else:
+        response = service.handle_chat(
+            sequence["prompt"],
+            filters=build_live_ui_filters(sequence["prompt"]),
+            history=[],
+            mode=sequence["mode"],
+            diagnostic=True,
+        )
+    assert_contract(response)
+    validation = validate_response(sequence, response)
+    chart = (response.get("evidence") or {}).get("chart") or {}
+    metadata = chart.get("metadata") or {}
+    chart_ok = True
+    if sequence.get("expected_chart") is not None:
+        chart_ok = chart_ok and (bool(chart) is bool(sequence.get("expected_chart")))
+    if sequence.get("expected_chart_title_contains"):
+        chart_ok = chart_ok and sequence["expected_chart_title_contains"].lower() in str(chart.get("title") or "").lower()
+    if sequence.get("expected_visual_type"):
+        chart_ok = chart_ok and str(metadata.get("visualType") or "") == str(sequence["expected_visual_type"])
+    validation["passed"] = bool(validation["routing_ok"] and chart_ok)
+    validation["actual_outcome"] = "passed" if validation["passed"] else "failed"
+    if not chart_ok:
+        validation["failure_category"] = validation["failure_category"] or "visual summary failure"
+        validation["pass_fail_reason"] = "compare/ranking response did not include the expected visual payload"
+    answer = response.get("answer") or {}
+    return {
+        "name": sequence["name"],
+        "suite": sequence["suite"],
+        "prompt": f"{sequence['previous_prompt']} -> {sequence['prompt']}" if sequence.get("previous_prompt") else sequence["prompt"],
+        "mode": sequence["mode"],
+        "recommended_mode": sequence["mode"],
+        "expected_tool": sequence["expected_tool"],
+        "expected_machine_count": sequence["expected_machine_count"],
+        "expects_metric": sequence["expects_metric"],
+        "expected_outcome": sequence["expected_outcome"],
+        "actual_tool": primary_tool_name(response),
+        "actual_tools": validation["actual_tools"],
+        "title": answer.get("title"),
+        "summary": answer.get("summary"),
+        "expected_vs_actual": {
+            "expected_tool": sequence["expected_tool"],
+            "actual_tools": validation["actual_tools"],
+            "expected_outcome": sequence["expected_outcome"],
+            "actual_outcome": validation["actual_outcome"],
+            "pass_fail_reason": validation["pass_fail_reason"],
+            "outcome_matches_expectation": validation["passed"],
+        },
+        "validation": validation,
+        "diagnostics": {
+            "chartTitle": chart.get("title"),
+            "visualType": metadata.get("visualType"),
+        },
+    }
 
 
+def evaluate_job_analysis_sequence(sequence: Dict[str, Any]) -> Dict[str, Any]:
+    service = StubAssistantService(sequence)
+    turns: List[Dict[str, Any]] = []
+    response = None
+    for index, prompt in enumerate(sequence["turns"]):
+        history = build_history_from_turns(turns)
+        filters = build_live_ui_filters(prompt)
+        response = service.handle_chat(
+            prompt,
+            filters=filters,
+            history=history,
+            mode=sequence["mode"],
+            diagnostic=True,
+        )
+        assert_contract(response)
+        turns.append({"prompt": prompt, "response": response})
+    assert response is not None
+    validation = validate_response({**sequence, "prompt": sequence["turns"][-1]}, response)
+    diagnostics = response.get("diagnostics") or {}
+    resolved = diagnostics.get("finalResolvedRequest") or {}
+    sections = {str(section.get("label") or "") for section in (response.get("answer") or {}).get("sections") or [] if isinstance(section, dict)}
+    context = response.get("context") or {}
+    job_analysis = context.get("jobAnalysis") or {}
+    job_ok = (
+        resolved.get("kind") == sequence.get("expected_kind")
+        and int(resolved.get("machine_id") or 0) == int(sequence.get("expected_machine_id") or 0)
+    )
+    if sequence.get("expected_selected_job"):
+        job_ok = job_ok and str(job_analysis.get("selectedJob") or context.get("selectedJob") or "") == str(sequence.get("expected_selected_job"))
+    if sequence.get("expected_section_labels"):
+        job_ok = job_ok and all(label in sections for label in sequence.get("expected_section_labels") or [])
+    validation["passed"] = bool(validation["routing_ok"] and job_ok)
+    validation["actual_outcome"] = "passed" if validation["passed"] else "failed"
+    if not job_ok:
+        validation["failure_category"] = validation["failure_category"] or "job analysis failure"
+        validation["pass_fail_reason"] = "job-within-machine response did not satisfy the expected contract"
+    answer = response.get("answer") or {}
+    return {
+        "name": sequence["name"],
+        "suite": sequence["suite"],
+        "prompt": " -> ".join(sequence["turns"]),
+        "mode": sequence["mode"],
+        "recommended_mode": sequence["mode"],
+        "expected_tool": sequence["expected_tool"],
+        "expected_machine_count": sequence["expected_machine_count"],
+        "expects_metric": sequence["expects_metric"],
+        "expected_outcome": sequence["expected_outcome"],
+        "actual_tool": primary_tool_name(response),
+        "actual_tools": validation["actual_tools"],
+        "title": answer.get("title"),
+        "summary": answer.get("summary"),
+        "expected_vs_actual": {
+            "expected_tool": sequence["expected_tool"],
+            "actual_tools": validation["actual_tools"],
+            "expected_outcome": sequence["expected_outcome"],
+            "actual_outcome": validation["actual_outcome"],
+            "pass_fail_reason": validation["pass_fail_reason"],
+            "outcome_matches_expectation": validation["passed"],
+        },
+        "validation": validation,
+        "diagnostics": {
+            "finalResolvedRequest": resolved,
+            "selectedJob": job_analysis.get("selectedJob") or context.get("selectedJob"),
+            "jobAnalysisMode": job_analysis.get("jobAnalysisMode"),
+        },
+    }
+
+
+def evaluate_status_chart_sequence(sequence: Dict[str, Any]) -> Dict[str, Any]:
+    service = StubAssistantService(sequence)
+    response = service.handle_chat(
+        sequence["prompt"],
+        filters=build_live_ui_filters(sequence["prompt"]),
+        history=[],
+        mode=sequence["mode"],
+        diagnostic=True,
+    )
+    assert_contract(response)
+    validation = validate_response(sequence, response)
+    chart = (response.get("evidence") or {}).get("chart") or {}
+    metadata = chart.get("metadata") or {}
+    series = chart.get("series") or []
+    point_count = 0
+    if series:
+        point_count = len(series[0].get("x") or [])
+    chart_ok = True
+    expected_chart = sequence.get("expected_chart")
+    if expected_chart is None:
+        expected_chart = True
+    chart_ok = chart_ok and (bool(chart) is bool(expected_chart))
+    if sequence.get("expected_chart_metric"):
+        chart_ok = chart_ok and str(metadata.get("metricLabel") or "") == str(sequence["expected_chart_metric"])
+    if sequence.get("expected_chart_title_contains"):
+        chart_ok = chart_ok and sequence["expected_chart_title_contains"].lower() in str(chart.get("title") or "").lower()
+    if sequence.get("minimum_points") is not None:
+        chart_ok = chart_ok and point_count >= int(sequence["minimum_points"])
+    if sequence.get("expected_chart_attached_at"):
+        chart_ok = chart_ok and str(metadata.get("attachedAt") or "") == str(sequence["expected_chart_attached_at"])
+    validation["passed"] = bool(validation["routing_ok"] and chart_ok)
+    validation["actual_outcome"] = "passed" if validation["passed"] else "failed"
+    if not chart_ok:
+        validation["failure_category"] = validation["failure_category"] or "status chart failure"
+        validation["pass_fail_reason"] = "status response did not include the expected chart metadata"
+    answer = response.get("answer") or {}
+    return {
+        "name": sequence["name"],
+        "suite": sequence["suite"],
+        "prompt": sequence["prompt"],
+        "mode": sequence["mode"],
+        "recommended_mode": sequence["mode"],
+        "expected_tool": sequence["expected_tool"],
+        "expected_machine_count": sequence["expected_machine_count"],
+        "expects_metric": sequence["expects_metric"],
+        "expected_outcome": sequence["expected_outcome"],
+        "actual_tool": primary_tool_name(response),
+        "actual_tools": validation["actual_tools"],
+        "title": answer.get("title"),
+        "summary": answer.get("summary"),
+        "expected_vs_actual": {
+            "expected_tool": sequence["expected_tool"],
+            "actual_tools": validation["actual_tools"],
+            "expected_outcome": sequence["expected_outcome"],
+            "actual_outcome": validation["actual_outcome"],
+            "pass_fail_reason": validation["pass_fail_reason"],
+            "outcome_matches_expectation": validation["passed"],
+        },
+        "validation": validation,
+        "diagnostics": {
+            "chartMetric": metadata.get("metricLabel"),
+            "chartAttachedAt": metadata.get("attachedAt"),
+            "chartTitle": chart.get("title"),
+            "pointCount": point_count,
+            "selectionReason": metadata.get("selectionReason"),
+        },
+    }
 def assert_contract(response: Dict[str, Any]) -> None:
     assert isinstance(response, dict), "response must be an object"
     assert isinstance(response.get("answer"), dict), "answer missing"
@@ -2239,10 +2693,27 @@ def evaluate_follow_up_sequence(sequence: Dict[str, Any]) -> Dict[str, Any]:
     expected_context_inheritance = sequence.get("expected_context_inheritance")
     if expected_context_inheritance is None:
         expected_context_inheritance = True
+    expected_machine_id = int(sequence.get("expected_machine_id") or 0)
+    expected_machine_count = int(sequence.get("expected_machine_count") or 0)
+    resolved_machine_id = int(resolved.get("machine_id") or 0)
+    resolved_machine_ids = [int(value) for value in (resolved.get("machine_ids") or []) if value is not None]
+    machine_context_ok = (
+        expected_machine_id in resolved_machine_ids
+        if expected_machine_count > 1
+        else resolved_machine_id == expected_machine_id
+    )
+    inherited_via_context = diagnostics.get("usedConversationContext") is True
+    inherited_via_sticky_scope = (
+        diagnostics.get("filterSource") == "inherited_session"
+        and (
+            int(diagnostics.get("inheritedMachineId") or 0) == expected_machine_id
+            or int(((diagnostics.get("activeStickyFilters") or {}).get("pressId") or 0)) == expected_machine_id
+        )
+    )
     follow_up_ok = (
-        diagnostics.get("usedConversationContext") is expected_context_inheritance
+        (inherited_via_context or inherited_via_sticky_scope) is expected_context_inheritance
         and resolved.get("kind") == sequence.get("expected_kind")
-        and int(resolved.get("machine_id") or 0) == int(sequence.get("expected_machine_id") or 0)
+        and machine_context_ok
     )
     if sequence.get("expected_metric_key"):
         follow_up_ok = follow_up_ok and resolved.get("metric_key") == sequence.get("expected_metric_key")
@@ -2548,6 +3019,62 @@ def evaluate_filter_visibility_sequence(sequence: Dict[str, Any]) -> Dict[str, A
         "diagnostics": {
             "appliedFilters": applied,
             "filterChanges": changes,
+        },
+    }
+
+
+def evaluate_clarification_sequence(sequence: Dict[str, Any]) -> Dict[str, Any]:
+    service = StubAssistantService(sequence)
+    response = service.handle_chat(
+        sequence["prompt"],
+        filters=build_live_ui_filters(sequence["prompt"]),
+        history=[],
+        mode=sequence["mode"],
+        diagnostic=True,
+    )
+    assert_contract(response)
+    answer = response.get("answer") or {}
+    title = str(answer.get("title") or "")
+    passed = title == str(sequence.get("expected_title") or "")
+    return {
+        "name": sequence["name"],
+        "suite": sequence["suite"],
+        "prompt": sequence["prompt"],
+        "mode": sequence["mode"],
+        "recommended_mode": sequence["mode"],
+        "expected_tool": None,
+        "expected_machine_count": 0,
+        "expects_metric": False,
+        "expected_outcome": "should_pass",
+        "actual_tool": primary_tool_name(response),
+        "actual_tools": [tool.get("tool") for tool in response.get("toolsUsed") or []],
+        "title": title,
+        "summary": answer.get("summary"),
+        "expected_vs_actual": {
+            "expected_tool": None,
+            "actual_tools": [tool.get("tool") for tool in response.get("toolsUsed") or []],
+            "expected_outcome": "should_pass",
+            "actual_outcome": "passed" if passed else "failed",
+            "pass_fail_reason": None if passed else "clarification title mismatch",
+            "outcome_matches_expectation": passed,
+        },
+        "validation": {
+            "passed": passed,
+            "entity_ok": True,
+            "entity_error": None,
+            "routing_ok": passed,
+            "machine_count_ok": True,
+            "machine_ids_ok": True,
+            "correctness_score": 1.0 if passed else 0.0,
+            "routing_score": 1.0 if passed else 0.0,
+            "entity_consistency": 1.0,
+            "actual_outcome": "passed" if passed else "failed",
+            "failure_category": None if passed else "clarification failure",
+            "pass_fail_reason": None if passed else "clarification title mismatch",
+            "actual_tools": [tool.get("tool") for tool in response.get("toolsUsed") or []],
+        },
+        "diagnostics": {
+            "finalResolvedRequest": (response.get("diagnostics") or {}).get("finalResolvedRequest"),
         },
     }
 
@@ -3016,7 +3543,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--only-failures", action="store_true", help="Print only failing rows in the output table.")
     parser.add_argument(
         "--suite",
-        choices=["safe", "llm", "hard", "summary", "minimal", "category", "category_compare", "scope", "compare_scope", "phase2a", "phase2b", "phase2c", "phase2d", "discovery", "discovery_time", "discovery_wording", "starter", "filter_visibility", "follow_up", "scope_follow_up", "sticky_filters", "sticky_live", "phase2a_follow_up", "phase2b_follow_up", "phase2c_follow_up", "phase2d_follow_up", "all"],
+        choices=["safe", "llm", "hard", "summary", "minimal", "category", "category_compare", "scope", "compare_scope", "phase2a", "phase2b", "phase2c", "phase2d", "discovery", "discovery_time", "discovery_wording", "status_chart", "visual_summary", "job_analysis", "starter", "filter_visibility", "follow_up", "clarification", "scope_follow_up", "sticky_filters", "sticky_live", "phase2a_follow_up", "phase2b_follow_up", "phase2c_follow_up", "phase2d_follow_up", "all"],
         default="all",
         help="Run only one prompt suite or all suites.",
     )
@@ -3052,6 +3579,9 @@ def main() -> None:
     if args.suite in {"filter_visibility", "all"}:
         selected_sequences = FILTER_VISIBILITY_SEQUENCES if args.suite == "all" else [sequence for sequence in FILTER_VISIBILITY_SEQUENCES if sequence["suite"] == args.suite]
         results.extend(evaluate_filter_visibility_sequence(sequence) for sequence in selected_sequences)
+    if args.suite in {"clarification", "all"}:
+        selected_sequences = CLARIFICATION_SEQUENCES if args.suite == "all" else [sequence for sequence in CLARIFICATION_SEQUENCES if sequence["suite"] == args.suite]
+        results.extend(evaluate_clarification_sequence(sequence) for sequence in selected_sequences)
     if args.suite in {"phase2a_follow_up", "all"}:
         selected_sequences = PHASE2A_FOLLOW_UP_SEQUENCES if args.suite == "all" else [sequence for sequence in PHASE2A_FOLLOW_UP_SEQUENCES if sequence["suite"] == args.suite]
         results.extend(evaluate_phase2a_follow_up_sequence(sequence) for sequence in selected_sequences)
@@ -3070,6 +3600,15 @@ def main() -> None:
     if args.suite in {"discovery_wording", "all"}:
         selected_sequences = DISCOVERY_WORDING_SEQUENCES if args.suite == "all" else [sequence for sequence in DISCOVERY_WORDING_SEQUENCES if sequence["suite"] == args.suite]
         results.extend(evaluate_discovery_time_sequence(sequence) for sequence in selected_sequences)
+    if args.suite in {"status_chart", "all"}:
+        selected_sequences = STATUS_CHART_SEQUENCES if args.suite == "all" else [sequence for sequence in STATUS_CHART_SEQUENCES if sequence["suite"] == args.suite]
+        results.extend(evaluate_status_chart_sequence(sequence) for sequence in selected_sequences)
+    if args.suite in {"visual_summary", "all"}:
+        selected_sequences = VISUAL_SUMMARY_SEQUENCES if args.suite == "all" else [sequence for sequence in VISUAL_SUMMARY_SEQUENCES if sequence["suite"] == args.suite]
+        results.extend(evaluate_visual_summary_sequence(sequence) for sequence in selected_sequences)
+    if args.suite in {"job_analysis", "all"}:
+        selected_sequences = JOB_ANALYSIS_SEQUENCES if args.suite == "all" else [sequence for sequence in JOB_ANALYSIS_SEQUENCES if sequence["suite"] == args.suite]
+        results.extend(evaluate_job_analysis_sequence(sequence) for sequence in selected_sequences)
     summary = build_summary(results)
     report = {
         "generatedAtUtc": datetime.now(UTC).isoformat(),

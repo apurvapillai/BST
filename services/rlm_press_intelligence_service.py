@@ -10,9 +10,8 @@ from sqlalchemy.orm import selectinload
 
 from db.rlm_connection import RLMSessionLocal
 from db.rlm_models import RLMMachine, RLMMonitoring, RLMReel, RLMTolerance
-
-
-FEET_PER_FORMAT_UNIT = 3.0417
+from services.rlm_reel_footage import RLM_REEL_FEET_PER_RANGE_UNIT, compute_reel_feet_from_range
+from services.rlm_repeat_length_service import RLMRepeatLengthService
 DEFAULT_MIN_MONITORING_POINTS_PER_1000_FT = 20.0
 ISSUE_CLASSES = {
     "drift": "Repeat Length Drift",
@@ -42,6 +41,8 @@ class RLMPressIntelligenceService:
     SELECT queries against existing RLM tables and perform in-memory aggregation.
     """
 
+    repeat_length_service = RLMRepeatLengthService()
+
     def get_press_intelligence(self, filters: PressIntelligenceFilters) -> Dict[str, Any]:
         """Build the full executive payload for press-level RLM comparison.
 
@@ -55,15 +56,11 @@ class RLMPressIntelligenceService:
         with RLMSessionLocal() as session:
             reels = self._get_reels(session, filters)
             reel_ids = [row.reel_db_id for row in reels]
-            latest_tolerances = self._get_latest_tolerances(session, reel_ids)
-            tolerance_change_counts = self._get_tolerance_change_counts(session, reel_ids)
-            monitoring = self._get_monitoring_aggregates(session, reel_ids)
+            repeat_length = self._get_repeat_length_batch(session, reel_ids)
 
         reel_metrics = self._compute_reel_metrics(
             reels,
-            monitoring,
-            latest_tolerances,
-            tolerance_change_counts,
+            repeat_length,
         )
         press_metrics = self._aggregate_press_metrics(reel_metrics)
         comparisons = self._build_comparisons(press_metrics)
@@ -89,8 +86,8 @@ class RLMPressIntelligenceService:
                 "minFeet": filters.min_feet,
                 "readOnly": True,
                 "notes": [
-                    "Estimated bad feet should be treated as a proxy derived from OOB monitoring-point share.",
-                    "Delta and OOB values use the latest tolerance row per reel for MVP calculations.",
+                    "Repeat-length quality uses the shared segmented tolerance evaluator for every reel.",
+                    "Estimated bad feet and bad-point percentages are derived from the canonical reel summary service.",
                 ],
             },
         }
@@ -116,72 +113,23 @@ class RLMPressIntelligenceService:
         if filters.min_feet is not None:
             query = query.filter(RLMReel.reel_start.isnot(None))
             query = query.filter(RLMReel.reel_end.isnot(None))
-            query = query.filter(
-                func.abs(RLMReel.reel_end - RLMReel.reel_start) * FEET_PER_FORMAT_UNIT
-                >= filters.min_feet
-            )
+            query = query.filter(RLMReel.reel_end >= RLMReel.reel_start)
+            query = query.filter((RLMReel.reel_end - RLMReel.reel_start) * RLM_REEL_FEET_PER_RANGE_UNIT >= filters.min_feet)
         return query.all()
 
     def _get_latest_tolerances(self, session, reel_ids: Iterable[int]) -> Dict[int, Dict[str, Any]]:
-        """Return one latest tolerance record per reel.
-
-        Latest is selected by the highest available tol_sequence, falling back to
-        row order when sequence is missing. This mirrors the existing page's
-        "latest tolerance per reel" approach without writing any state.
-        """
-        clean_ids = [int(reel_id) for reel_id in reel_ids if reel_id is not None]
-        if not clean_ids:
-            return {}
-
-        rows = (
-            session.query(RLMTolerance)
-            .filter(RLMTolerance.reel_db_id.in_(clean_ids))
-            .order_by(
-                RLMTolerance.reel_db_id.asc(),
-                RLMTolerance.tol_sequence.asc(),
-                RLMTolerance.tolerance_time.asc(),
-                RLMTolerance.tolerance_id.asc(),
-            )
-            .all()
-        )
-
-        latest: Dict[int, Dict[str, Any]] = {}
-        latest_sort: Dict[int, Tuple[int, datetime, int]] = {}
-        for row in rows:
-            reel_id = int(row.reel_db_id)
-            sort_key = (
-                int(row.tol_sequence or 0),
-                row.tolerance_time or datetime.min,
-                int(row.tolerance_id or 0),
-            )
-            if reel_id not in latest_sort or sort_key >= latest_sort[reel_id]:
-                latest_sort[reel_id] = sort_key
-                latest[reel_id] = {
-                    "sequence": row.tol_sequence,
-                    "nominalLength": self._to_float(row.nom_length),
-                    "errShrink": self._to_float(row.err_shrink),
-                    "errExpand": self._to_float(row.err_expand),
-                    "timestamp": row.tolerance_time.isoformat() if row.tolerance_time else None,
-                }
-        return latest
+        repeat_length = self._get_repeat_length_batch(session, reel_ids)
+        return {
+            int(reel_id): (item.get("latestTolerance") or {})
+            for reel_id, item in repeat_length.items()
+        }
 
     def _get_tolerance_change_counts(self, session, reel_ids: Iterable[int]) -> Dict[int, int]:
-        """Return per-reel tolerance volatility counts.
-
-        MVP uses the requested convention: number of tolerance rows minus one,
-        floored at zero. This is intentionally read-only and avoids backfills.
-        """
-        clean_ids = [int(reel_id) for reel_id in reel_ids if reel_id is not None]
-        if not clean_ids:
-            return {}
-
-        rows = (
-            session.query(RLMTolerance.reel_db_id, func.count(RLMTolerance.tolerance_id))
-            .filter(RLMTolerance.reel_db_id.in_(clean_ids))
-            .group_by(RLMTolerance.reel_db_id)
-            .all()
-        )
-        return {int(reel_id): max(int(count or 0) - 1, 0) for reel_id, count in rows}
+        repeat_length = self._get_repeat_length_batch(session, reel_ids)
+        return {
+            int(reel_id): max(int(item.get("toleranceSegmentCount") or 0) - 1, 0)
+            for reel_id, item in repeat_length.items()
+        }
 
     def _get_tolerance_data(self, session, reel_ids: Iterable[int]) -> Dict[int, Dict[str, Any]]:
         """Compatibility wrapper returning latest tolerance plus change count."""
@@ -196,92 +144,57 @@ class RLMPressIntelligenceService:
         }
 
     def _get_monitoring_aggregates(self, session, reel_ids: Iterable[int]) -> Dict[int, Dict[str, Any]]:
-        """Fetch point-level monitoring values and aggregate them by reel.
-
-        OOB percentage and delta standard deviation require comparing individual
-        curlength points to the selected reel tolerance. The executive date range
-        is bounded, so MVP safely loads only the selected reels' point values and
-        leaves all aggregation in memory without writing any DB state.
-        """
-        clean_ids = [int(reel_id) for reel_id in reel_ids if reel_id is not None]
-        if not clean_ids:
-            return {}
-
-        rows = (
-            session.query(
-                RLMMonitoring.reel_db_id,
-                RLMMonitoring.curlength,
-                RLMMonitoring.webspeed,
-            )
-            .filter(RLMMonitoring.reel_db_id.in_(clean_ids))
-            .order_by(RLMMonitoring.reel_db_id.asc(), RLMMonitoring.monitoring_id.asc())
-            .all()
-        )
-
-        out: Dict[int, Dict[str, Any]] = {
-            reel_id: {
-                "monitorCount": 0,
-                "curlengthValues": [],
-                "webspeedValues": [],
-                "avgCurlength": None,
-                "avgWebspeed": None,
-                "minWebspeed": None,
-                "maxWebspeed": None,
+        repeat_length = self._get_repeat_length_batch(session, reel_ids)
+        out: Dict[int, Dict[str, Any]] = {}
+        for reel_id, item in repeat_length.items():
+            out[int(reel_id)] = {
+                "monitorCount": int(item.get("monitoringPointsTotal") or 0),
+                "curlengthValues": [
+                    float(point.get("curlength"))
+                    for point in (item.get("points") or [])
+                    if point.get("curlength") is not None
+                ],
+                "webspeedValues": [
+                    float(point.get("webspeed"))
+                    for point in (item.get("points") or [])
+                    if point.get("webspeed") is not None
+                ],
+                "avgCurlength": item.get("avgCurlength"),
+                "avgWebspeed": item.get("avgWebspeed"),
+                "minWebspeed": item.get("minWebspeed"),
+                "maxWebspeed": item.get("maxWebspeed"),
+                "matchedMonitoringPoints": int(item.get("matchedMonitoringPoints") or 0),
+                "unmatchedMonitoringPoints": int(item.get("unmatchedMonitoringPoints") or 0),
+                "goodMonitoringPoints": int(item.get("goodMonitoringPoints") or 0),
+                "badMonitoringPoints": int(item.get("badMonitoringPoints") or 0),
+                "badPointPct": item.get("badPointPct"),
             }
-            for reel_id in clean_ids
-        }
-        for reel_id, curlength, webspeed in rows:
-            bucket = out.setdefault(
-                int(reel_id),
-                {
-                    "monitorCount": 0,
-                    "curlengthValues": [],
-                    "webspeedValues": [],
-                    "avgCurlength": None,
-                    "avgWebspeed": None,
-                    "minWebspeed": None,
-                    "maxWebspeed": None,
-                },
-            )
-            bucket["monitorCount"] += 1
-            curlength_value = self._to_float(curlength)
-            webspeed_value = self._to_float(webspeed)
-            if curlength_value is not None:
-                bucket["curlengthValues"].append(curlength_value)
-            if webspeed_value is not None:
-                bucket["webspeedValues"].append(webspeed_value)
-
-        for bucket in out.values():
-            speeds = bucket["webspeedValues"]
-            curls = bucket["curlengthValues"]
-            bucket["avgCurlength"] = self._mean(curls)
-            bucket["avgWebspeed"] = self._mean(speeds)
-            bucket["minWebspeed"] = min(speeds) if speeds else None
-            bucket["maxWebspeed"] = max(speeds) if speeds else None
-
         return out
+
+    def _get_repeat_length_batch(self, session, reel_ids: Iterable[int]) -> Dict[int, Dict[str, Any]]:
+        return self.repeat_length_service.fetch_reel_batch(session, reel_ids)
 
     def _compute_reel_metrics(
         self,
         reels: List[RLMReel],
-        monitoring: Dict[int, Dict[str, Any]],
-        latest_tolerances: Dict[int, Dict[str, Any]],
-        tolerance_change_counts: Dict[int, int],
+        repeat_length: Dict[int, Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
         """Compute per-reel metrics from read-only reel, monitoring, and tolerance data.
 
-        Delta and OOB calculations use the latest tolerance row per reel. Bad
-        feet is estimated by applying OOB point percentage to total reel feet.
+        Reel quality counts and footage come from the shared repeat-length reel
+        summary so press intelligence matches the assistant, /rlm, and live
+        dashboard outputs.
         """
         metrics: List[Dict[str, Any]] = []
         for reel in reels:
-            reel_monitoring = monitoring.get(reel.reel_db_id, {})
-            latest_tolerance = latest_tolerances.get(reel.reel_db_id, {})
-            feet_total = self._feet_from_reel(reel)
-            monitor_count = int(reel_monitoring.get("monitorCount") or 0)
+            reel_repeat = repeat_length.get(reel.reel_db_id, {})
+            reel_summary = self.repeat_length_service.build_reel_summary(reel, reel_repeat)
+            latest_tolerance = (reel_repeat.get("latestTolerance") or {})
+            feet_total = float(reel_summary.get("feet_total") or 0.0)
+            monitor_count = int(reel_repeat.get("monitoringPointsTotal") or 0)
             points_per_1000_ft = (monitor_count / feet_total * 1000.0) if feet_total else None
-            min_speed = reel_monitoring.get("minWebspeed")
-            max_speed = reel_monitoring.get("maxWebspeed")
+            min_speed = reel_repeat.get("minWebspeed")
+            max_speed = reel_repeat.get("maxWebspeed")
             speed_range = (
                 max_speed - min_speed
                 if min_speed is not None and max_speed is not None
@@ -290,27 +203,15 @@ class RLMPressIntelligenceService:
             nominal = latest_tolerance.get("nominalLength")
             err_shrink = abs(latest_tolerance.get("errShrink") or 0.0) if latest_tolerance else None
             err_expand = abs(latest_tolerance.get("errExpand") or 0.0) if latest_tolerance else None
-            deltas: List[float] = []
-            oob_count = 0
-            if nominal is not None:
-                lower = -(err_shrink or 0.0)
-                upper = err_expand or 0.0
-                for curlength in reel_monitoring.get("curlengthValues", []):
-                    delta = curlength - nominal
-                    deltas.append(delta)
-                    if delta < lower or delta > upper:
-                        oob_count += 1
-            delta_count = len(deltas)
-            avg_delta = self._mean(deltas)
-            delta_std = self._stddev(deltas)
-            oob_point_pct = (oob_count / delta_count * 100.0) if delta_count else None
-            estimated_bad_feet_pct = oob_point_pct
-            estimated_bad_feet = (
-                feet_total * estimated_bad_feet_pct / 100.0
-                if estimated_bad_feet_pct is not None
-                else None
-            )
-            tolerance_change_count = int(tolerance_change_counts.get(reel.reel_db_id, 0) or 0)
+            delta_count = int(reel_repeat.get("deltaPointCount") or 0)
+            oob_count = int(reel_repeat.get("oobPointCount") or 0)
+            avg_delta = reel_repeat.get("avgDelta")
+            delta_std = reel_repeat.get("deltaStd")
+            oob_point_pct = reel_summary.get("bad_point_pct")
+            estimated_bad_feet_pct = reel_summary.get("bad_point_pct")
+            estimated_bad_feet = reel_summary.get("estimated_bad_feet")
+            estimated_good_feet = reel_summary.get("estimated_good_feet")
+            tolerance_change_count = max(int(reel_repeat.get("toleranceSegmentCount") or 0) - 1, 0)
             outlier_score = self._compute_reel_outlier_score(
                 avg_delta=avg_delta,
                 delta_std=delta_std,
@@ -331,23 +232,33 @@ class RLMPressIntelligenceService:
                     "orderNumber": reel.order_number,
                     "productionStart": reel.production_start_dt.isoformat() if reel.production_start_dt else None,
                     "feetTotal": feet_total,
+                    "estimatedGoodFeet": round(float(estimated_good_feet), 3) if estimated_good_feet is not None else None,
                     "monitoringPointsTotal": monitor_count,
+                    "matchedMonitoringPoints": int(reel_summary.get("matched_monitoring_points") or 0),
+                    "unmatchedMonitoringPoints": int(reel_summary.get("unmatched_monitoring_points") or 0),
+                    "goodMonitoringPoints": int(reel_summary.get("good_monitoring_points") or 0),
+                    "badMonitoringPoints": int(reel_summary.get("bad_monitoring_points") or 0),
+                    "goodPointPct": round(float(reel_summary.get("good_point_pct")), 3) if reel_summary.get("good_point_pct") is not None else None,
                     "deltaPointCount": delta_count,
                     "oobPointCount": oob_count,
                     "pointsPer1000Ft": points_per_1000_ft,
-                    "avgCurlength": reel_monitoring.get("avgCurlength"),
+                    "avgCurlength": reel_repeat.get("avgCurlength"),
                     "nominalLength": nominal,
                     "avgDelta": avg_delta,
-                    "avgAbsDelta": self._mean([abs(delta) for delta in deltas]),
+                    "avgAbsDelta": reel_repeat.get("avgAbsDelta"),
                     "deltaStd": delta_std,
-                    "deltaSum": sum(deltas),
-                    "deltaSumSq": sum(delta * delta for delta in deltas),
+                    "deltaSum": None,
+                    "deltaSumSq": None,
                     "oobPointPct": round(oob_point_pct, 3) if oob_point_pct is not None else None,
                     "estimatedBadFeetPct": round(estimated_bad_feet_pct, 3) if estimated_bad_feet_pct is not None else None,
                     "estimatedBadFeet": round(estimated_bad_feet, 3) if estimated_bad_feet is not None else None,
-                    "avgWebspeed": reel_monitoring.get("avgWebspeed"),
+                    "avgWebspeed": reel_repeat.get("avgWebspeed"),
                     "webspeedRange": speed_range,
                     "toleranceChangeCount": tolerance_change_count,
+                    "toleranceSegmentCount": int(reel_repeat.get("toleranceSegmentCount") or 0),
+                    "repeatLengthDebug": {
+                        "segmentBreakdown": reel_repeat.get("segmentBreakdown") or [],
+                    },
                     "outlierScore": outlier_score,
                 }
             )
@@ -364,13 +275,19 @@ class RLMPressIntelligenceService:
             jobs = {row.get("jobName") for row in rows if row.get("jobName")}
             total_feet = sum(float(row.get("feetTotal") or 0.0) for row in rows)
             total_bad_feet = sum(float(row.get("estimatedBadFeet") or 0.0) for row in rows)
+            total_good_feet = sum(float(row.get("estimatedGoodFeet") or 0.0) for row in rows)
             total_delta_points = sum(int(row.get("deltaPointCount") or 0) for row in rows)
             total_oob_points = sum(int(row.get("oobPointCount") or 0) for row in rows)
             total_monitor_points = sum(int(row.get("monitoringPointsTotal") or 0) for row in rows)
+            total_matched_monitor_points = sum(int(row.get("matchedMonitoringPoints") or 0) for row in rows)
+            total_good_monitor_points = sum(int(row.get("goodMonitoringPoints") or 0) for row in rows)
+            total_bad_monitor_points = sum(int(row.get("badMonitoringPoints") or 0) for row in rows)
+            total_unmatched_monitor_points = sum(int(row.get("unmatchedMonitoringPoints") or 0) for row in rows)
             avg_delta = self._weighted_mean(rows, "avgDelta", "deltaPointCount")
             avg_webspeed = self._weighted_mean(rows, "avgWebspeed", "monitoringPointsTotal")
             delta_std = self._combined_stddev(rows)
-            oob_pct = (total_oob_points / total_delta_points * 100.0) if total_delta_points else None
+            oob_pct = (total_bad_monitor_points / total_matched_monitor_points * 100.0) if total_matched_monitor_points else None
+            good_point_pct = (total_good_monitor_points / total_matched_monitor_points * 100.0) if total_matched_monitor_points else None
             bad_feet_pct = (total_bad_feet / total_feet * 100.0) if total_feet else None
             points_per_1000_ft = (total_monitor_points / total_feet * 1000.0) if total_feet else None
             tolerance_changes = sum(int(row.get("toleranceChangeCount") or 0) for row in rows)
@@ -385,10 +302,16 @@ class RLMPressIntelligenceService:
                     "jobsRun": len(jobs),
                     "reelsRun": len(rows),
                     "feetTotal": round(total_feet, 3),
+                    "estimatedGoodFeet": round(total_good_feet, 3),
                     "monitoringPointsTotal": total_monitor_points,
+                    "matchedMonitoringPoints": total_matched_monitor_points,
+                    "unmatchedMonitoringPoints": total_unmatched_monitor_points,
+                    "goodMonitoringPoints": total_good_monitor_points,
+                    "badMonitoringPoints": total_bad_monitor_points,
                     "avgDelta": avg_delta,
                     "deltaStd": delta_std,
                     "oobPointPct": round(oob_pct, 3) if oob_pct is not None else None,
+                    "goodPointPct": round(good_point_pct, 3) if good_point_pct is not None else None,
                     "estimatedBadFeetPct": round(bad_feet_pct, 3) if bad_feet_pct is not None else None,
                     "estimatedBadFeet": round(total_bad_feet, 3),
                     "avgWebspeed": avg_webspeed,
@@ -1286,12 +1209,8 @@ class RLMPressIntelligenceService:
         return ISSUE_CLASSES.get(ranked[0][0], ISSUE_CLASSES["mixed"])
 
     def _feet_from_reel(self, reel: RLMReel) -> float:
-        """Compute approximate reel feet using the existing RLM format-unit conversion."""
-        start = self._to_float(reel.reel_start)
-        end = self._to_float(reel.reel_end)
-        if start is None or end is None:
-            return 0.0
-        return abs(end - start) * FEET_PER_FORMAT_UNIT
+        feet = compute_reel_feet_from_range(reel.reel_start, reel.reel_end)
+        return feet if feet is not None else 0.0
 
     def _mean(self, values: Iterable[Optional[float]]) -> Optional[float]:
         """Return a rounded mean for numeric values only."""

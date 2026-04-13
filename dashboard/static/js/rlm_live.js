@@ -306,7 +306,7 @@ function renderMachineCard(card) {
         ${machineMetric("Reel", latest.reelId || "—")}
         ${machineMetric("Reel start", formatReelStart(latest))}
         ${machineMetric("Feet (bad/total)", formatFeet(metrics.feetBad, metrics.feetTotal))}
-        ${machineMetric("Bad points / total", formatPoints(metrics.monitoringPointsBad, metrics.monitoringPointsTotal))}
+        ${machineMetric("Bad points / matched", formatPoints(metrics.monitoringPointsBad, matchedPointTotal(metrics)))}
         ${machineMetric("Bad feet %", formatPercent(metrics.badFeetPct))}
         ${machineMetric("Avg Δ", formatNumber(metrics.avgDelta, 3))}
         ${machineMetric("Δ std dev", formatNumber(metrics.deltaStd, 3))}
@@ -597,7 +597,7 @@ function renderWindowModal() {
           <td>${formatYesNo(reel.qualifying)}</td>
           <td>${formatYesNo(reel.monitored)}</td>
           <td>${formatPercent(reel.badFeetPct)}</td>
-          <td>${formatPoints(reel.monitoringPointsBad, reel.monitoringPointsTotal)}</td>
+          <td>${formatPoints(reel.monitoringPointsBad, matchedPointTotal(reel))}</td>
           <td>${formatNumber(reel.avgDelta, 3)}</td>
           <td>${formatNumber(reel.deltaStd, 3)}</td>
         </tr>
@@ -1524,6 +1524,14 @@ function formatPoints(bad, total) {
   return `${bad} / ${total} pts`;
 }
 
+function matchedPointTotal(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  if (payload.matchedMonitoringPoints !== undefined && payload.matchedMonitoringPoints !== null) {
+    return payload.matchedMonitoringPoints;
+  }
+  return null;
+}
+
 function formatStateLabel(status) {
   if (!status) return "Status";
   return STATE_LABELS[status] || status.charAt(0).toUpperCase() + status.slice(1);
@@ -1672,7 +1680,7 @@ function renderStandardAlertMetrics(payload, webspeedSummary) {
     <div class="alert-metrics">
       <div><label>Feet (bad/total)</label><strong>${formatFeet(payload.feetBad, payload.feetTotal)}</strong></div>
       <div><label>Bad feet %</label><strong>${formatPercent(payload.badFeetPct)}</strong></div>
-      <div><label>Bad pts</label><strong>${formatPoints(payload.monitoringPointsBad, payload.monitoringPointsTotal)}</strong></div>
+      <div><label>Bad pts</label><strong>${formatPoints(payload.monitoringPointsBad, matchedPointTotal(payload))}</strong></div>
       <div><label>Avg Δ</label><strong>${formatNumber(payload.avgDelta, 3)}</strong></div>
       <div><label>Δ std dev</label><strong>${formatNumber(payload.deltaStd, 3)}</strong></div>
       <div><label>Webspeed</label><strong>${webspeedSummary}</strong></div>
@@ -1696,7 +1704,7 @@ function renderRollingAlertMetrics(payload) {
       <div class="current-reel-body">
         <div><label>Reel</label><strong>${payload.reelId || "—"}</strong></div>
         <div><label>Bad feet %</label><strong>${formatPercent(payload.badFeetPctCurrent ?? payload.badFeetPct)}</strong></div>
-        <div><label>Bad pts</label><strong>${formatPoints(payload.monitoringPointsBad, payload.monitoringPointsTotal)}</strong></div>
+        <div><label>Bad pts</label><strong>${formatPoints(payload.monitoringPointsBad, matchedPointTotal(payload))}</strong></div>
         <div><label>Δ std dev</label><strong>${formatNumber(payload.deltaStd, 3)}</strong></div>
         <div class="current-reel-detail">${currentStatus.detail}</div>
       </div>
@@ -1714,7 +1722,7 @@ function getCurrentReelStatus(payload) {
       detail: `${payload.monitoringPointsTotal || 0} pts over ${feet.toFixed ? feet.toFixed(0) : feet} ft (needs ≥ ${expected} pts/1000ft)`,
     };
   }
-  const totalPoints = Number(payload.monitoringPointsTotal) || 0;
+  const totalPoints = Number(matchedPointTotal(payload)) || 0;
   const badPoints = Number(payload.monitoringPointsBad) || 0;
   const badFeetPct = Number(payload.badFeetPctCurrent ?? payload.badFeetPct ?? 0);
   if (!payload.reelId) {

@@ -21,14 +21,21 @@
         <main class="assistant-workspace"
               data-default-start="{{ default_start_date }}"
               data-default-end="{{ default_end_date }}">
-          <section class="filters filters--with-header assistant-context-bar" aria-labelledby="assistantContextTitle">
+          <section class="filters filters--with-header assistant-context-bar assistant-context-bar--collapsed" id="assistantContextBar" aria-labelledby="assistantContextTitle">
             <div class="filters-header">
               <div>
                 <p class="kpi-section__title">Assistant Context</p>
                 <small id="assistantContextTitle">Control scope, date window, execution mode, and diagnostics for this standalone workspace.</small>
               </div>
+              <button type="button"
+                      id="assistantContextToggle"
+                      class="filters-clear-btn assistant-context-toggle-btn"
+                      aria-expanded="false"
+                      aria-controls="assistantContextBody">
+                Show Filters
+              </button>
             </div>
-            <div class="filters-body">
+            <div class="filters-body" id="assistantContextBody">
               <div class="filter-grid assistant-context-grid">
                 <div class="filter-card">
                   <label for="assistantDataMode">Data Mode</label>
@@ -73,6 +80,20 @@
                     </span>
                   </label>
                 </div>
+
+                <div class="filter-card assistant-context-toggle-card">
+                  <label>Response Mode</label>
+                  <div class="assistant-segmented-control" role="group" aria-label="Response mode">
+                    <label class="assistant-segmented-control__option">
+                      <input type="radio" name="assistantResponseMode" value="full">
+                      <span>Full</span>
+                    </label>
+                    <label class="assistant-segmented-control__option">
+                      <input type="radio" name="assistantResponseMode" value="simple" checked>
+                      <span>Simple</span>
+                    </label>
+                  </div>
+                </div>
               </div>
             </div>
           </section>
@@ -95,8 +116,9 @@
                       data-prompt="Use {{ card.press_label }}">
                 <div class="assistant-ranking-card__body">
                   <h3 class="assistant-ranking-card__title">{{ card.rank }} - {{ card.press_label }}</h3>
-                  <p class="assistant-ranking-card__metric"><span>Total feet today</span><strong>{{ card.feet_total }}</strong></p>
-                  <p class="assistant-ranking-card__metric"><span>Bad feet % today</span><strong>{{ card.bad_feet_pct }}</strong></p>
+                  <p class="assistant-ranking-card__metric"><span>Total feet</span><strong>{{ card.feet_total }}</strong></p>
+                  <p class="assistant-ranking-card__metric"><span>Bad feet %</span><strong>{{ card.bad_feet_pct }}</strong></p>
+                  <p class="assistant-ranking-card__metric"><span>Active %</span><strong>{{ card.active_pct }}</strong></p>
                 </div>
               </button>
               {% endfor %}

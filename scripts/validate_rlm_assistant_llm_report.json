@@ -1,94 +1,11 @@
 {
-  "generatedAtUtc": "2026-04-09T15:03:07.735707+00:00",
-  "suiteFilter": "starter",
+  "generatedAtUtc": "2026-04-09T20:47:14.881270+00:00",
+  "suiteFilter": "safe",
   "cases": [
     {
-      "name": "how_is_press_8_performing",
-      "suite": "starter",
-      "prompt": "How is Press 8 performing?",
-      "mode": "deterministic",
-      "recommended_mode": "deterministic",
-      "expected_tool": "get_press_status",
-      "expected_machine_count": 1,
-      "expects_metric": false,
-      "expected_outcome": "should_pass",
-      "actual_tool": "get_press_status",
-      "actual_tools": [
-        "get_press_status"
-      ],
-      "requested_mode": "deterministic",
-      "execution_mode": "deterministic",
-      "fallback_reason": null,
-      "title": "Press 8 is healthy in the selected window.",
-      "summary": "Filtered repeat length metrics look stable",
-      "expected_vs_actual": {
-        "expected_tool": "get_press_status",
-        "actual_tools": [
-          "get_press_status"
-        ],
-        "expected_outcome": "should_pass",
-        "actual_outcome": "passed",
-        "pass_fail_reason": "matched expectations",
-        "outcome_matches_expectation": true
-      },
-      "validation": {
-        "prompt_presses": [
-          8
-        ],
-        "response_presses": [
-          8
-        ],
-        "actual_tools": [
-          "get_press_status"
-        ],
-        "actual_machine_ids": [
-          8
-        ],
-        "entity_ok": true,
-        "entity_error": null,
-        "routing_ok": true,
-        "machine_count_ok": true,
-        "machine_ids_ok": true,
-        "metric_ok": true,
-        "fallback": false,
-        "correctness_score": 1.0,
-        "routing_score": 1.0,
-        "entity_consistency": 1.0,
-        "passed": true,
-        "failure_category": null,
-        "actual_outcome": "passed",
-        "pass_fail_reason": "matched expectations",
-        "outcome_matches_expectation": true
-      },
-      "diagnostics": {
-        "finalResolvedRequest": {
-          "kind": "status",
-          "domain": "auto",
-          "metric_key": null,
-          "category_key": null,
-          "comparison_mode": "none",
-          "comparison_target": null,
-          "grouping": null,
-          "output_shape": "summary",
-          "machine_id": 4,
-          "machine_ids": [],
-          "job": "",
-          "analysisScope": null,
-          "min_reel_feet": null,
-          "effective_start": "2026-04-09",
-          "effective_end": "2026-04-09",
-          "trendRequested": null
-        },
-        "activeStickyFilters": {
-          "pressId": 4
-        },
-        "usedConversationContext": false
-      }
-    },
-    {
-      "name": "how_is_press_5_performing_in_the_last_10_reels",
-      "suite": "starter",
-      "prompt": "How is Press 5 performing in the last 10 reels?",
+      "name": "what_is_the_status_of_press_5_today",
+      "suite": "safe",
+      "prompt": "What is the status of Press 5 today?",
       "mode": "deterministic",
       "recommended_mode": "deterministic",
       "expected_tool": "get_press_status",
@@ -144,6 +61,20 @@
         "outcome_matches_expectation": true
       },
       "diagnostics": {
+        "rawExtractedPressIds": [
+          5
+        ],
+        "selectedMachineId": 1,
+        "machineIdSource": "message",
+        "requestedPressLabel": "Press 5",
+        "renderedPressLabel": "Press 5",
+        "usedConversationContext": false,
+        "contextSourceTurn": null,
+        "inheritedIntent": null,
+        "inheritedMachineId": null,
+        "inheritedMetricKey": null,
+        "inheritedScope": null,
+        "overriddenFields": [],
         "finalResolvedRequest": {
           "kind": "status",
           "domain": "auto",
@@ -162,42 +93,43 @@
           "effective_end": "2026-04-09",
           "trendRequested": null
         },
-        "activeStickyFilters": {
-          "pressId": 1,
-          "reelScope": {
-            "kind": "reels",
-            "count": 10,
-            "label": "last 10 reels"
-          }
-        },
-        "usedConversationContext": false
+        "plannerAttempted": false,
+        "plannerSucceeded": false,
+        "plannerValidationPassed": false,
+        "rewriteAttempted": false,
+        "rewriteApplied": false,
+        "fallbackTriggered": false,
+        "parsedMachines": [
+          1
+        ],
+        "plannedMachines": [],
+        "executedMachines": [],
+        "finalRenderedMachines": []
       }
     },
     {
-      "name": "which_press_is_performing_the_worst_right_now",
-      "suite": "starter",
-      "prompt": "Which press is performing the worst right now?",
+      "name": "how_is_press_8_doing",
+      "suite": "safe",
+      "prompt": "How is Press 8 doing?",
       "mode": "deterministic",
       "recommended_mode": "deterministic",
-      "expected_tool": "get_press_rankings",
+      "expected_tool": "get_press_status",
       "expected_machine_count": 1,
       "expects_metric": false,
       "expected_outcome": "should_pass",
-      "actual_tool": "get_press_rankings",
+      "actual_tool": "get_press_status",
       "actual_tools": [
-        "get_press_rankings",
-        "get_press_category_breakdown"
+        "get_press_status"
       ],
       "requested_mode": "deterministic",
       "execution_mode": "deterministic",
       "fallback_reason": null,
-      "title": "Press 15 is the weakest press today.",
-      "summary": "Press 15 is currently the weakest press today, with 8.10% bad feet and 9.40 pts/1k ft.",
+      "title": "Press 8 is healthy in the selected window.",
+      "summary": "Filtered repeat length metrics look stable",
       "expected_vs_actual": {
-        "expected_tool": "get_press_rankings",
+        "expected_tool": "get_press_status",
         "actual_tools": [
-          "get_press_rankings",
-          "get_press_category_breakdown"
+          "get_press_status"
         ],
         "expected_outcome": "should_pass",
         "actual_outcome": "passed",
@@ -205,16 +137,17 @@
         "outcome_matches_expectation": true
       },
       "validation": {
-        "prompt_presses": [],
+        "prompt_presses": [
+          8
+        ],
         "response_presses": [
-          15
+          8
         ],
         "actual_tools": [
-          "get_press_rankings",
-          "get_press_category_breakdown"
+          "get_press_status"
         ],
         "actual_machine_ids": [
-          15
+          8
         ],
         "entity_ok": true,
         "entity_error": null,
@@ -233,16 +166,30 @@
         "outcome_matches_expectation": true
       },
       "diagnostics": {
+        "rawExtractedPressIds": [
+          8
+        ],
+        "selectedMachineId": 4,
+        "machineIdSource": "message",
+        "requestedPressLabel": "Press 8",
+        "renderedPressLabel": "Press 8",
+        "usedConversationContext": false,
+        "contextSourceTurn": null,
+        "inheritedIntent": null,
+        "inheritedMachineId": null,
+        "inheritedMetricKey": null,
+        "inheritedScope": null,
+        "overriddenFields": [],
         "finalResolvedRequest": {
-          "kind": "ranking_summary",
+          "kind": "status",
           "domain": "auto",
           "metric_key": null,
           "category_key": null,
-          "comparison_mode": "ranking",
+          "comparison_mode": "none",
           "comparison_target": null,
           "grouping": null,
           "output_shape": "summary",
-          "machine_id": null,
+          "machine_id": 4,
           "machine_ids": [],
           "job": "",
           "analysisScope": null,
@@ -251,35 +198,43 @@
           "effective_end": "2026-04-09",
           "trendRequested": null
         },
-        "activeStickyFilters": {},
-        "usedConversationContext": false
+        "plannerAttempted": false,
+        "plannerSucceeded": false,
+        "plannerValidationPassed": false,
+        "rewriteAttempted": false,
+        "rewriteApplied": false,
+        "fallbackTriggered": false,
+        "parsedMachines": [
+          4
+        ],
+        "plannedMachines": [],
+        "executedMachines": [],
+        "finalRenderedMachines": []
       }
     },
     {
-      "name": "which_press_is_performing_the_best_today",
-      "suite": "starter",
-      "prompt": "Which press is performing the best today?",
+      "name": "status_for_press_11",
+      "suite": "safe",
+      "prompt": "Status for Press 11",
       "mode": "deterministic",
       "recommended_mode": "deterministic",
-      "expected_tool": "get_press_rankings",
+      "expected_tool": "get_press_status",
       "expected_machine_count": 1,
       "expects_metric": false,
       "expected_outcome": "should_pass",
-      "actual_tool": "get_press_rankings",
+      "actual_tool": "get_press_status",
       "actual_tools": [
-        "get_press_rankings",
-        "get_press_category_breakdown"
+        "get_press_status"
       ],
       "requested_mode": "deterministic",
       "execution_mode": "deterministic",
       "fallback_reason": null,
-      "title": "Press 6 is the strongest press today.",
-      "summary": "Press 6 is currently the strongest press today, with 1.40% bad feet and 25.20 pts/1k ft.",
+      "title": "Press 11 is warning in the selected window.",
+      "summary": "Low monitoring density in the latest filtered reel",
       "expected_vs_actual": {
-        "expected_tool": "get_press_rankings",
+        "expected_tool": "get_press_status",
         "actual_tools": [
-          "get_press_rankings",
-          "get_press_category_breakdown"
+          "get_press_status"
         ],
         "expected_outcome": "should_pass",
         "actual_outcome": "passed",
@@ -287,13 +242,119 @@
         "outcome_matches_expectation": true
       },
       "validation": {
-        "prompt_presses": [],
+        "prompt_presses": [
+          11
+        ],
+        "response_presses": [
+          11
+        ],
+        "actual_tools": [
+          "get_press_status"
+        ],
+        "actual_machine_ids": [
+          11
+        ],
+        "entity_ok": true,
+        "entity_error": null,
+        "routing_ok": true,
+        "machine_count_ok": true,
+        "machine_ids_ok": true,
+        "metric_ok": true,
+        "fallback": false,
+        "correctness_score": 1.0,
+        "routing_score": 1.0,
+        "entity_consistency": 1.0,
+        "passed": true,
+        "failure_category": null,
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "diagnostics": {
+        "rawExtractedPressIds": [
+          11
+        ],
+        "selectedMachineId": 6,
+        "machineIdSource": "message",
+        "requestedPressLabel": "Press 11",
+        "renderedPressLabel": "Press 11",
+        "usedConversationContext": false,
+        "contextSourceTurn": null,
+        "inheritedIntent": null,
+        "inheritedMachineId": null,
+        "inheritedMetricKey": null,
+        "inheritedScope": null,
+        "overriddenFields": [],
+        "finalResolvedRequest": {
+          "kind": "status",
+          "domain": "auto",
+          "metric_key": null,
+          "category_key": null,
+          "comparison_mode": "none",
+          "comparison_target": null,
+          "grouping": null,
+          "output_shape": "summary",
+          "machine_id": 6,
+          "machine_ids": [],
+          "job": "",
+          "analysisScope": null,
+          "min_reel_feet": null,
+          "effective_start": "2026-04-09",
+          "effective_end": "2026-04-09",
+          "trendRequested": null
+        },
+        "plannerAttempted": false,
+        "plannerSucceeded": false,
+        "plannerValidationPassed": false,
+        "rewriteAttempted": false,
+        "rewriteApplied": false,
+        "fallbackTriggered": false,
+        "parsedMachines": [
+          6
+        ],
+        "plannedMachines": [],
+        "executedMachines": [],
+        "finalRenderedMachines": []
+      }
+    },
+    {
+      "name": "is_press_6_healthy_right_now",
+      "suite": "safe",
+      "prompt": "Is Press 6 healthy right now?",
+      "mode": "deterministic",
+      "recommended_mode": "deterministic",
+      "expected_tool": "get_press_status",
+      "expected_machine_count": 1,
+      "expects_metric": false,
+      "expected_outcome": "should_pass",
+      "actual_tool": "get_press_status",
+      "actual_tools": [
+        "get_press_status"
+      ],
+      "requested_mode": "deterministic",
+      "execution_mode": "deterministic",
+      "fallback_reason": null,
+      "title": "Press 6 is healthy in the selected window.",
+      "summary": "Filtered repeat length metrics look stable",
+      "expected_vs_actual": {
+        "expected_tool": "get_press_status",
+        "actual_tools": [
+          "get_press_status"
+        ],
+        "expected_outcome": "should_pass",
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "validation": {
+        "prompt_presses": [
+          6
+        ],
         "response_presses": [
           6
         ],
         "actual_tools": [
-          "get_press_rankings",
-          "get_press_category_breakdown"
+          "get_press_status"
         ],
         "actual_machine_ids": [
           6
@@ -315,16 +376,30 @@
         "outcome_matches_expectation": true
       },
       "diagnostics": {
+        "rawExtractedPressIds": [
+          6
+        ],
+        "selectedMachineId": 2,
+        "machineIdSource": "message",
+        "requestedPressLabel": "Press 6",
+        "renderedPressLabel": "Press 6",
+        "usedConversationContext": false,
+        "contextSourceTurn": null,
+        "inheritedIntent": null,
+        "inheritedMachineId": null,
+        "inheritedMetricKey": null,
+        "inheritedScope": null,
+        "overriddenFields": [],
         "finalResolvedRequest": {
-          "kind": "ranking_summary",
+          "kind": "status",
           "domain": "auto",
           "metric_key": null,
           "category_key": null,
-          "comparison_mode": "ranking",
+          "comparison_mode": "none",
           "comparison_target": null,
           "grouping": null,
           "output_shape": "summary",
-          "machine_id": null,
+          "machine_id": 2,
           "machine_ids": [],
           "job": "",
           "analysisScope": null,
@@ -333,20 +408,24 @@
           "effective_end": "2026-04-09",
           "trendRequested": null
         },
-        "activeStickyFilters": {
-          "timeScope": {
-            "kind": "time",
-            "preset": "today",
-            "label": "today"
-          }
-        },
-        "usedConversationContext": false
+        "plannerAttempted": false,
+        "plannerSucceeded": false,
+        "plannerValidationPassed": false,
+        "rewriteAttempted": false,
+        "rewriteApplied": false,
+        "fallbackTriggered": false,
+        "parsedMachines": [
+          2
+        ],
+        "plannedMachines": [],
+        "executedMachines": [],
+        "finalRenderedMachines": []
       }
     },
     {
-      "name": "compare_press_5_to_press_6",
-      "suite": "starter",
-      "prompt": "Compare Press 5 to Press 6",
+      "name": "compare_press_6_vs_press_8",
+      "suite": "safe",
+      "prompt": "Compare Press 6 vs Press 8",
       "mode": "deterministic",
       "recommended_mode": "deterministic",
       "expected_tool": "compare_presses",
@@ -361,8 +440,8 @@
       "requested_mode": "deterministic",
       "execution_mode": "deterministic",
       "fallback_reason": null,
-      "title": "Press 5 vs Press 6: Press 5 is currently stronger on bad-feet rate.",
-      "summary": "Press 5 is at 1.40% estimated bad feet versus 4.80% for Press 6.",
+      "title": "Press 6 vs Press 8: Press 6 is currently stronger on bad-feet rate.",
+      "summary": "Press 6 is at 1.40% estimated bad feet versus 4.80% for Press 8.",
       "expected_vs_actual": {
         "expected_tool": "compare_presses",
         "actual_tools": [
@@ -376,20 +455,20 @@
       },
       "validation": {
         "prompt_presses": [
-          5,
-          6
+          6,
+          8
         ],
         "response_presses": [
-          5,
-          6
+          6,
+          8
         ],
         "actual_tools": [
           "compare_presses",
           "get_press_category_breakdown"
         ],
         "actual_machine_ids": [
-          5,
-          6
+          6,
+          8
         ],
         "entity_ok": true,
         "entity_error": null,
@@ -408,6 +487,21 @@
         "outcome_matches_expectation": true
       },
       "diagnostics": {
+        "rawExtractedPressIds": [
+          6,
+          8
+        ],
+        "selectedMachineId": 2,
+        "machineIdSource": "message",
+        "requestedPressLabel": "Press 6",
+        "renderedPressLabel": "Press 6",
+        "usedConversationContext": false,
+        "contextSourceTurn": null,
+        "inheritedIntent": null,
+        "inheritedMachineId": null,
+        "inheritedMetricKey": null,
+        "inheritedScope": null,
+        "overriddenFields": [],
         "finalResolvedRequest": {
           "kind": "compare",
           "domain": "auto",
@@ -419,8 +513,8 @@
           "output_shape": "summary",
           "machine_id": null,
           "machine_ids": [
-            1,
-            2
+            2,
+            4
           ],
           "job": "",
           "analysisScope": null,
@@ -429,33 +523,46 @@
           "effective_end": "2026-04-09",
           "trendRequested": null
         },
-        "activeStickyFilters": {},
-        "usedConversationContext": false
+        "plannerAttempted": false,
+        "plannerSucceeded": false,
+        "plannerValidationPassed": false,
+        "rewriteAttempted": false,
+        "rewriteApplied": false,
+        "fallbackTriggered": false,
+        "parsedMachines": [
+          2,
+          4
+        ],
+        "plannedMachines": [],
+        "executedMachines": [],
+        "finalRenderedMachines": []
       }
     },
     {
-      "name": "compare_press_5_to_average",
-      "suite": "starter",
-      "prompt": "Compare Press 5 to Average",
+      "name": "compare_press_11_versus_press_12",
+      "suite": "safe",
+      "prompt": "Compare Press 11 versus Press 12",
       "mode": "deterministic",
       "recommended_mode": "deterministic",
-      "expected_tool": "get_rlm_metric_analysis",
-      "expected_machine_count": 1,
-      "expects_metric": true,
+      "expected_tool": "compare_presses",
+      "expected_machine_count": 2,
+      "expects_metric": false,
       "expected_outcome": "should_pass",
-      "actual_tool": "get_rlm_metric_analysis",
+      "actual_tool": "compare_presses",
       "actual_tools": [
-        "get_rlm_metric_analysis"
+        "compare_presses",
+        "get_press_category_breakdown"
       ],
       "requested_mode": "deterministic",
       "execution_mode": "deterministic",
       "fallback_reason": null,
-      "title": "Press 5 is worse than peer average across 9 presses on bad feet %.",
-      "summary": "Primary driver: Bad Feet Pct. Issue shape: isolated. Comparison confidence: medium. Press 5 is worse on bad feet % than the average of 9 peer presses: 11.82% versus 5.51%. Comparison confidence is medium. Trend is worsening. Production impact was concentrated in a smaller set of reels rather than evenly spread across the run.",
+      "title": "Press 11 vs Press 12: Press 11 is currently stronger on bad-feet rate.",
+      "summary": "Press 11 is at 1.40% estimated bad feet versus 4.80% for Press 12.",
       "expected_vs_actual": {
-        "expected_tool": "get_rlm_metric_analysis",
+        "expected_tool": "compare_presses",
         "actual_tools": [
-          "get_rlm_metric_analysis"
+          "compare_presses",
+          "get_press_category_breakdown"
         ],
         "expected_outcome": "should_pass",
         "actual_outcome": "passed",
@@ -464,16 +571,20 @@
       },
       "validation": {
         "prompt_presses": [
-          5
+          11,
+          12
         ],
         "response_presses": [
-          5
+          11,
+          12
         ],
         "actual_tools": [
-          "get_rlm_metric_analysis"
+          "compare_presses",
+          "get_press_category_breakdown"
         ],
         "actual_machine_ids": [
-          5
+          11,
+          12
         ],
         "entity_ok": true,
         "entity_error": null,
@@ -492,16 +603,143 @@
         "outcome_matches_expectation": true
       },
       "diagnostics": {
+        "rawExtractedPressIds": [
+          11,
+          12
+        ],
+        "selectedMachineId": 6,
+        "machineIdSource": "message",
+        "requestedPressLabel": "Press 11",
+        "renderedPressLabel": "Press 11",
+        "usedConversationContext": false,
+        "contextSourceTurn": null,
+        "inheritedIntent": null,
+        "inheritedMachineId": null,
+        "inheritedMetricKey": null,
+        "inheritedScope": null,
+        "overriddenFields": [],
         "finalResolvedRequest": {
-          "kind": "activity",
+          "kind": "compare",
           "domain": "auto",
-          "metric_key": "rlm_bad_feet_pct",
+          "metric_key": null,
           "category_key": null,
-          "comparison_mode": "press_vs_average",
+          "comparison_mode": "press_vs_press",
           "comparison_target": "better",
-          "grouping": "decision",
+          "grouping": null,
           "output_shape": "summary",
-          "machine_id": 1,
+          "machine_id": null,
+          "machine_ids": [
+            6,
+            7
+          ],
+          "job": "",
+          "analysisScope": null,
+          "min_reel_feet": null,
+          "effective_start": "2026-04-09",
+          "effective_end": "2026-04-09",
+          "trendRequested": null
+        },
+        "plannerAttempted": false,
+        "plannerSucceeded": false,
+        "plannerValidationPassed": false,
+        "rewriteAttempted": false,
+        "rewriteApplied": false,
+        "fallbackTriggered": false,
+        "parsedMachines": [
+          6,
+          7
+        ],
+        "plannedMachines": [],
+        "executedMachines": [],
+        "finalRenderedMachines": []
+      }
+    },
+    {
+      "name": "why_is_press_11_ranked_low",
+      "suite": "safe",
+      "prompt": "Why is Press 11 ranked low?",
+      "mode": "deterministic",
+      "recommended_mode": "deterministic",
+      "expected_tool": "get_press_rankings",
+      "expected_machine_count": 1,
+      "expects_metric": false,
+      "expected_outcome": "should_pass",
+      "actual_tool": "get_press_rankings",
+      "actual_tools": [
+        "get_press_rankings",
+        "get_press_category_breakdown"
+      ],
+      "requested_mode": "deterministic",
+      "execution_mode": "deterministic",
+      "fallback_reason": null,
+      "title": "Press 11 ranks low because repeat length variation, monitoring coverage are weak.",
+      "summary": "Ranks low because delta variation is elevated.",
+      "expected_vs_actual": {
+        "expected_tool": "get_press_rankings",
+        "actual_tools": [
+          "get_press_rankings",
+          "get_press_category_breakdown"
+        ],
+        "expected_outcome": "should_pass",
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "validation": {
+        "prompt_presses": [
+          11
+        ],
+        "response_presses": [
+          11
+        ],
+        "actual_tools": [
+          "get_press_rankings",
+          "get_press_category_breakdown"
+        ],
+        "actual_machine_ids": [
+          11
+        ],
+        "entity_ok": true,
+        "entity_error": null,
+        "routing_ok": true,
+        "machine_count_ok": true,
+        "machine_ids_ok": true,
+        "metric_ok": true,
+        "fallback": false,
+        "correctness_score": 1.0,
+        "routing_score": 1.0,
+        "entity_consistency": 1.0,
+        "passed": true,
+        "failure_category": null,
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "diagnostics": {
+        "rawExtractedPressIds": [
+          11
+        ],
+        "selectedMachineId": 6,
+        "machineIdSource": "message",
+        "requestedPressLabel": "Press 11",
+        "renderedPressLabel": "Press 11",
+        "usedConversationContext": false,
+        "contextSourceTurn": null,
+        "inheritedIntent": null,
+        "inheritedMachineId": null,
+        "inheritedMetricKey": null,
+        "inheritedScope": null,
+        "overriddenFields": [],
+        "finalResolvedRequest": {
+          "kind": "ranking",
+          "domain": "auto",
+          "metric_key": null,
+          "category_key": null,
+          "comparison_mode": "ranking",
+          "comparison_target": null,
+          "grouping": null,
+          "output_shape": "summary",
+          "machine_id": 6,
           "machine_ids": [],
           "job": "",
           "analysisScope": null,
@@ -510,35 +748,256 @@
           "effective_end": "2026-04-09",
           "trendRequested": null
         },
-        "activeStickyFilters": {
-          "pressId": 1
-        },
-        "usedConversationContext": false
+        "plannerAttempted": false,
+        "plannerSucceeded": false,
+        "plannerValidationPassed": false,
+        "rewriteAttempted": false,
+        "rewriteApplied": false,
+        "fallbackTriggered": false,
+        "parsedMachines": [
+          6
+        ],
+        "plannedMachines": [],
+        "executedMachines": [],
+        "finalRenderedMachines": []
       }
     },
     {
-      "name": "what_jobs_ran_on_press_8_in_the_last_24_hours",
-      "suite": "starter",
-      "prompt": "What jobs ran on Press 8 in the last 24 hours?",
+      "name": "why_is_press_6_low",
+      "suite": "safe",
+      "prompt": "Why is Press 6 low?",
       "mode": "deterministic",
       "recommended_mode": "deterministic",
-      "expected_tool": "get_press_job_list",
+      "expected_tool": "get_press_rankings",
       "expected_machine_count": 1,
       "expects_metric": false,
       "expected_outcome": "should_pass",
-      "actual_tool": "get_press_job_list",
+      "actual_tool": "get_press_rankings",
       "actual_tools": [
-        "get_press_job_list"
+        "get_press_rankings",
+        "get_press_category_breakdown"
       ],
       "requested_mode": "deterministic",
       "execution_mode": "deterministic",
       "fallback_reason": null,
-      "title": "Jobs run on Press 8",
-      "summary": "Press 8 ran 2 jobs in the selected scope.",
+      "title": "Press 6 ranks low because repeat length variation, monitoring coverage are weak.",
+      "summary": "Ranks low because delta variation is elevated.",
       "expected_vs_actual": {
-        "expected_tool": "get_press_job_list",
+        "expected_tool": "get_press_rankings",
         "actual_tools": [
-          "get_press_job_list"
+          "get_press_rankings",
+          "get_press_category_breakdown"
+        ],
+        "expected_outcome": "should_pass",
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "validation": {
+        "prompt_presses": [
+          6
+        ],
+        "response_presses": [
+          6
+        ],
+        "actual_tools": [
+          "get_press_rankings",
+          "get_press_category_breakdown"
+        ],
+        "actual_machine_ids": [
+          6
+        ],
+        "entity_ok": true,
+        "entity_error": null,
+        "routing_ok": true,
+        "machine_count_ok": true,
+        "machine_ids_ok": true,
+        "metric_ok": true,
+        "fallback": false,
+        "correctness_score": 1.0,
+        "routing_score": 1.0,
+        "entity_consistency": 1.0,
+        "passed": true,
+        "failure_category": null,
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "diagnostics": {
+        "rawExtractedPressIds": [
+          6
+        ],
+        "selectedMachineId": 2,
+        "machineIdSource": "message",
+        "requestedPressLabel": "Press 6",
+        "renderedPressLabel": "Press 6",
+        "usedConversationContext": false,
+        "contextSourceTurn": null,
+        "inheritedIntent": null,
+        "inheritedMachineId": null,
+        "inheritedMetricKey": null,
+        "inheritedScope": null,
+        "overriddenFields": [],
+        "finalResolvedRequest": {
+          "kind": "ranking",
+          "domain": "auto",
+          "metric_key": null,
+          "category_key": null,
+          "comparison_mode": "ranking",
+          "comparison_target": null,
+          "grouping": null,
+          "output_shape": "summary",
+          "machine_id": 2,
+          "machine_ids": [],
+          "job": "",
+          "analysisScope": null,
+          "min_reel_feet": null,
+          "effective_start": "2026-04-09",
+          "effective_end": "2026-04-09",
+          "trendRequested": null
+        },
+        "plannerAttempted": false,
+        "plannerSucceeded": false,
+        "plannerValidationPassed": false,
+        "rewriteAttempted": false,
+        "rewriteApplied": false,
+        "fallbackTriggered": false,
+        "parsedMachines": [
+          2
+        ],
+        "plannedMachines": [],
+        "executedMachines": [],
+        "finalRenderedMachines": []
+      }
+    },
+    {
+      "name": "is_press_6_getting_worse_reel_to_reel",
+      "suite": "safe",
+      "prompt": "Is Press 6 getting worse reel to reel?",
+      "mode": "deterministic",
+      "recommended_mode": "deterministic",
+      "expected_tool": "get_reel_to_reel_summary",
+      "expected_machine_count": 1,
+      "expects_metric": false,
+      "expected_outcome": "should_pass",
+      "actual_tool": "get_reel_to_reel_summary",
+      "actual_tools": [
+        "get_reel_to_reel_summary"
+      ],
+      "requested_mode": "deterministic",
+      "execution_mode": "deterministic",
+      "fallback_reason": null,
+      "title": "Press 6 is getting worse reel to reel in the selected window.",
+      "summary": "It is trending worse over the selected scope. Recent filtered reels moved from 4.30% bad feet on R-10 to 5.00% on R-12.",
+      "expected_vs_actual": {
+        "expected_tool": "get_reel_to_reel_summary",
+        "actual_tools": [
+          "get_reel_to_reel_summary"
+        ],
+        "expected_outcome": "should_pass",
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "validation": {
+        "prompt_presses": [
+          6
+        ],
+        "response_presses": [
+          6
+        ],
+        "actual_tools": [
+          "get_reel_to_reel_summary"
+        ],
+        "actual_machine_ids": [
+          6
+        ],
+        "entity_ok": true,
+        "entity_error": null,
+        "routing_ok": true,
+        "machine_count_ok": true,
+        "machine_ids_ok": true,
+        "metric_ok": true,
+        "fallback": false,
+        "correctness_score": 1.0,
+        "routing_score": 1.0,
+        "entity_consistency": 1.0,
+        "passed": true,
+        "failure_category": null,
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "diagnostics": {
+        "rawExtractedPressIds": [
+          6
+        ],
+        "selectedMachineId": 2,
+        "machineIdSource": "message",
+        "requestedPressLabel": "Press 6",
+        "renderedPressLabel": "Press 6",
+        "usedConversationContext": false,
+        "contextSourceTurn": null,
+        "inheritedIntent": null,
+        "inheritedMachineId": null,
+        "inheritedMetricKey": null,
+        "inheritedScope": null,
+        "overriddenFields": [],
+        "finalResolvedRequest": {
+          "kind": "reel_summary",
+          "domain": "auto",
+          "metric_key": null,
+          "category_key": null,
+          "comparison_mode": "none",
+          "comparison_target": null,
+          "grouping": null,
+          "output_shape": "summary",
+          "machine_id": 2,
+          "machine_ids": [],
+          "job": "",
+          "analysisScope": null,
+          "min_reel_feet": null,
+          "effective_start": "2026-04-09",
+          "effective_end": "2026-04-09",
+          "trendRequested": null
+        },
+        "plannerAttempted": false,
+        "plannerSucceeded": false,
+        "plannerValidationPassed": false,
+        "rewriteAttempted": false,
+        "rewriteApplied": false,
+        "fallbackTriggered": false,
+        "parsedMachines": [
+          2
+        ],
+        "plannedMachines": [],
+        "executedMachines": [],
+        "finalRenderedMachines": []
+      }
+    },
+    {
+      "name": "show_reel_to_reel_for_press_8",
+      "suite": "safe",
+      "prompt": "Show reel to reel for Press 8",
+      "mode": "deterministic",
+      "recommended_mode": "deterministic",
+      "expected_tool": "get_reel_to_reel_summary",
+      "expected_machine_count": 1,
+      "expects_metric": false,
+      "expected_outcome": "should_pass",
+      "actual_tool": "get_reel_to_reel_summary",
+      "actual_tools": [
+        "get_reel_to_reel_summary"
+      ],
+      "requested_mode": "deterministic",
+      "execution_mode": "deterministic",
+      "fallback_reason": null,
+      "title": "Press 8 is getting worse reel to reel in the selected window.",
+      "summary": "It is trending worse over the selected scope. Recent filtered reels moved from 4.30% bad feet on R-10 to 5.00% on R-12.",
+      "expected_vs_actual": {
+        "expected_tool": "get_reel_to_reel_summary",
+        "actual_tools": [
+          "get_reel_to_reel_summary"
         ],
         "expected_outcome": "should_pass",
         "actual_outcome": "passed",
@@ -553,7 +1012,7 @@
           8
         ],
         "actual_tools": [
-          "get_press_job_list"
+          "get_reel_to_reel_summary"
         ],
         "actual_machine_ids": [
           8
@@ -575,8 +1034,22 @@
         "outcome_matches_expectation": true
       },
       "diagnostics": {
+        "rawExtractedPressIds": [
+          8
+        ],
+        "selectedMachineId": 4,
+        "machineIdSource": "message",
+        "requestedPressLabel": "Press 8",
+        "renderedPressLabel": "Press 8",
+        "usedConversationContext": false,
+        "contextSourceTurn": null,
+        "inheritedIntent": null,
+        "inheritedMachineId": null,
+        "inheritedMetricKey": null,
+        "inheritedScope": null,
+        "overriddenFields": [],
         "finalResolvedRequest": {
-          "kind": "job_list",
+          "kind": "reel_summary",
           "domain": "auto",
           "metric_key": null,
           "category_key": null,
@@ -587,52 +1060,49 @@
           "machine_id": 4,
           "machine_ids": [],
           "job": "",
-          "analysisScope": {
-            "kind": "time",
-            "unit": "hours",
-            "value": 24,
-            "label": "last 24 hours"
-          },
+          "analysisScope": null,
           "min_reel_feet": null,
-          "effective_start": "2026-04-08T15:03:07",
-          "effective_end": "2026-04-09T15:03:07",
+          "effective_start": "2026-04-09",
+          "effective_end": "2026-04-09",
           "trendRequested": null
         },
-        "activeStickyFilters": {
-          "timeScope": {
-            "kind": "time",
-            "unit": "hours",
-            "value": 24,
-            "label": "last 24 hours"
-          },
-          "pressId": 4
-        },
-        "usedConversationContext": false
+        "plannerAttempted": false,
+        "plannerSucceeded": false,
+        "plannerValidationPassed": false,
+        "rewriteAttempted": false,
+        "rewriteApplied": false,
+        "fallbackTriggered": false,
+        "parsedMachines": [
+          4
+        ],
+        "plannedMachines": [],
+        "executedMachines": [],
+        "finalRenderedMachines": []
       }
     },
     {
-      "name": "show_me_recent_jobs_for_press_5",
-      "suite": "starter",
-      "prompt": "Show me recent jobs for Press 5",
+      "name": "show_the_bad_feet_trend_for_press_7",
+      "suite": "safe",
+      "prompt": "Show the bad feet trend for Press 7",
       "mode": "deterministic",
       "recommended_mode": "deterministic",
-      "expected_tool": "get_press_job_list",
+      "expected_tool": "get_press_metric_trend",
       "expected_machine_count": 1,
-      "expects_metric": false,
+      "expects_metric": true,
       "expected_outcome": "should_pass",
-      "actual_tool": "get_press_job_list",
+      "actual_tool": "get_press_metric_trend",
       "actual_tools": [
-        "get_press_job_list"
+        "get_press_metric_trend"
       ],
       "requested_mode": "deterministic",
       "execution_mode": "deterministic",
       "fallback_reason": null,
-      "title": "Jobs run on Press 5",
-      "summary": "Press 5 ran 2 jobs in the selected scope.",
+      "title": "Press 7 bad feet % is trending up in the selected window.",
+      "summary": "It is trending up over the selected scope. Metric trend is available for the selected window.",
       "expected_vs_actual": {
-        "expected_tool": "get_press_job_list",
+        "expected_tool": "get_press_metric_trend",
         "actual_tools": [
-          "get_press_job_list"
+          "get_press_metric_trend"
         ],
         "expected_outcome": "should_pass",
         "actual_outcome": "passed",
@@ -641,16 +1111,16 @@
       },
       "validation": {
         "prompt_presses": [
-          5
+          7
         ],
         "response_presses": [
-          5
+          7
         ],
         "actual_tools": [
-          "get_press_job_list"
+          "get_press_metric_trend"
         ],
         "actual_machine_ids": [
-          5
+          7
         ],
         "entity_ok": true,
         "entity_error": null,
@@ -669,16 +1139,30 @@
         "outcome_matches_expectation": true
       },
       "diagnostics": {
+        "rawExtractedPressIds": [
+          7
+        ],
+        "selectedMachineId": 3,
+        "machineIdSource": "message",
+        "requestedPressLabel": "Press 7",
+        "renderedPressLabel": "Press 7",
+        "usedConversationContext": false,
+        "contextSourceTurn": null,
+        "inheritedIntent": null,
+        "inheritedMachineId": null,
+        "inheritedMetricKey": null,
+        "inheritedScope": null,
+        "overriddenFields": [],
         "finalResolvedRequest": {
-          "kind": "job_list",
+          "kind": "trend",
           "domain": "auto",
-          "metric_key": null,
+          "metric_key": "bad_feet_pct",
           "category_key": null,
           "comparison_mode": "none",
           "comparison_target": null,
           "grouping": null,
           "output_shape": "summary",
-          "machine_id": 1,
+          "machine_id": 3,
           "machine_ids": [],
           "job": "",
           "analysisScope": null,
@@ -687,15 +1171,338 @@
           "effective_end": "2026-04-09",
           "trendRequested": null
         },
-        "activeStickyFilters": {
-          "pressId": 1
+        "plannerAttempted": false,
+        "plannerSucceeded": false,
+        "plannerValidationPassed": false,
+        "rewriteAttempted": false,
+        "rewriteApplied": false,
+        "fallbackTriggered": false,
+        "parsedMachines": [
+          3
+        ],
+        "plannedMachines": [],
+        "executedMachines": [],
+        "finalRenderedMachines": []
+      }
+    },
+    {
+      "name": "show_monitoring_density_for_press_6",
+      "suite": "safe",
+      "prompt": "Show monitoring density for Press 6",
+      "mode": "deterministic",
+      "recommended_mode": "deterministic",
+      "expected_tool": "get_press_metric_trend",
+      "expected_machine_count": 1,
+      "expects_metric": true,
+      "expected_outcome": "should_pass",
+      "actual_tool": "get_press_metric_trend",
+      "actual_tools": [
+        "get_press_metric_trend"
+      ],
+      "requested_mode": "deterministic",
+      "execution_mode": "deterministic",
+      "fallback_reason": null,
+      "title": "Press 6 monitoring coverage is trending better in the selected window.",
+      "summary": "It is trending better over the selected scope. Metric trend is available for the selected window.",
+      "expected_vs_actual": {
+        "expected_tool": "get_press_metric_trend",
+        "actual_tools": [
+          "get_press_metric_trend"
+        ],
+        "expected_outcome": "should_pass",
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "validation": {
+        "prompt_presses": [
+          6
+        ],
+        "response_presses": [
+          6
+        ],
+        "actual_tools": [
+          "get_press_metric_trend"
+        ],
+        "actual_machine_ids": [
+          6
+        ],
+        "entity_ok": true,
+        "entity_error": null,
+        "routing_ok": true,
+        "machine_count_ok": true,
+        "machine_ids_ok": true,
+        "metric_ok": true,
+        "fallback": false,
+        "correctness_score": 1.0,
+        "routing_score": 1.0,
+        "entity_consistency": 1.0,
+        "passed": true,
+        "failure_category": null,
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "diagnostics": {
+        "rawExtractedPressIds": [
+          6
+        ],
+        "selectedMachineId": 2,
+        "machineIdSource": "message",
+        "requestedPressLabel": "Press 6",
+        "renderedPressLabel": "Press 6",
+        "usedConversationContext": false,
+        "contextSourceTurn": null,
+        "inheritedIntent": null,
+        "inheritedMachineId": null,
+        "inheritedMetricKey": null,
+        "inheritedScope": null,
+        "overriddenFields": [],
+        "finalResolvedRequest": {
+          "kind": "trend",
+          "domain": "auto",
+          "metric_key": "monitoring_coverage",
+          "category_key": null,
+          "comparison_mode": "none",
+          "comparison_target": null,
+          "grouping": null,
+          "output_shape": "summary",
+          "machine_id": 2,
+          "machine_ids": [],
+          "job": "",
+          "analysisScope": null,
+          "min_reel_feet": null,
+          "effective_start": "2026-04-09",
+          "effective_end": "2026-04-09",
+          "trendRequested": null
         },
-        "usedConversationContext": false
+        "plannerAttempted": false,
+        "plannerSucceeded": false,
+        "plannerValidationPassed": false,
+        "rewriteAttempted": false,
+        "rewriteApplied": false,
+        "fallbackTriggered": false,
+        "parsedMachines": [
+          2
+        ],
+        "plannedMachines": [],
+        "executedMachines": [],
+        "finalRenderedMachines": []
+      }
+    },
+    {
+      "name": "show_delta_std_for_press_9",
+      "suite": "safe",
+      "prompt": "Show delta std for Press 9",
+      "mode": "deterministic",
+      "recommended_mode": "deterministic",
+      "expected_tool": "get_press_metric_trend",
+      "expected_machine_count": 1,
+      "expects_metric": true,
+      "expected_outcome": "should_pass",
+      "actual_tool": "get_press_metric_trend",
+      "actual_tools": [
+        "get_press_metric_trend"
+      ],
+      "requested_mode": "deterministic",
+      "execution_mode": "deterministic",
+      "fallback_reason": null,
+      "title": "Press 9 repeat length variation is trending worse in the selected window.",
+      "summary": "It is trending worse over the selected scope. Metric trend is available for the selected window.",
+      "expected_vs_actual": {
+        "expected_tool": "get_press_metric_trend",
+        "actual_tools": [
+          "get_press_metric_trend"
+        ],
+        "expected_outcome": "should_pass",
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "validation": {
+        "prompt_presses": [
+          9
+        ],
+        "response_presses": [
+          9
+        ],
+        "actual_tools": [
+          "get_press_metric_trend"
+        ],
+        "actual_machine_ids": [
+          9
+        ],
+        "entity_ok": true,
+        "entity_error": null,
+        "routing_ok": true,
+        "machine_count_ok": true,
+        "machine_ids_ok": true,
+        "metric_ok": true,
+        "fallback": false,
+        "correctness_score": 1.0,
+        "routing_score": 1.0,
+        "entity_consistency": 1.0,
+        "passed": true,
+        "failure_category": null,
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "diagnostics": {
+        "rawExtractedPressIds": [
+          9
+        ],
+        "selectedMachineId": 5,
+        "machineIdSource": "message",
+        "requestedPressLabel": "Press 9",
+        "renderedPressLabel": "Press 9",
+        "usedConversationContext": false,
+        "contextSourceTurn": null,
+        "inheritedIntent": null,
+        "inheritedMachineId": null,
+        "inheritedMetricKey": null,
+        "inheritedScope": null,
+        "overriddenFields": [],
+        "finalResolvedRequest": {
+          "kind": "trend",
+          "domain": "auto",
+          "metric_key": "delta_variation",
+          "category_key": null,
+          "comparison_mode": "none",
+          "comparison_target": null,
+          "grouping": null,
+          "output_shape": "summary",
+          "machine_id": 5,
+          "machine_ids": [],
+          "job": "",
+          "analysisScope": null,
+          "min_reel_feet": null,
+          "effective_start": "2026-04-09",
+          "effective_end": "2026-04-09",
+          "trendRequested": null
+        },
+        "plannerAttempted": false,
+        "plannerSucceeded": false,
+        "plannerValidationPassed": false,
+        "rewriteAttempted": false,
+        "rewriteApplied": false,
+        "fallbackTriggered": false,
+        "parsedMachines": [
+          5
+        ],
+        "plannedMachines": [],
+        "executedMachines": [],
+        "finalRenderedMachines": []
+      }
+    },
+    {
+      "name": "plot_drift_for_press_12",
+      "suite": "safe",
+      "prompt": "Plot drift for Press 12",
+      "mode": "deterministic",
+      "recommended_mode": "deterministic",
+      "expected_tool": "get_press_metric_trend",
+      "expected_machine_count": 1,
+      "expects_metric": true,
+      "expected_outcome": "should_pass",
+      "actual_tool": "get_press_metric_trend",
+      "actual_tools": [
+        "get_press_metric_trend"
+      ],
+      "requested_mode": "deterministic",
+      "execution_mode": "deterministic",
+      "fallback_reason": null,
+      "title": "Press 12 repeat length drift is trending worse in the selected window.",
+      "summary": "It is trending worse over the selected scope. Metric trend is available for the selected window.",
+      "expected_vs_actual": {
+        "expected_tool": "get_press_metric_trend",
+        "actual_tools": [
+          "get_press_metric_trend"
+        ],
+        "expected_outcome": "should_pass",
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "validation": {
+        "prompt_presses": [
+          12
+        ],
+        "response_presses": [
+          12
+        ],
+        "actual_tools": [
+          "get_press_metric_trend"
+        ],
+        "actual_machine_ids": [
+          12
+        ],
+        "entity_ok": true,
+        "entity_error": null,
+        "routing_ok": true,
+        "machine_count_ok": true,
+        "machine_ids_ok": true,
+        "metric_ok": true,
+        "fallback": false,
+        "correctness_score": 1.0,
+        "routing_score": 1.0,
+        "entity_consistency": 1.0,
+        "passed": true,
+        "failure_category": null,
+        "actual_outcome": "passed",
+        "pass_fail_reason": "matched expectations",
+        "outcome_matches_expectation": true
+      },
+      "diagnostics": {
+        "rawExtractedPressIds": [
+          12
+        ],
+        "selectedMachineId": 7,
+        "machineIdSource": "message",
+        "requestedPressLabel": "Press 12",
+        "renderedPressLabel": "Press 12",
+        "usedConversationContext": false,
+        "contextSourceTurn": null,
+        "inheritedIntent": null,
+        "inheritedMachineId": null,
+        "inheritedMetricKey": null,
+        "inheritedScope": null,
+        "overriddenFields": [],
+        "finalResolvedRequest": {
+          "kind": "trend",
+          "domain": "auto",
+          "metric_key": "delta_drift",
+          "category_key": null,
+          "comparison_mode": "none",
+          "comparison_target": null,
+          "grouping": null,
+          "output_shape": "summary",
+          "machine_id": 7,
+          "machine_ids": [],
+          "job": "",
+          "analysisScope": null,
+          "min_reel_feet": null,
+          "effective_start": "2026-04-09",
+          "effective_end": "2026-04-09",
+          "trendRequested": null
+        },
+        "plannerAttempted": false,
+        "plannerSucceeded": false,
+        "plannerValidationPassed": false,
+        "rewriteAttempted": false,
+        "rewriteApplied": false,
+        "fallbackTriggered": false,
+        "parsedMachines": [
+          7
+        ],
+        "plannedMachines": [],
+        "executedMachines": [],
+        "finalRenderedMachines": []
       }
     },
     {
       "name": "show_speed_instability_for_press_14",
-      "suite": "starter",
+      "suite": "safe",
       "prompt": "Show speed instability for Press 14",
       "mode": "deterministic",
       "recommended_mode": "deterministic",
@@ -752,6 +1559,20 @@
         "outcome_matches_expectation": true
       },
       "diagnostics": {
+        "rawExtractedPressIds": [
+          14
+        ],
+        "selectedMachineId": 9,
+        "machineIdSource": "message",
+        "requestedPressLabel": "Press 14",
+        "renderedPressLabel": "Press 14",
+        "usedConversationContext": false,
+        "contextSourceTurn": null,
+        "inheritedIntent": null,
+        "inheritedMachineId": null,
+        "inheritedMetricKey": null,
+        "inheritedScope": null,
+        "overriddenFields": [],
         "finalResolvedRequest": {
           "kind": "trend",
           "domain": "auto",
@@ -770,109 +1591,33 @@
           "effective_end": "2026-04-09",
           "trendRequested": null
         },
-        "activeStickyFilters": {
-          "pressId": 9
-        },
-        "usedConversationContext": false
-      }
-    },
-    {
-      "name": "show_delta_behavior_for_press_7",
-      "suite": "starter",
-      "prompt": "Show delta behavior for Press 7",
-      "mode": "deterministic",
-      "recommended_mode": "deterministic",
-      "expected_tool": "get_rlm_metric_analysis",
-      "expected_machine_count": 1,
-      "expects_metric": true,
-      "expected_outcome": "should_pass",
-      "actual_tool": "get_rlm_metric_analysis",
-      "actual_tools": [
-        "get_rlm_metric_analysis"
-      ],
-      "requested_mode": "deterministic",
-      "execution_mode": "deterministic",
-      "fallback_reason": null,
-      "title": "Press 7 Delta Behavior",
-      "summary": "Press 7 delta behavior is 0.72 mm. Trend is worsening. The run had one main deviation episode in the end averaging 1.02 mm across 9 reels.",
-      "expected_vs_actual": {
-        "expected_tool": "get_rlm_metric_analysis",
-        "actual_tools": [
-          "get_rlm_metric_analysis"
+        "plannerAttempted": false,
+        "plannerSucceeded": false,
+        "plannerValidationPassed": false,
+        "rewriteAttempted": false,
+        "rewriteApplied": false,
+        "fallbackTriggered": false,
+        "parsedMachines": [
+          9
         ],
-        "expected_outcome": "should_pass",
-        "actual_outcome": "passed",
-        "pass_fail_reason": "matched expectations",
-        "outcome_matches_expectation": true
-      },
-      "validation": {
-        "prompt_presses": [
-          7
-        ],
-        "response_presses": [
-          7
-        ],
-        "actual_tools": [
-          "get_rlm_metric_analysis"
-        ],
-        "actual_machine_ids": [
-          7
-        ],
-        "entity_ok": true,
-        "entity_error": null,
-        "routing_ok": true,
-        "machine_count_ok": true,
-        "machine_ids_ok": true,
-        "metric_ok": true,
-        "fallback": false,
-        "correctness_score": 1.0,
-        "routing_score": 1.0,
-        "entity_consistency": 1.0,
-        "passed": true,
-        "failure_category": null,
-        "actual_outcome": "passed",
-        "pass_fail_reason": "matched expectations",
-        "outcome_matches_expectation": true
-      },
-      "diagnostics": {
-        "finalResolvedRequest": {
-          "kind": "activity",
-          "domain": "auto",
-          "metric_key": "delta_variation",
-          "category_key": null,
-          "comparison_mode": "none",
-          "comparison_target": null,
-          "grouping": null,
-          "output_shape": "summary",
-          "machine_id": 3,
-          "machine_ids": [],
-          "job": "",
-          "analysisScope": null,
-          "min_reel_feet": null,
-          "effective_start": "2026-04-09",
-          "effective_end": "2026-04-09",
-          "trendRequested": false
-        },
-        "activeStickyFilters": {
-          "pressId": 3
-        },
-        "usedConversationContext": false
+        "plannedMachines": [],
+        "executedMachines": [],
+        "finalRenderedMachines": []
       }
     }
   ],
   "summary": {
-    "total_cases": 10,
-    "passed_cases": 10,
+    "total_cases": 15,
+    "passed_cases": 15,
     "failed_cases": 0,
     "overall_pass_rate": 1.0,
     "entity_consistency_rate": 1.0,
     "tool_accuracy": {
       "compare_presses": 1.0,
-      "get_press_job_list": 1.0,
       "get_press_metric_trend": 1.0,
       "get_press_rankings": 1.0,
       "get_press_status": 1.0,
-      "get_rlm_metric_analysis": 1.0
+      "get_reel_to_reel_summary": 1.0
     },
     "failure_categories": {},
     "most_common_failure_type": null,
@@ -883,11 +1628,11 @@
         "accuracy": 1.0
       },
       {
-        "tool": "get_press_job_list",
+        "tool": "get_press_metric_trend",
         "accuracy": 1.0
       },
       {
-        "tool": "get_press_metric_trend",
+        "tool": "get_press_rankings",
         "accuracy": 1.0
       }
     ],
@@ -897,9 +1642,9 @@
       "entity_consistency": 1.0
     },
     "suite_summary": {
-      "starter": {
-        "total": 10,
-        "passed": 10,
+      "safe": {
+        "total": 15,
+        "passed": 15,
         "failed": 0,
         "pass_rate": 1.0,
         "entity_consistency_rate": 1.0,

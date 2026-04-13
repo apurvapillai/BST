@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict
 
 from flask import Blueprint, jsonify, render_template, request
 
 from db.connection import SessionLocal
 from db.models import Machine
+from db.rlm_connection import RLMSessionLocal
 from services.rlm_assistant_service import (
     EXECUTION_MODE_DETERMINISTIC,
     EXECUTION_MODE_LLM,
@@ -14,6 +15,7 @@ from services.rlm_assistant_service import (
     RLMAssistantService,
 )
 from services.rlm_press_intelligence_service import PressIntelligenceFilters
+from services.rlm_reel_footage import compute_reel_feet_from_range
 
 
 assistant_bp = Blueprint("assistant", __name__)
@@ -21,9 +23,8 @@ assistant_service = RLMAssistantService()
 
 
 def _default_window() -> tuple[str, str]:
-    end = datetime.utcnow().date()
-    start = end - timedelta(days=2)
-    return start.isoformat(), end.isoformat()
+    today = datetime.utcnow().date()
+    return today.isoformat(), today.isoformat()
 
 
 def _format_feet(value: Any) -> str:
@@ -46,11 +47,28 @@ def _assistant_press_rankings_today() -> list[Dict[str, Any]]:
     now = datetime.utcnow()
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     try:
-        intelligence = assistant_service.press_service.get_press_intelligence(
-            PressIntelligenceFilters(start=start, end=now)
-        )
+        filters = PressIntelligenceFilters(start=start, end=now)
+        intelligence = assistant_service.press_service.get_press_intelligence(filters)
+        with RLMSessionLocal() as session:
+            reels = assistant_service.press_service._get_reels(session, filters)
+            repeat_length = assistant_service.press_service._get_repeat_length_batch(
+                session,
+                [row.reel_db_id for row in reels],
+            )
     except Exception:
         return []
+
+    active_feet_by_machine: Dict[int, float] = {}
+    total_feet_by_machine: Dict[int, float] = {}
+    for reel in reels:
+        machine_id = int(reel.machine_id or 0)
+        feet = compute_reel_feet_from_range(reel.reel_start, reel.reel_end)
+        if feet is None:
+            continue
+        total_feet_by_machine[machine_id] = float(total_feet_by_machine.get(machine_id) or 0.0) + float(feet)
+        reel_repeat = repeat_length.get(reel.reel_db_id, {})
+        if int(reel_repeat.get("monitoringPointsTotal") or 0) > 0:
+            active_feet_by_machine[machine_id] = float(active_feet_by_machine.get(machine_id) or 0.0) + float(feet)
 
     rows = list(intelligence.get("pressRankings") or [])
     rows.sort(
@@ -71,6 +89,15 @@ def _assistant_press_rankings_today() -> list[Dict[str, Any]]:
                 "press_label": press_label,
                 "feet_total": _format_feet(row.get("feetTotal")),
                 "bad_feet_pct": _format_pct(row.get("estimatedBadFeetPct")),
+                "active_pct": _format_pct(
+                    (
+                        float(active_feet_by_machine.get(machine_id) or 0.0)
+                        / float(total_feet_by_machine.get(machine_id) or 0.0)
+                        * 100.0
+                    )
+                    if machine_id is not None and float(total_feet_by_machine.get(machine_id) or 0.0) > 0.0
+                    else None
+                ),
             }
         )
     return cards

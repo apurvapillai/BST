@@ -83,13 +83,81 @@
             </div>
           </section>
 
+    <section class="rlm-panel rlm-panel--status">
+      <div class="panel-header">
+        <div>
+          <h2>Press RLM Status</h2>
+          <p class="panel-subtitle">Feet by reel activity across the current scope</p>
+        </div>
+      </div>
+      <div class="chart-card chart-card--status">
+        <div class="chart-card-title">
+          <p class="chart-card__eyebrow">Reel Status</p>
+          <h4>Feet by Reel Activity</h4>
+        </div>
+        <div id="rlmStatusFeetChart" class="chart chart--monitoring"></div>
+      </div>
+      <div class="rlm-status-feet-grid">
+        <div class="rlm-status-metrics">
+          <div class="delta-feet-cards delta-feet-cards--side">
+            <div class="delta-feet-card">
+              <p>Total feet</p>
+              <div class="delta-feet-card__value" id="rlmFeetTotal">--</div>
+            </div>
+            <div class="delta-feet-card">
+              <p>Good feet</p>
+              <div class="delta-feet-card__value delta-feet-card__value--good" id="rlmFeetGood">--</div>
+              <span class="delta-feet-card__percent" id="rlmFeetGoodPct">--</span>
+            </div>
+            <div class="delta-feet-card">
+              <p>Bad feet</p>
+              <div class="delta-feet-card__value delta-feet-card__value--bad" id="rlmFeetBad">--</div>
+              <span class="delta-feet-card__percent" id="rlmFeetBadPct">--</span>
+            </div>
+          </div>
+          <div class="rlm-status-mini-charts">
+            <div class="chart-card chart-card--mini">
+              <div class="chart-card-title">
+                <p class="chart-card__eyebrow">Distribution</p>
+                <h4>Out-of-bounds Breakdown</h4>
+              </div>
+              <div id="rlmDeltaOobPie" class="chart chart--mini"></div>
+            </div>
+            <div class="chart-card chart-card--mini">
+              <div class="chart-card-title">
+                <p class="chart-card__eyebrow">Split</p>
+                <h4>Above vs Below Bounds</h4>
+              </div>
+              <div id="rlmDeltaOobBar" class="chart chart--mini"></div>
+            </div>
+            <div class="chart-card chart-card--mini">
+              <div class="chart-card-title">
+                <p class="chart-card__eyebrow">Defect Position</p>
+                <h4>Beginning vs Middle vs End</h4>
+              </div>
+              <div id="rlmDefectZoneChart" class="chart chart--mini"></div>
+            </div>
+          </div>
+        </div>
+        <div class="chart-card chart-card--mini chart-card--feet rlm-status-hotspots">
+          <div class="chart-card-title">
+            <p class="chart-card__eyebrow">Reel Hotspots</p>
+            <h4>Feet In/Out-of-Bounds</h4>
+          </div>
+          <div id="rlmDeltaFeetBar" class="chart chart--mini chart--feet-bar"></div>
+        </div>
+      </div>
+    </section>
+
     <section class="rlm-panel rlm-panel--highlight rlm-panel--curlength">
       <div class="panel-header">
         <div>
           <h2>Curlength Analysis</h2>
           <p class="panel-subtitle">Primary trend focus with alert banding</p>
         </div>
+        <button type="button" class="btn btn--inline rlm-trend-gap-toggle" id="rlmTrendGapToggle">Compress gaps</button>
       </div>
+      <div class="summary-grid rlm-trend-summary" id="rlmTrendSummary"></div>
       <div class="curlength-controls">
         <div class="control control--hidden">
           <label for="rlmTargetValue">Target curlength (mm)</label>
@@ -115,191 +183,159 @@
         </div>
         <div id="rlmCurlengthChart" class="chart chart--tall"></div>
       </div>
+      <div class="curlength-delta-group">
+        <div class="panel-header panel-header--stacked">
+          <div>
+            <h2>Repeat Length Delta</h2>
+            <p class="panel-subtitle">Trend range, error limits, and out-of-bounds analysis.</p>
+          </div>
+          <span id="rlmDeltaSummary" class="delta-summary">--</span>
+        </div>
+        <div class="summary-grid rlm-delta-summary-grid" id="rlmDeltaMetricsSummary"></div>
+        <div class="chart-card chart-card--tall chart-card--full rlm-delta-chart">
+          <div class="chart-card-title">
+            <p class="chart-card__eyebrow">Delta Analysis</p>
+            <h4>Repeat Length Delta</h4>
+          </div>
+          <div class="chart-loader hidden" id="rlmDeltaChartLoader">
+            <div class="chart-loader__spinner"></div>
+          </div>
+          <div id="rlmDeltaChart" class="chart chart--tall"></div>
+        </div>
+        <div class="delta-control-card">
+          <div class="delta-controls delta-controls--inline">
+            <label class="delta-toggle delta-toggle--inline">
+              <input type="checkbox" id="rlmDeltaToggle">
+              Out-of-bounds only
+            </label>
+            <div class="delta-controls__inputs">
+              <div class="control-group control-group--boxed">
+                <div class="control-group__header">
+                  <p class="control-group__eyebrow">Trend range</p>
+                  <h5>Custom y-axis (mm)</h5>
+                </div>
+                <div class="control control--inline">
+                  <label>Min / Max</label>
+                  <div class="inline-inputs">
+                    <input type="number" step="0.001" id="rlmDeltaAxisMin" placeholder="min">
+                    <input type="number" step="0.001" id="rlmDeltaAxisMax" placeholder="max">
+                    <button type="button" class="btn btn--inline" id="rlmDeltaAxisApply">Apply</button>
+                  </div>
+                </div>
+              </div>
+              <div class="control-group control-group--boxed">
+                <div class="control-group__header">
+                  <p class="control-group__eyebrow">Error limits</p>
+                  <h5>Custom err bounds (mm)</h5>
+                </div>
+                <div class="control control--inline">
+                  <label>Shrink / Expand</label>
+                  <div class="inline-inputs">
+                    <input type="number" step="0.001" id="rlmErrShrinkOverride" placeholder="err shrink">
+                    <input type="number" step="0.001" id="rlmErrExpandOverride" placeholder="err expand">
+                    <button type="button" class="btn btn--inline" id="rlmDeltaBoundsApply">Apply</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
 
-    <section class="rlm-panel rlm-panel--delta">
+    <section class="rlm-panel rlm-panel--reel-intelligence">
       <div class="panel-header">
         <div>
-          <h2>Delta Intelligence</h2>
-          <p class="panel-subtitle">Repeat length deltas, distributions, and detail</p>
-        </div>
-        <span id="rlmDeltaSummary" class="delta-summary">--</span>
-      </div>
-      <div class="delta-control-card">
-        <div class="delta-controls delta-controls--inline">
-          <label class="delta-toggle delta-toggle--inline">
-            <input type="checkbox" id="rlmDeltaToggle">
-            Out-of-bounds only
-          </label>
-          <div class="delta-controls__inputs">
-            <div class="control-group control-group--boxed">
-              <div class="control-group__header">
-                <p class="control-group__eyebrow">Trend range</p>
-                <h5>Custom y-axis (mm)</h5>
-              </div>
-              <div class="control control--inline">
-                <label>Min / Max</label>
-                <div class="inline-inputs">
-                  <input type="number" step="0.001" id="rlmDeltaAxisMin" placeholder="min">
-                  <input type="number" step="0.001" id="rlmDeltaAxisMax" placeholder="max">
-                  <button type="button" class="btn btn--inline" id="rlmDeltaAxisApply">Apply</button>
-                </div>
-              </div>
-            </div>
-            <div class="control-group control-group--boxed">
-              <div class="control-group__header">
-                <p class="control-group__eyebrow">Error limits</p>
-                <h5>Custom err bounds (mm)</h5>
-              </div>
-              <div class="control control--inline">
-                <label>Shrink / Expand</label>
-                <div class="inline-inputs">
-                  <input type="number" step="0.001" id="rlmErrShrinkOverride" placeholder="err shrink">
-                  <input type="number" step="0.001" id="rlmErrExpandOverride" placeholder="err expand">
-                  <button type="button" class="btn btn--inline" id="rlmDeltaBoundsApply">Apply</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="chart-card chart-card--tall chart-card--full rlm-delta-chart">
-        <div class="chart-card-title">
-          <p class="chart-card__eyebrow">Delta Analysis</p>
-          <h4>Repeat Length Delta</h4>
-        </div>
-        <div class="chart-loader hidden" id="rlmDeltaChartLoader">
-          <div class="chart-loader__spinner"></div>
-        </div>
-        <div id="rlmDeltaChart" class="chart chart--tall"></div>
-      </div>
-      <div class="rlm-delta-grid">
-        <div class="rlm-delta-left">
-          <div class="delta-info-grid delta-info-grid--trio">
-            <div class="delta-card">
-              <p>Total reels</p>
-              <div class="delta-card__value" id="rlmReelCountTotal">--</div>
-            </div>
-            <div class="delta-card">
-              <p>Good reels</p>
-              <div class="delta-card__value" id="rlmReelCountGood">--</div>
-            </div>
-            <div class="delta-card">
-              <p>Bad reels</p>
-              <div class="delta-card__value" id="rlmReelCountBad">--</div>
-            </div>
-          </div>
-          <div class="delta-info-grid delta-info-grid--trio">
-            <div class="delta-card">
-              <p>Avg delta</p>
-              <div class="delta-card__value" id="rlmDeltaAvg">--</div>
-            </div>
-            <div class="delta-card">
-              <p>Std dev delta</p>
-              <div class="delta-card__value" id="rlmDeltaStd">--</div>
-            </div>
-            <div class="delta-card delta-card--paired">
-              <p>Delta min / max</p>
-              <div class="delta-card__value-pair">
-                <span id="rlmDeltaMin">--</span>
-                <span>/</span>
-                <span id="rlmDeltaMax">--</span>
-              </div>
-            </div>
-          </div>
-        <div class="delta-mini-charts">
-          <div class="chart-card chart-card--mini">
-            <div class="chart-card-title">
-              <p class="chart-card__eyebrow">Distribution</p>
-              <h4>Out-of-bounds Breakdown</h4>
-              </div>
-              <div id="rlmDeltaOobPie" class="chart chart--mini"></div>
-            </div>
-          <div class="chart-card chart-card--mini">
-            <div class="chart-card-title">
-              <p class="chart-card__eyebrow">Split</p>
-              <h4>Above vs Below Bounds</h4>
-            </div>
-            <div id="rlmDeltaOobBar" class="chart chart--mini"></div>
-          </div>
-        </div>
-      </div>
-      <div class="rlm-delta-right">
-        <div class="delta-feet-cards delta-feet-cards--side">
-          <div class="delta-feet-card">
-            <p>Total feet</p>
-            <div class="delta-feet-card__value" id="rlmFeetTotal">--</div>
-          </div>
-          <div class="delta-feet-card">
-            <p>Good feet</p>
-            <div class="delta-feet-card__value delta-feet-card__value--good" id="rlmFeetGood">--</div>
-            <span class="delta-feet-card__percent" id="rlmFeetGoodPct">--</span>
-          </div>
-          <div class="delta-feet-card">
-            <p>Bad feet</p>
-            <div class="delta-feet-card__value delta-feet-card__value--bad" id="rlmFeetBad">--</div>
-            <span class="delta-feet-card__percent" id="rlmFeetBadPct">--</span>
-          </div>
-        </div>
-        <div class="chart-card chart-card--mini chart-card--feet">
-          <div class="chart-card-title">
-            <p class="chart-card__eyebrow">Reel Hotspots</p>
-            <h4>Feet In/Out-of-Bounds</h4>
-          </div>
-          <div id="rlmDeltaFeetBar" class="chart chart--mini chart--feet-bar"></div>
+          <h2>Reel Intelligence</h2>
+          <p class="panel-subtitle">Analyze individual reels, compare adjacent runs, and inspect position-level behavior.</p>
         </div>
       </div>
       <div class="delta-table-card-wrapper">
-        <div class="chart-card chart-card--mini chart-card--points">
-          <div class="chart-card-title">
-            <p class="chart-card__eyebrow">Monitoring Density</p>
-            <h4>Points In/Out-of-Bounds</h4>
-          </div>
-          <div id="rlmDeltaPointBar" class="chart chart--mini chart--points-bar"></div>
-        </div>
         <div class="delta-reel-investigate">
-          <div class="delta-reel-filter">
-            <label for="rlmDeltaReelSelect">Investigate reel</label>
-            <select id="rlmDeltaReelSelect">
-              <option value="">Select a reel with OOB points</option>
-            </select>
-            <p class="delta-reel-meta" id="rlmDeltaReelMeta">Pick a reel to explore where issues occur.</p>
-        </div>
-        <div class="delta-reel-summary">
-          <div class="delta-summary-card">
-            <h5>Feet</h5>
-            <div class="delta-summary-values">
-              <div><span>Prev</span><strong id="rlmSummaryFeetPrev">--</strong></div>
-              <div><span>Current</span><strong id="rlmSummaryFeetCurrent">--</strong></div>
-              <div><span>Next</span><strong id="rlmSummaryFeetNext">--</strong></div>
+          <div class="chart-card chart-card--mini chart-card--points delta-reel-monitoring">
+            <div class="chart-card-title">
+              <p class="chart-card__eyebrow">Monitoring Density</p>
+              <h4>Points In/Out-of-Bounds</h4>
+            </div>
+            <div id="rlmDeltaPointBar" class="chart chart--mini chart--points-bar"></div>
+          </div>
+          <div class="delta-reel-investigate__top">
+            <div class="chart-card chart-card--mini delta-reel-filter">
+              <div class="chart-card-title">
+                <p class="chart-card__eyebrow">Reel Intelligence</p>
+                <h4>Investigate Reel</h4>
+              </div>
+              <label for="rlmDeltaReelSelect">Select a reel with out-of-bounds points</label>
+              <div class="delta-reel-select-wrap">
+                <select id="rlmDeltaReelSelect">
+                  <option value="">Select a reel with OOB points</option>
+                </select>
+              </div>
+              <p class="delta-reel-meta" id="rlmDeltaReelMeta">Pick a reel to explore where issues occur.</p>
+            </div>
+            <div class="chart-card chart-card--mini delta-reel-summary-card">
+              <div class="chart-card-title">
+                <p class="chart-card__eyebrow">Adjacent Reel Snapshot</p>
+                <h4>Prev / Current / Next Comparison</h4>
+              </div>
+              <div class="delta-reel-summary">
+                <div class="delta-summary-card">
+                  <h5>Feet</h5>
+                  <div class="delta-summary-values">
+                    <div><span>Prev</span><strong id="rlmSummaryFeetPrev">--</strong></div>
+                    <div><span>Current</span><strong id="rlmSummaryFeetCurrent">--</strong></div>
+                    <div><span>Next</span><strong id="rlmSummaryFeetNext">--</strong></div>
+                  </div>
+                </div>
+                <div class="delta-summary-card">
+                  <h5>Monitoring Points</h5>
+                  <div class="delta-summary-values">
+                    <div><span>Prev</span><strong id="rlmSummaryPointsPrev">--</strong></div>
+                    <div><span>Current</span><strong id="rlmSummaryPointsCurrent">--</strong></div>
+                    <div><span>Next</span><strong id="rlmSummaryPointsNext">--</strong></div>
+                  </div>
+                </div>
+                <div class="delta-summary-card">
+                  <h5>Out-of-Bounds Points</h5>
+                  <div class="delta-summary-values">
+                    <div><span>Prev</span><strong id="rlmSummaryOobPrev">--</strong></div>
+                    <div><span>Current</span><strong id="rlmSummaryOobCurrent">--</strong></div>
+                    <div><span>Next</span><strong id="rlmSummaryOobNext">--</strong></div>
+                  </div>
+                </div>
+                <div class="delta-summary-card">
+                  <h5>Avg Delta</h5>
+                  <div class="delta-summary-values">
+                    <div><span>Prev</span><strong id="rlmSummaryDeltaPrev">--</strong></div>
+                    <div><span>Current</span><strong id="rlmSummaryDeltaCurrent">--</strong></div>
+                    <div><span>Next</span><strong id="rlmSummaryDeltaNext">--</strong></div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-          <div class="delta-summary-card">
-            <h5>Monitoring Points</h5>
-            <div class="delta-summary-values">
-              <div><span>Prev</span><strong id="rlmSummaryPointsPrev">--</strong></div>
-              <div><span>Current</span><strong id="rlmSummaryPointsCurrent">--</strong></div>
-              <div><span>Next</span><strong id="rlmSummaryPointsNext">--</strong></div>
+          <div class="chart-card chart-card--tall delta-reel-chart delta-reel-chart--wide">
+            <div class="chart-card-title">
+              <p class="chart-card__eyebrow">Adjacent Reels</p>
+              <h4>Delta Context</h4>
+              <div class="reel-range-inputs">
+                <label>
+                  Reels each side
+                  <input type="number" id="rlmContextNeighborCount" min="1" step="1" value="1">
+                </label>
+                <label>
+                  Min
+                  <input type="number" id="rlmContextRangeMin" placeholder="auto">
+                </label>
+                <label>
+                  Max
+                  <input type="number" id="rlmContextRangeMax" placeholder="auto">
+                </label>
+              </div>
             </div>
+            <div id="rlmDeltaReelContext" class="chart chart--reel-context"></div>
           </div>
-          <div class="delta-summary-card">
-            <h5>Out-of-Bounds Points</h5>
-            <div class="delta-summary-values">
-              <div><span>Prev</span><strong id="rlmSummaryOobPrev">--</strong></div>
-              <div><span>Current</span><strong id="rlmSummaryOobCurrent">--</strong></div>
-              <div><span>Next</span><strong id="rlmSummaryOobNext">--</strong></div>
-            </div>
-          </div>
-          <div class="delta-summary-card">
-            <h5>Avg Delta</h5>
-            <div class="delta-summary-values">
-              <div><span>Prev</span><strong id="rlmSummaryDeltaPrev">--</strong></div>
-              <div><span>Current</span><strong id="rlmSummaryDeltaCurrent">--</strong></div>
-              <div><span>Next</span><strong id="rlmSummaryDeltaNext">--</strong></div>
-            </div>
-          </div>
-        </div>
-        <div class="delta-reel-charts">
+          <div class="delta-reel-charts">
             <div class="chart-card chart-card--tall delta-reel-chart">
               <div class="chart-card-title">
                 <p class="chart-card__eyebrow">Roll Position</p>
@@ -314,23 +350,6 @@
               </div>
               <div id="rlmDeltaReelDelta" class="chart chart--reel-position"></div>
             </div>
-          </div>
-          <div class="chart-card chart-card--tall delta-reel-chart delta-reel-chart--wide">
-            <div class="chart-card-title">
-              <p class="chart-card__eyebrow">Adjacent Reels</p>
-              <h4>Position Context (Prev · Current · Next)</h4>
-              <div class="reel-range-inputs">
-                <label>
-                  Min
-                  <input type="number" id="rlmContextRangeMin" placeholder="auto">
-                </label>
-                <label>
-                  Max
-                  <input type="number" id="rlmContextRangeMax" placeholder="auto">
-                </label>
-              </div>
-            </div>
-            <div id="rlmDeltaReelContext" class="chart chart--reel-context"></div>
           </div>
         </div>
       </div>

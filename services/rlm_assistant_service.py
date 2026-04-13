@@ -395,7 +395,7 @@ class RLMAssistantService:
             self._finalize_phase2a_diagnostics(response, diagnostics, resolved_intent)
             return self._attach_diagnostics(response, diagnostics, diagnostic)
 
-        if self._is_filter_only_request(filter_updates, resolved_intent):
+        if self._is_filter_only_request(filter_updates, resolved_intent, history):
             response = self._sticky_filter_update_response(effective_filters, sticky_after, filter_updates)
             response = self._attach_execution_context(
                 response,
@@ -559,6 +559,44 @@ class RLMAssistantService:
     ) -> Dict[str, Any]:
         intent = intent_override or self.classify_message(message, filters)
         if not intent:
+            lowered = self._normalize_message(message)
+            if any(
+                token in lowered
+                for token in (
+                    " what stands out between them ",
+                    " which one is worse ",
+                    " is the gap big or small ",
+                    " which metric differs most ",
+                    " what should i check next ",
+                )
+            ):
+                return self._unsupported_response(
+                    filters,
+                    "This follow-up needs an active comparison first.",
+                    "Start with a question like 'Compare Press 6 and Press 8'.",
+                    data_semantics="request-validation",
+                )
+            if any(
+                token in lowered
+                for token in (
+                    " what stands out ",
+                    " why is it worse ",
+                    " why was it worse ",
+                    " did it recover ",
+                    " did it recover after the shift ",
+                    " was it spikes or sustained ",
+                    " spikes or sustained ",
+                    " sustained or spikes ",
+                    " concentrated or broad ",
+                    " where did behavior shift ",
+                )
+            ):
+                return self._unsupported_response(
+                    filters,
+                    "This analysis needs a press. Which press should I look at?",
+                    "Use a press like 'Press 8' or ask 'What changed on Press 8 today?'.",
+                    data_semantics="request-validation",
+                )
             return self._unsupported_response(
                 filters,
                 "Question type not supported in this version.",
@@ -576,15 +614,39 @@ class RLMAssistantService:
                 data_semantics="request-validation",
             )
         if validation_error == "job_selection_requires_specific_job":
-            return self._unsupported_response(
+            return self._clarification_response(
                 filters,
                 "I need a specific job selection to analyze.",
                 "You can pick a job from the recent list, for example 'Use Job JOB-1-A'.",
                 tools=intent.get("tools", []),
                 data_semantics="request-validation",
             )
+        if validation_error == "missing_job_for_machine_job_analysis":
+            return self._clarification_response(
+                filters,
+                "This analysis needs a specific job selection.",
+                "Pick a job from the recent list first, for example 'Use Job JOB-1-A'.",
+                tools=intent.get("tools", []),
+                data_semantics="request-validation",
+            )
+        if validation_error == "current_job_unknown_on_machine":
+            return self._clarification_response(
+                filters,
+                "I could not determine the current job for that press.",
+                "Try 'Show me recent jobs' first, or select a job explicitly with 'Use Job JOB-1-A'.",
+                tools=intent.get("tools", []),
+                data_semantics="request-validation",
+            )
+        if validation_error == "ranked_job_reference_unavailable":
+            return self._clarification_response(
+                filters,
+                "I could not resolve that recent-job reference.",
+                "Try 'Show me recent jobs' first, or ask 'Which one was worst?' before saying 'Use the worst one'.",
+                tools=intent.get("tools", []),
+                data_semantics="request-validation",
+            )
         if validation_error == "missing_machine":
-            return self._unsupported_response(
+            return self._clarification_response(
                 filters,
                 "This question needs a press selection.",
                 "Use the dashboard machine filter or mention a press like 'Press 5'.",
@@ -741,6 +803,8 @@ class RLMAssistantService:
         analysis_scope = self._parse_analysis_scope(lowered)
         legacy_metric_key = self._resolve_metric_key(lowered)
         phase2a_metric_key = self._resolve_phase2a_metric_key(lowered)
+        sticky_filters = filters.get("sticky_filters") if isinstance(filters.get("sticky_filters"), dict) else {}
+        active_job = str(filters.get("job") or sticky_filters.get("job") or "").strip()
         job_list_requested = (
             (" what jobs " in lowered or lowered_stripped.startswith("what jobs"))
             and any(token in lowered for token in (" ran ", " run ", " produced "))
@@ -749,6 +813,53 @@ class RLMAssistantService:
             job_list_requested = (" show me " in lowered or " show " in lowered or " what " in lowered) and self._is_valid_machine_id(machine_id)
         if not job_list_requested and " show jobs " in lowered and self._is_valid_machine_id(machine_id):
             job_list_requested = True
+        weakest_recent_job_requested = any(
+            token in lowered
+            for token in (
+                " which recent job performed the worst ",
+                " which recent job on ",
+                " which one was worst ",
+                " which one is worst ",
+                " weakest recent job ",
+                " show me the weakest recent job ",
+                " did one job stand out as the weakest ",
+            )
+        )
+        best_recent_job_requested = any(
+            token in lowered
+            for token in (
+                " which recent job performed the best ",
+                " which one was best ",
+                " which one is best ",
+                " strongest recent job ",
+                " show me the strongest recent job ",
+                " did one job stand out as the best ",
+            )
+        )
+        job_concentration_requested = any(
+            token in lowered
+            for token in (
+                " concentrated in one recent job or spread across jobs ",
+                " concentrated in one job or spread across jobs ",
+                " spread across jobs ",
+                " spread across recent jobs ",
+            )
+        )
+        selected_job_performance_requested = any(
+            token in lowered
+            for token in (
+                " how is this current job performing ",
+                " how is this job performing ",
+                " how is it performing ",
+                " how is it doing ",
+                " is this job worse than this machine s recent runs ",
+                " is this job worse than this machine recent runs ",
+                " is it worse than recent jobs ",
+                " what stands out ",
+                " how is the current job performing ",
+                " is the current job worse than this machine s recent runs ",
+            )
+        )
         if " use the weakest recent job " in lowered:
             return {
                 "kind": "job_list",
@@ -756,6 +867,41 @@ class RLMAssistantService:
                 "analysisScope": analysis_scope if analysis_scope and analysis_scope.get("kind") in {"time", "reels"} else None,
                 "tools": ["get_press_job_list"],
                 "validationError": "job_selection_requires_specific_job",
+            }
+        if weakest_recent_job_requested or best_recent_job_requested or job_concentration_requested or selected_job_performance_requested:
+            current_job_requested = " current job " in lowered
+            resolved_job = active_job
+            validation_error = None
+            if current_job_requested:
+                if not self._is_valid_machine_id(machine_id):
+                    validation_error = "missing_machine"
+                else:
+                    resolved_job = self._current_job_name_for_machine(machine_id, filters)
+                    if not resolved_job:
+                        validation_error = "current_job_unknown_on_machine"
+            return {
+                "kind": "job_analysis",
+                "machine_id": machine_id,
+                "analysisScope": analysis_scope if analysis_scope and analysis_scope.get("kind") in {"time", "reels"} else None,
+                "jobAnalysisMode": (
+                    "selected_job_vs_recent"
+                    if selected_job_performance_requested
+                    else "best_recent_job"
+                    if best_recent_job_requested
+                    else "concentration"
+                    if job_concentration_requested
+                    else "weakest_recent_job"
+                ),
+                "job": resolved_job,
+                "tools": ["get_machine_job_analysis"],
+                "validationError": validation_error
+                or (
+                    "missing_machine"
+                    if not self._is_valid_machine_id(machine_id)
+                    else "missing_job_for_machine_job_analysis"
+                    if selected_job_performance_requested and not resolved_job
+                    else None
+                ),
             }
         reel_summary_requested = any(
             token in lowered for token in ("reel to reel", "reel-to-reel", "reel by reel")
@@ -801,6 +947,14 @@ class RLMAssistantService:
             or bool(causal_matches)
             or (bool(weakness_matches) and bool(context_matches))
             or (" why " in lowered and bool(weakness_matches))
+        )
+        status_prompt_framing = self._status_prompt_framing(lowered)
+        broad_press_explanation_requested = bool(machine_id) and not compare_requested and not phase2a_metric_key and (
+            status_requested
+            or ranking_requested
+            or lowered_stripped.startswith("tell me about")
+            or lowered_stripped.startswith("summarize")
+            or (" today" in lowered and lowered_stripped.startswith("press "))
         )
         explanation_focus = self._phase2b_explanation_focus(lowered)
         decision_requested = bool(machine_id) and (
@@ -850,6 +1004,10 @@ class RLMAssistantService:
             and self._is_valid_machine_id(machine_id)
             and any(token in lowered for token in (" than average ", " than peer average ", " than the others ", " than the other presses ", " peer average ", " average "))
         )
+        if not phase2a_metric_key and any(token in lowered for token in (" repeat length ", " delta behavior ")) and any(
+            token in lowered for token in (" how is ", " behaving ", " behavior ", " getting worse ", " getting better ", " trend", " trending ", " show ")
+        ):
+            phase2a_metric_key = "delta_variation"
         decision_metric_key = self._resolve_decision_metric_key(lowered, phase2a_metric_key)
 
         if compare_requested and " average " in lowered and self._is_valid_machine_id(machine_id) and len(press_ids) <= 1:
@@ -1035,14 +1193,15 @@ class RLMAssistantService:
                 "tools": ["get_reel_to_reel_summary"],
                 "validationError": None if self._is_valid_machine_id(machine_id) else "missing_machine",
             }
-        if status_requested:
+        if broad_press_explanation_requested:
             return {
                 "kind": "status",
                 "machine_id": machine_id,
                 "analysisScope": analysis_scope if analysis_scope and analysis_scope.get("kind") == "time" else None,
                 "tools": ["get_press_status"],
                 "validationError": None if self._is_valid_machine_id(machine_id) else "missing_machine",
-                "matchedKeywords": status_matches,
+                "matchedKeywords": list(dict.fromkeys(status_matches + ranking_matches)),
+                "promptFraming": status_prompt_framing,
             }
         if trend_requested:
             metric_key = legacy_metric_key
@@ -1089,6 +1248,12 @@ class RLMAssistantService:
         if kind == "job_list":
             return self._assemble_job_list_response(
                 self.get_press_job_list_tool(intent["machine_id"], filters),
+                filters,
+                intent,
+            )
+        if kind == "job_analysis":
+            return self._assemble_job_analysis_response(
+                self.get_machine_job_analysis_tool(intent["machine_id"], filters, intent),
                 filters,
                 intent,
             )
@@ -1143,6 +1308,7 @@ class RLMAssistantService:
                 "machineName": requested_label,
                 "latest": {**latest, "machineName": requested_label},
                 "aggregate": aggregate,
+                "filteredRows": filtered_rows,
                 "state": state,
                 "dataSemantics": "filtered-window",
             }
@@ -1322,6 +1488,149 @@ class RLMAssistantService:
             "machineName": requested_label,
             "jobs": job_rows,
             "selectedJob": str(filters.get("job") or "").strip() or None,
+            "dataSemantics": "filtered-window",
+        }
+
+    def _filters_without_job_scope(self, filters: Dict[str, Any]) -> Dict[str, Any]:
+        updated = dict(filters or {})
+        updated["job"] = ""
+        sticky_filters = dict(updated.get("sticky_filters") or {})
+        if "job" in sticky_filters:
+            sticky_filters["job"] = None
+        updated["sticky_filters"] = sticky_filters
+        return updated
+
+    def _current_job_name_for_machine(self, machine_id: int, filters: Dict[str, Any]) -> Optional[str]:
+        rows = self._filtered_reel_metrics(self._filters_without_job_scope(filters), machine_id)
+        if not rows:
+            return None
+        rows.sort(key=lambda row: row.get("productionStart") or "")
+        latest_job = str((rows[-1] or {}).get("jobName") or "").strip()
+        return latest_job or None
+
+    def _ranked_job_reference(
+        self,
+        machine_id: int,
+        filters: Dict[str, Any],
+        focus: str,
+    ) -> Optional[str]:
+        tool_data = self.get_machine_job_analysis_tool(
+            machine_id,
+            self._filters_without_job_scope(filters),
+            {"jobAnalysisMode": "weakest_recent_job"},
+        )
+        ranked_jobs = tool_data.get("rankedJobs") or []
+        if not ranked_jobs:
+            return None
+        if focus == "best":
+            target = ranked_jobs[-1]
+        else:
+            target = ranked_jobs[0]
+        job_name = str((target or {}).get("jobName") or "").strip()
+        return job_name or None
+
+    def get_machine_job_analysis_tool(self, machine_id: int, filters: Dict[str, Any], intent: Dict[str, Any]) -> Dict[str, Any]:
+        rows = self._filtered_reel_metrics(filters, machine_id)
+        requested_label = self._press_label(machine_id)
+        by_job: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            by_job[str(row.get("jobName") or "Unknown job")].append(row)
+
+        job_summaries: List[Dict[str, Any]] = []
+        for job_name, job_rows in by_job.items():
+            ordered_rows = sorted(job_rows, key=lambda row: row.get("productionStart") or "")
+            aggregate = self._aggregate_filtered_rows(ordered_rows)
+            estimated_bad_feet = None
+            if aggregate.get("badFeetPct") is not None and aggregate.get("feetTotal") is not None:
+                estimated_bad_feet = float(aggregate.get("feetTotal") or 0.0) * float(aggregate.get("badFeetPct") or 0.0) / 100.0
+            job_summaries.append(
+                {
+                    "jobName": job_name,
+                    "rows": ordered_rows,
+                    "reelCount": aggregate.get("reelsRun") or len(ordered_rows),
+                    "feetTotal": aggregate.get("feetTotal") or 0.0,
+                    "badFeetPct": aggregate.get("badFeetPct"),
+                    "deltaStd": aggregate.get("deltaStd"),
+                    "pointsPer1000Ft": aggregate.get("pointsPer1000Ft"),
+                    "estimatedBadFeetFeet": estimated_bad_feet,
+                    "start": ordered_rows[0].get("productionStart") if ordered_rows else None,
+                    "end": ordered_rows[-1].get("productionStart") if ordered_rows else None,
+                }
+            )
+
+        def normalized_score(value: Optional[float], values: List[Optional[float]], higher_worse: bool = True) -> float:
+            usable = [float(item) for item in values if item is not None]
+            if value is None or len(usable) < 2:
+                return 0.0
+            low = min(usable)
+            high = max(usable)
+            if abs(high - low) < 1e-9:
+                return 0.0
+            position = (float(value) - low) / (high - low)
+            return position if higher_worse else 1.0 - position
+
+        bad_values = [item.get("badFeetPct") for item in job_summaries]
+        delta_values = [item.get("deltaStd") for item in job_summaries]
+        coverage_values = [item.get("pointsPer1000Ft") for item in job_summaries]
+        for item in job_summaries:
+            item["worstScore"] = round(
+                normalized_score(item.get("badFeetPct"), bad_values, higher_worse=True)
+                + normalized_score(item.get("deltaStd"), delta_values, higher_worse=True)
+                + normalized_score(item.get("pointsPer1000Ft"), coverage_values, higher_worse=False),
+                4,
+            )
+
+        ranked_jobs = sorted(
+            job_summaries,
+            key=lambda item: (
+                -(item.get("worstScore") or 0.0),
+                -(item.get("badFeetPct") or 0.0),
+                -(item.get("deltaStd") or 0.0),
+                str(item.get("jobName") or ""),
+            ),
+        )
+        selected_job = str(intent.get("job") or filters.get("job") or "").strip() or None
+        selected_summary = next((item for item in ranked_jobs if str(item.get("jobName") or "") == selected_job), None)
+        peer_jobs = [item for item in ranked_jobs if str(item.get("jobName") or "") != selected_job] if selected_job else ranked_jobs
+
+        def avg(items: List[Dict[str, Any]], key: str) -> Optional[float]:
+            usable = [float(item.get(key)) for item in items if item.get(key) is not None]
+            if not usable:
+                return None
+            return sum(usable) / len(usable)
+
+        recent_baseline = {
+            "jobCount": len(peer_jobs),
+            "badFeetPct": avg(peer_jobs, "badFeetPct"),
+            "deltaStd": avg(peer_jobs, "deltaStd"),
+            "pointsPer1000Ft": avg(peer_jobs, "pointsPer1000Ft"),
+        }
+        total_estimated_bad_feet = sum(float(item.get("estimatedBadFeetFeet") or 0.0) for item in ranked_jobs)
+        top_job = ranked_jobs[0] if ranked_jobs else None
+        top_share = (
+            float(top_job.get("estimatedBadFeetFeet") or 0.0) / total_estimated_bad_feet
+            if top_job and total_estimated_bad_feet > 0
+            else 0.0
+        )
+        concentration = {
+            "label": "one recent job" if top_share >= 0.55 else "spread across multiple jobs",
+            "topJob": top_job.get("jobName") if top_job else None,
+            "topShare": round(top_share * 100.0, 1),
+            "summary": (
+                f"Problems are mainly concentrated in {top_job.get('jobName')}, which accounts for about {round(top_share * 100.0, 1)}% of estimated bad feet."
+                if top_job and top_share >= 0.55
+                else "Recent weakness is spread across multiple jobs rather than concentrated in one."
+            ),
+        }
+        return {
+            "machineId": machine_id,
+            "machineName": requested_label,
+            "selectedJob": selected_job,
+            "selectedJobSummary": selected_summary,
+            "recentBaseline": recent_baseline,
+            "rankedJobs": ranked_jobs,
+            "concentration": concentration,
+            "jobAnalysisMode": str(intent.get("jobAnalysisMode") or ""),
             "dataSemantics": "filtered-window",
         }
 
@@ -1645,7 +1954,7 @@ class RLMAssistantService:
             "machine_id": filters.get("machine_id"),
             "start": filters.get("start"),
             "end": filters.get("end"),
-            "job": filters.get("job"),
+            "job": intent.get("job") or filters.get("job"),
             "order": filters.get("order"),
             "reel_ids": filters.get("reel_ids"),
         }
@@ -2130,9 +2439,51 @@ class RLMAssistantService:
                 updated["end"] = updated["end_dt"].isoformat(timespec="seconds")
         return updated
 
-    def _is_filter_only_request(self, updates: Dict[str, Any], resolved_intent: Optional[Dict[str, Any]]) -> bool:
+    def _scope_filter_update_keys(self, updates: Dict[str, Any]) -> set[str]:
+        keys = set((updates.get("set") or {}).keys())
+        keys.update(updates.get("clear") or [])
+        return {key for key in keys if key in {"timeScope", "reelScope", "feetFilter"}}
+
+    def _latest_active_analysis_request(self, history: Optional[List[Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
+        supported_kinds = {"status", "discovery", "compare", "trend", "reel_summary", "job_analysis", "ranking_summary"}
+        for index in range(len(history or []) - 1, -1, -1):
+            entry = (history or [])[index] or {}
+            payload = entry.get("payload") if isinstance(entry.get("payload"), dict) else entry
+            if str(entry.get("role") or payload.get("role") or "") != "assistant":
+                continue
+            context = payload.get("context") if isinstance(payload.get("context"), dict) else {}
+            data_semantics = str(
+                payload.get("dataSemantics")
+                or context.get("dataSemantics")
+                or ""
+            ).strip()
+            resolved = payload.get("resolvedRequest") or context.get("resolvedRequest")
+            if not isinstance(resolved, dict) or not resolved.get("kind"):
+                return None
+            if data_semantics in {"session-filter-update", "request-validation"}:
+                return None
+            if str(resolved.get("kind") or "") in supported_kinds:
+                return resolved
+            return None
+        return None
+
+    def _is_filter_only_request(
+        self,
+        updates: Dict[str, Any],
+        resolved_intent: Optional[Dict[str, Any]],
+        history: Optional[List[Dict[str, Any]]] = None,
+    ) -> bool:
         if not updates or not updates.get("filterOnly"):
             return False
+        if self._scope_filter_update_keys(updates):
+            latest_analysis = self._latest_active_analysis_request(history)
+            if (
+                latest_analysis
+                and resolved_intent
+                and str(resolved_intent.get("kind") or "") in {"status", "discovery", "compare", "trend", "reel_summary", "job_analysis", "ranking_summary"}
+                and str(resolved_intent.get("kind") or "") == str(latest_analysis.get("kind") or "")
+            ):
+                return False
         set_updates = updates.get("set") or {}
         clear_updates = updates.get("clear") or []
         press_only_update = set(set_updates.keys()) == {"pressId"} and not clear_updates
@@ -2228,10 +2579,167 @@ class RLMAssistantService:
         explicit_category_key = self._resolve_ranking_category_key(lowered)
         compare_direction = "worse" if any(token in lowered for token in (" which is worse ", " who is worse ", " worse ")) else "better"
         explanation_focus = self._phase2b_explanation_focus(lowered)
+        compare_follow_up_requested = any(
+            token in lowered
+            for token in (
+                " what stands out between them ",
+                " which one is worse ",
+                " is the gap big or small ",
+                " which metric differs most ",
+                " what should i check next ",
+                " what should i check ",
+            )
+        )
+        discovery_follow_up_requested = any(
+            token in lowered
+            for token in (
+                " what stands out ",
+                " why is it worse ",
+                " why was it worse ",
+                " did it recover ",
+                " did it recover after the shift ",
+                " was it spikes or sustained ",
+                " spikes or sustained ",
+                " sustained or spikes ",
+                " concentrated or broad ",
+                " where did behavior shift ",
+                " is it a few bad reels or the whole run ",
+                " few bad reels or the whole run ",
+                " few bad reels or the whole job ",
+            )
+        )
+        job_selected_follow_up_requested = any(
+            token in lowered
+            for token in (
+                " how is it performing ",
+                " how is it doing ",
+                " is it worse than recent jobs ",
+                " this job worse than this machine s recent runs ",
+                " this current job performing ",
+                " this job performing ",
+                " what stands out ",
+            )
+        )
+        job_concentration_follow_up_requested = any(
+            token in lowered
+            for token in (
+                " concentrated in one recent job ",
+                " concentrated in one job ",
+                " spread across jobs ",
+                " spread across recent jobs ",
+                " issue concentrated or broad ",
+                " concentrated or broad ",
+            )
+        )
+        job_rank_follow_up = (
+            "worst"
+            if any(token in lowered for token in (" which one was worst ", " which one is worst ", " weakest recent job ", " recent job performed the worst ", " use the worst one ", " use the weakest recent job ", " analyze the weakest recent job "))
+            else "best"
+            if any(token in lowered for token in (" which one was best ", " which one is best ", " strongest recent job ", " recent job performed the best ", " use the best one ", " use the strongest recent job ", " analyze the strongest recent job "))
+            else None
+        )
 
         merged = self._intent_from_resolved_request(prior_request)
         if not merged:
             return parsed_intent, diagnostics
+
+        sticky_filters = (filters or {}).get("sticky_filters") or {}
+        sticky_job = str(sticky_filters.get("job") or "").strip()
+        sticky_press_id = self._to_int(sticky_filters.get("pressId"))
+
+        if merged.get("kind") == "compare" and compare_follow_up_requested:
+            merged = dict(merged)
+            diagnostics["used"] = True
+            diagnostics["overriddenFields"].append("kind")
+            merged["validationError"] = self._validate_merged_intent(merged, filters)
+            diagnostics["overriddenFields"] = list(dict.fromkeys(diagnostics["overriddenFields"]))
+            return merged, diagnostics
+
+        if (
+            merged.get("kind") in {"status", "activity", "discovery", "reel_summary", "trend"}
+            and discovery_follow_up_requested
+            and (self._is_valid_machine_id(merged.get("machine_id")) or self._is_valid_machine_id(sticky_press_id))
+        ):
+            inherited_metric_key = (
+                explicit_phase2a_metric_key
+                or explicit_metric_key
+                or str(merged.get("metric_key") or "").strip()
+                or "rlm_bad_feet_pct"
+            )
+            discovery_kind = "discovery" if merged.get("kind") in {"status", "discovery"} else "activity"
+            merged = {
+                "kind": discovery_kind,
+                "machine_id": self._to_int(merged.get("machine_id")) or sticky_press_id,
+                "metric_key": inherited_metric_key,
+                "analysisScope": explicit_scope or merged.get("analysisScope"),
+                "comparisonMode": str(merged.get("comparisonMode") or "none"),
+                "trendRequested": True,
+                "grouping": explanation_focus or merged.get("grouping") or "decision",
+                "output_shape": "summary",
+                "tools": ["run_discovery_analysis"] if discovery_kind == "discovery" else ["get_rlm_metric_analysis"],
+                "validationError": None,
+                "job": str(merged.get("job") or "").strip(),
+            }
+            diagnostics["used"] = True
+            diagnostics["overriddenFields"].extend(["kind", "metric_key", "machine_id", "trendRequested", "grouping"])
+            if explicit_scope:
+                diagnostics["overriddenFields"].append("analysisScope")
+                diagnostics["scopeSource"] = "inherited_followup"
+            merged["validationError"] = self._validate_merged_intent(merged, filters)
+            diagnostics["overriddenFields"] = list(dict.fromkeys(diagnostics["overriddenFields"]))
+            return merged, diagnostics
+
+        if merged.get("kind") in {"job_list", "job_analysis"}:
+            target_machine_id = sticky_press_id or self._to_int(merged.get("machine_id"))
+            if job_rank_follow_up:
+                selected_ranked_job = (
+                    self._ranked_job_reference(target_machine_id, filters, job_rank_follow_up)
+                    if self._is_valid_machine_id(target_machine_id)
+                    else None
+                )
+                merged = {
+                    "kind": "job_analysis",
+                    "machine_id": target_machine_id,
+                    "analysisScope": explicit_scope or merged.get("analysisScope"),
+                    "jobAnalysisMode": "selected_job_vs_recent" if lowered.startswith(" use ") or lowered.startswith(" analyze ") else f"{job_rank_follow_up}_recent_job",
+                    "job": selected_ranked_job,
+                    "tools": ["get_machine_job_analysis"],
+                    "validationError": (
+                        "missing_machine"
+                        if not self._is_valid_machine_id(target_machine_id)
+                        else "ranked_job_reference_unavailable"
+                        if not selected_ranked_job
+                        else None
+                    ),
+                }
+                diagnostics["used"] = True
+                diagnostics["overriddenFields"].extend(["kind", "machine_id", "jobAnalysisMode", "job"])
+                merged["validationError"] = self._validate_merged_intent(merged, filters)
+                diagnostics["overriddenFields"] = list(dict.fromkeys(diagnostics["overriddenFields"]))
+                return merged, diagnostics
+
+            if job_selected_follow_up_requested or job_concentration_follow_up_requested:
+                mode = "concentration" if job_concentration_follow_up_requested else "selected_job_vs_recent"
+                merged = {
+                    "kind": "job_analysis",
+                    "machine_id": target_machine_id,
+                    "analysisScope": explicit_scope or merged.get("analysisScope"),
+                    "jobAnalysisMode": mode,
+                    "job": sticky_job,
+                    "tools": ["get_machine_job_analysis"],
+                    "validationError": (
+                        "missing_machine"
+                        if not self._is_valid_machine_id(target_machine_id)
+                        else "missing_job_for_machine_job_analysis"
+                        if mode == "selected_job_vs_recent" and not sticky_job
+                        else None
+                    ),
+                }
+                diagnostics["used"] = True
+                diagnostics["overriddenFields"].extend(["kind", "machine_id", "jobAnalysisMode", "job"])
+                merged["validationError"] = self._validate_merged_intent(merged, filters)
+                diagnostics["overriddenFields"] = list(dict.fromkeys(diagnostics["overriddenFields"]))
+                return merged, diagnostics
 
         if merged.get("kind") == "job_list" and " use the weakest recent job " in lowered:
             return (
@@ -2244,10 +2752,6 @@ class RLMAssistantService:
                 },
                 {**diagnostics, "used": True},
             )
-
-        sticky_filters = (filters or {}).get("sticky_filters") or {}
-        sticky_job = str(sticky_filters.get("job") or "").strip()
-        sticky_press_id = self._to_int(sticky_filters.get("pressId"))
 
         if (
             merged.get("kind") == "job_list"
@@ -2269,6 +2773,41 @@ class RLMAssistantService:
                 "job": sticky_job,
             }
             diagnostics["overriddenFields"].extend(["kind", "metric_key", "comparisonMode", "job"])
+
+        if (
+            merged.get("kind") in {"job_list", "job_analysis"}
+            and any(
+                token in lowered
+                for token in (
+                    " this job worse than this machine s recent runs ",
+                    " this current job performing ",
+                    " this job performing ",
+                    " weakest recent job ",
+                    " recent job performed the worst ",
+                    " concentrated in one recent job ",
+                    " spread across jobs ",
+                    " spread across recent jobs ",
+                )
+            )
+        ):
+            mode = (
+                "selected_job_vs_recent"
+                if any(token in lowered for token in (" this job worse than this machine s recent runs ", " this current job performing ", " this job performing "))
+                else "concentration"
+                if any(token in lowered for token in (" concentrated in one recent job ", " spread across jobs ", " spread across recent jobs "))
+                else "weakest_recent_job"
+            )
+            merged = {
+                "kind": "job_analysis",
+                "machine_id": sticky_press_id or self._to_int(merged.get("machine_id")),
+                "analysisScope": merged.get("analysisScope"),
+                "jobAnalysisMode": mode,
+                "job": sticky_job,
+                "tools": ["get_machine_job_analysis"],
+                "validationError": "missing_job_for_machine_job_analysis" if mode == "selected_job_vs_recent" and not sticky_job else None,
+            }
+            diagnostics["used"] = True
+            diagnostics["overriddenFields"].extend(["kind", "jobAnalysisMode", "job"])
 
         if (
             any(token in lowered for token in (" reel to reel", " reel-to-reel "))
@@ -2476,6 +3015,7 @@ class RLMAssistantService:
             "activity": ["get_rlm_metric_analysis"],
             "discovery": ["run_discovery_analysis"],
             "job_list": ["get_press_job_list"],
+            "job_analysis": ["get_machine_job_analysis"],
             "compare": ["compare_presses"],
             "ranking": ["get_press_rankings", "get_press_category_breakdown"],
             "ranking_summary": ["get_press_rankings"],
@@ -2510,6 +3050,14 @@ class RLMAssistantService:
             return None if self._is_valid_machine_id(intent.get("machine_id")) else "missing_machine_for_discovery"
         if kind == "job_list" and intent.get("validationError") == "job_selection_requires_specific_job":
             return "job_selection_requires_specific_job"
+        if kind == "job_analysis":
+            if intent.get("validationError") == "missing_job_for_machine_job_analysis":
+                return "missing_job_for_machine_job_analysis"
+            if intent.get("validationError") == "current_job_unknown_on_machine":
+                return "current_job_unknown_on_machine"
+            if intent.get("validationError") == "ranked_job_reference_unavailable":
+                return "ranked_job_reference_unavailable"
+            return None if self._is_valid_machine_id(intent.get("machine_id")) else "missing_machine"
         if kind in {"status", "ranking", "reel_summary", "trend", "job_list"}:
             return None if self._is_valid_machine_id(intent.get("machine_id")) else "missing_machine"
         return None
@@ -2519,7 +3067,23 @@ class RLMAssistantService:
         stripped = lowered.strip()
         if stripped.startswith("what about ") or stripped.startswith("now "):
             return True
-        if any(token in lowered for token in (" what stands out between them ", " which one is worse ", " where did behavior shift ", " did it recover ", " spikes or sustained ", " sustained or spikes ", " concentrated or broad ")):
+        if any(
+            token in lowered
+            for token in (
+                " what stands out between them ",
+                " which one is worse ",
+                " is the gap big or small ",
+                " which metric differs most ",
+                " what should i check next ",
+                " what should i check ",
+                " where did behavior shift ",
+                " did it recover ",
+                " spikes or sustained ",
+                " sustained or spikes ",
+                " concentrated or broad ",
+                " what stands out ",
+            )
+        ):
             return True
         if " that job " in lowered or " this job " in lowered:
             return True
@@ -2896,8 +3460,25 @@ class RLMAssistantService:
         if tool_data.get("dataSemantics") == "filtered-window":
             latest = tool_data.get("latest") or {}
             aggregate = tool_data.get("aggregate") or {}
+            filtered_rows = tool_data.get("filteredRows") or []
             state = tool_data.get("state") or {}
             machine_id = self._to_int(tool_data.get("machineId"))
+            status_performance_summary = self._status_category_summaries(
+                machine_name=tool_data.get("machineName") or "This press",
+                machine_id=machine_id,
+                rows=filtered_rows,
+                aggregate=aggregate,
+                filters=filters,
+                prompt_framing=str((intent or {}).get("promptFraming") or "performance"),
+            )
+            chart = self._status_chart(
+                tool_data.get("machineName") or "This press",
+                filtered_rows,
+                filters,
+                latest,
+                aggregate,
+                state,
+            )
             sections = [
                 {"label": "Latest reel in window", "text": self._filtered_latest_reel_text(latest)},
                 {
@@ -2905,6 +3486,9 @@ class RLMAssistantService:
                     "text": f"{aggregate.get('reelsRun') or 0} reels, {self._format_pct(aggregate.get('badFeetPct'))} bad feet, {self._format_number(aggregate.get('pointsPer1000Ft'))} pts/1k ft.",
                 },
             ]
+            breakdown_section = self._status_category_breakdown_section(status_performance_summary)
+            if breakdown_section:
+                sections.append(breakdown_section)
             scope_section = self._scope_section((intent or {}).get("analysisScope") or {}, [], filters)
             if scope_section:
                 sections.insert(0, scope_section)
@@ -2914,10 +3498,10 @@ class RLMAssistantService:
             peer_section = self._status_peer_ranking_section(machine_id, filters)
             if peer_section:
                 sections.append(peer_section)
-            return self._response(
+            response = self._response(
                 answer={
-                    "title": f"{tool_data['machineName']} is {str(state.get('stateLabel') or 'Unknown').lower()} in the selected window.",
-                    "summary": state.get("statusMessage") or "Filtered repeat length status is available.",
+                    "title": f"{tool_data['machineName']} performance summary",
+                    "summary": status_performance_summary.get("overallSummary") or state.get("statusMessage") or "Filtered repeat length status is available.",
                     "sections": sections,
                 },
                 evidence_metrics=[
@@ -2927,7 +3511,7 @@ class RLMAssistantService:
                     self._metric("Pts / 1k ft", self._format_number(aggregate.get("pointsPer1000Ft"))),
                     self._metric("Delta std dev", self._format_mm(latest.get("deltaStd"))),
                 ],
-                chart=None,
+                chart=chart,
                 tools_used=[{"tool": "get_press_status", "ok": True}],
                 suggested_prompts=self._contextual_follow_up_prompts(
                     response_kind="status",
@@ -2937,6 +3521,17 @@ class RLMAssistantService:
                 filters=filters,
                 data_semantics="filtered-window",
             )
+            response.setdefault("context", {})["statusSimpleSummary"] = self._build_status_simple_summary(
+                machine_id=machine_id,
+                machine_name=tool_data.get("machineName") or "This press",
+                filters=filters,
+                latest=latest,
+                aggregate=aggregate,
+                state=state,
+                rows=filtered_rows,
+            )
+            response.setdefault("context", {})["statusPerformanceSummary"] = status_performance_summary
+            return self._attach_analysis_summary(response, self._status_analysis_summary(status_performance_summary, aggregate))
 
         card = tool_data.get("card") or {}
         metrics = card.get("metrics") or {}
@@ -2944,6 +3539,53 @@ class RLMAssistantService:
         window_24h = windows.get("24h") or {}
         signal = tool_data.get("signal") or {}
         machine_id = self._to_int(tool_data.get("machineId"))
+        live_aggregate = {
+            "reelsRun": window_24h.get("qualifyingReels"),
+            "feetTotal": metrics.get("feetTotal") or window_24h.get("feetTotal"),
+            "estimatedBadFeet": metrics.get("estimatedBadFeet") or window_24h.get("estimatedBadFeet"),
+            "badFeetPct": window_24h.get("badFeetPct", metrics.get("badFeetPct")),
+            "deltaPointCount": metrics.get("deltaPointCount") or window_24h.get("deltaPointCount"),
+            "oobPointCount": metrics.get("oobPointCount") or window_24h.get("oobPointCount"),
+            "monitoringPointsTotal": metrics.get("monitoringPointsTotal") or window_24h.get("monitoringPointsTotal"),
+            "pointsPer1000Ft": metrics.get("pointsPer1000Ft") or window_24h.get("pointsPer1000Ft"),
+            "deltaVariation": window_24h.get("deltaStd"),
+            "deltaDrift": window_24h.get("avgDelta"),
+            "speedInstability": window_24h.get("webspeedRange"),
+            "toleranceChanges": window_24h.get("toleranceChangeCount"),
+        }
+        live_rows: List[Dict[str, Any]] = []
+        if any(
+            value is not None
+            for value in (
+                live_aggregate.get("estimatedBadFeet"),
+                live_aggregate.get("badFeetPct"),
+                live_aggregate.get("pointsPer1000Ft"),
+                live_aggregate.get("deltaVariation"),
+                live_aggregate.get("deltaDrift"),
+                live_aggregate.get("speedInstability"),
+                live_aggregate.get("toleranceChanges"),
+            )
+        ):
+            live_rows.append(
+                {
+                    "estimatedBadFeet": live_aggregate.get("estimatedBadFeet"),
+                    "estimatedBadFeetPct": live_aggregate.get("badFeetPct"),
+                    "pointsPer1000Ft": live_aggregate.get("pointsPer1000Ft"),
+                    "deltaStd": live_aggregate.get("deltaVariation"),
+                    "avgDelta": live_aggregate.get("deltaDrift"),
+                    "webspeedRange": live_aggregate.get("speedInstability"),
+                    "toleranceChangeCount": live_aggregate.get("toleranceChanges"),
+                    "feetTotal": live_aggregate.get("feetTotal"),
+                }
+            )
+        status_performance_summary = self._status_category_summaries(
+            machine_name=tool_data.get("machineName") or "This press",
+            machine_id=machine_id,
+            rows=live_rows,
+            aggregate=live_aggregate,
+            filters=filters,
+            prompt_framing=str((intent or {}).get("promptFraming") or "performance"),
+        )
         sections = [
             {"label": "Latest reel", "text": self._latest_reel_text(card)},
             {
@@ -2957,26 +3599,25 @@ class RLMAssistantService:
                 or "No active short-window trend signal was found.",
             },
         ]
+        breakdown_section = self._status_category_breakdown_section(status_performance_summary)
+        if breakdown_section:
+            sections.append(breakdown_section)
         scope_section = self._scope_section((intent or {}).get("analysisScope") or {}, [], filters)
         if scope_section:
             sections.insert(0, scope_section)
-        production_section = self._production_context_section(
-            {
-                "reelsRun": window_24h.get("qualifyingReels"),
-                "feetTotal": metrics.get("feetTotal") or window_24h.get("feetTotal"),
-                "estimatedBadFeet": metrics.get("estimatedBadFeet") or window_24h.get("estimatedBadFeet"),
-                "estimatedBadFeetPct": metrics.get("badFeetPct") or window_24h.get("badFeetPct"),
-            }
-        )
+        production_section = self._production_context_section(live_aggregate)
         if production_section:
             sections.append(production_section)
         peer_section = self._status_peer_ranking_section(machine_id, filters)
         if peer_section:
             sections.append(peer_section)
-        return self._response(
+        response = self._response(
             answer={
-                "title": f"{tool_data['machineName']} is {card.get('stateLabel', 'Unknown').lower()} right now.",
-                "summary": "No filtered-window rows were found, so this response uses current live RLM status.",
+                "title": f"{tool_data['machineName']} performance summary",
+                "summary": (
+                    status_performance_summary.get("overallSummary")
+                    or "No filtered-window rows were found, so this response uses current live RLM status."
+                ),
                 "sections": sections,
             },
             evidence_metrics=[
@@ -2995,6 +3636,1369 @@ class RLMAssistantService:
             ),
             filters=filters,
             data_semantics="live-current-fallback",
+        )
+        response.setdefault("context", {})["statusSimpleSummary"] = self._build_status_simple_summary(
+            machine_id=machine_id,
+            machine_name=tool_data.get("machineName") or "This press",
+            filters=filters,
+            latest=metrics,
+            aggregate=live_aggregate,
+            state={"state": card.get("state"), "stateLabel": card.get("stateLabel"), "statusMessage": card.get("statusMessage")},
+            rows=[],
+            trend_signal=signal,
+        )
+        response.setdefault("context", {})["statusPerformanceSummary"] = status_performance_summary
+        return self._attach_analysis_summary(response, self._status_analysis_summary(status_performance_summary, live_aggregate))
+
+    def _build_status_simple_summary(
+        self,
+        *,
+        machine_id: Optional[int],
+        machine_name: str,
+        filters: Dict[str, Any],
+        latest: Dict[str, Any],
+        aggregate: Dict[str, Any],
+        state: Dict[str, Any],
+        rows: List[Dict[str, Any]],
+        trend_signal: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        signals = self._status_signal_snapshot(latest=latest, aggregate=aggregate, rows=rows)
+        overall_standing = self._status_simple_standing(machine_id, filters)
+        takeaways = self._status_simple_takeaways(signals, state)
+        trend = self._status_simple_trend(signals, rows, trend_signal, state)
+        next_check = self._status_simple_next_check(signals)
+        return {
+            "verdict": f"{machine_name} is {str(state.get('stateLabel') or 'Unknown').lower()}.",
+            "overallStanding": overall_standing,
+            "takeaways": takeaways,
+            "trend": trend,
+            "nextCheck": next_check,
+        }
+
+    def _status_category_tags(self, metric_key: str, severity: int, trend: str) -> List[str]:
+        base_tags = {
+            "monitoring_coverage": ["Read confidence"],
+            "rlm_bad_feet_pct": ["Quality loss"],
+            "rlm_bad_feet": ["Scrap driver"],
+            "delta_variation": ["Control issue"],
+            "delta_drift": ["Registration drift"],
+            "speed_instability": ["Process instability"],
+            "tolerance_changes": ["Operator intervention"],
+        }.get(metric_key, [])
+        tags = list(base_tags)
+        trend_lower = str(trend or "").lower()
+        if severity >= 3:
+            tags.append("Immediate attention")
+        elif severity >= 2:
+            tags.append("Watch closely")
+        if trend_lower == "worsening":
+            tags.append("Getting worse")
+        elif trend_lower == "improving":
+            tags.append("Recovering")
+        elif trend_lower == "mixed":
+            tags.append("Uneven pattern")
+        return tags[:3]
+
+    def _status_delta_display(self, metric_key: str, baseline_context: Optional[Dict[str, Any]]) -> str:
+        if not baseline_context:
+            return "--"
+        delta = baseline_context.get("delta")
+        if delta is None:
+            return "--"
+        try:
+            delta_value = float(delta)
+        except (TypeError, ValueError):
+            return "--"
+        arrow = "↑" if delta_value > 0 else "↓" if delta_value < 0 else "→"
+        abs_value = abs(delta_value)
+        if metric_key in {"rlm_bad_feet_pct", "monitoring_coverage"}:
+            formatted = self._format_pct(abs_value)
+        elif metric_key in {"delta_variation", "delta_drift", "speed_instability"}:
+            formatted = self._format_mm(abs_value)
+        elif metric_key in {"rlm_bad_feet"}:
+            formatted = self._format_feet_value(abs_value)
+        elif metric_key in {"tolerance_changes"}:
+            formatted = f"{abs_value:.2f}"
+        else:
+            formatted = self._format_number(abs_value)
+        return f"{arrow} {formatted}"
+
+    def _status_outcome_rank_phrase(self, rank: Optional[int], total: Optional[int]) -> str:
+        if rank is None or total is None or total <= 0:
+            return "position is unclear"
+        if rank == total and total > 1:
+            return "worst in the plant"
+        if rank >= max(2, total - 1):
+            return "among the worst in the plant"
+        if rank >= max(1, total - total // 3):
+            return "in the weaker end of the plant"
+        if rank <= max(1, total // 3):
+            return "in the stronger end of the plant"
+        return "mid-pack in the plant"
+
+    def _status_prompt_framing(self, lowered: str) -> str:
+        if any(
+            token in lowered
+            for token in (
+                " what is hurting ",
+                " what s hurting ",
+                " what is driving ",
+                " what s driving ",
+                " what is causing ",
+                " what s causing ",
+                " what is dragging down ",
+                " what s dragging down ",
+            )
+        ):
+            return "driver"
+        if (
+            " why " in lowered
+            or " worst " in lowered
+            or " rank " in lowered
+            or " ranking " in lowered
+            or " bad today " in lowered
+            or " ranked low " in lowered
+        ):
+            return "cause"
+        return "performance"
+
+    def _status_quality_outcome(
+        self,
+        *,
+        machine_id: Optional[int],
+        machine_name: str,
+        filters: Dict[str, Any],
+        aggregate: Dict[str, Any],
+        category_summaries: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        resolved_id = self._to_int(machine_id)
+        if resolved_id is None:
+            return {}
+        rankings = self._safe_get_press_rankings_tool(resolved_id, filters)
+        intelligence = self._get_press_intelligence(filters)
+        category_breakdown = self._safe_get_press_category_breakdown_tool(resolved_id, filters)
+        overview_row = rankings.get("overviewRow") or {}
+        category_map = {str(item.get("key") or ""): item for item in (category_breakdown.get("categories") or [])}
+        bad_feet_pct_rank = self._to_int((category_map.get("bad_feet_pct") or {}).get("rank"))
+        bad_feet_total = len(intelligence.get("pressRankings") or [])
+        bad_feet_rank = self._to_int((category_map.get("bad_feet") or {}).get("rank"))
+        overall_total = len(intelligence.get("overviewRankings") or [])
+        overall_rank = self._to_int(overview_row.get("rank"))
+        bad_feet_pct_total = bad_feet_total or None
+        outcome_categories = {
+            str(item.get("key") or ""): item
+            for item in category_summaries
+            if str(item.get("key") or "") in {"rlm_bad_feet_pct", "rlm_bad_feet"}
+        }
+        bad_pct_item = outcome_categories.get("rlm_bad_feet_pct") or {}
+        bad_feet_item = outcome_categories.get("rlm_bad_feet") or {}
+        bad_pct_phrase = self._status_outcome_rank_phrase(bad_feet_pct_rank, bad_feet_pct_total)
+        bad_feet_phrase = self._status_outcome_rank_phrase(bad_feet_rank, bad_feet_total)
+        primary_trends = [str(item.get("trend") or "") for item in (bad_pct_item, bad_feet_item) if item]
+        if primary_trends.count("worsening") >= 1:
+            direction = "worsening"
+        elif primary_trends and all(item == "improving" for item in primary_trends):
+            direction = "improving"
+        else:
+            direction = "mostly holding steady"
+        monitor_points = self._to_int(aggregate.get("monitoringPointsTotal"))
+        bad_points = self._to_int(aggregate.get("oobPointCount"))
+        evidence_display = "--"
+        confidence_note = ""
+        if monitor_points is not None and monitor_points > 0:
+            evidence_display = f"{bad_points or 0} / {monitor_points} bad monitoring points"
+            coverage_density = aggregate.get("pointsPer1000Ft")
+            if monitor_points < 50 or (coverage_density is not None and float(coverage_density) < 5.0):
+                confidence_note = "Coverage is light, so treat the bad-feet read as directional rather than fully locked in."
+            elif (bad_points or 0) <= 0:
+                confidence_note = "Coverage is broad, but there are very few bad monitoring points backing the current bad-feet result."
+            else:
+                confidence_note = "Coverage is broad enough that the bad-feet result is supported by the monitoring evidence."
+        else:
+            confidence_note = "Monitoring coverage is thin, so confidence in the bad-feet read is limited."
+
+        overall_sentence = (
+            f"{machine_name} is {bad_pct_phrase} on Bad Feet % at {bad_pct_item.get('currentDisplay') or self._format_pct(aggregate.get('badFeetPct'))} "
+            f"(rank #{bad_feet_pct_rank or '--'} of {bad_feet_pct_total or '--'}), and total bad feet is "
+            f"{'also elevated' if bad_feet_rank and bad_feet_total and bad_feet_rank >= max(2, bad_feet_total - 1) else bad_feet_phrase} "
+            f"at {bad_feet_item.get('currentDisplay') or self._format_feet_value(aggregate.get('estimatedBadFeet'))} "
+            f"(rank #{bad_feet_rank or '--'} of {bad_feet_total or '--'})."
+        )
+        direction_sentence = f"Across the active scope, quality outcome is {direction}."
+        summary = f"{overall_sentence} {direction_sentence}".strip()
+        return {
+            "summary": summary,
+            "badFeetPctRank": bad_feet_pct_rank,
+            "badFeetPctTotal": bad_feet_pct_total,
+            "badFeetRank": bad_feet_rank,
+            "badFeetTotal": bad_feet_total,
+            "overallRankDisplay": f"#{overall_rank} of {overall_total}" if overall_rank and overall_total else "--",
+            "badFeetPctDisplay": bad_pct_item.get("currentDisplay") or self._format_pct(aggregate.get("badFeetPct")),
+            "badFeetPctRankDisplay": f"#{bad_feet_pct_rank} of {bad_feet_pct_total}" if bad_feet_pct_rank and bad_feet_pct_total else "--",
+            "badFeetDisplay": bad_feet_item.get("currentDisplay") or self._format_feet_value(aggregate.get("estimatedBadFeet")),
+            "badFeetRankDisplay": f"#{bad_feet_rank} of {bad_feet_total}" if bad_feet_rank and bad_feet_total else "--",
+            "monitoringEvidenceDisplay": evidence_display,
+            "confidenceNote": confidence_note,
+            "overallDirection": direction,
+        }
+
+    def _status_outcome_opening_sentence(
+        self,
+        *,
+        machine_name: str,
+        quality_outcome: Dict[str, Any],
+        contributor_labels: List[str],
+        stable_labels: List[str],
+        prompt_framing: str,
+    ) -> str:
+        bad_pct_display = quality_outcome.get("badFeetPctDisplay") or "--"
+        bad_pct_rank = quality_outcome.get("badFeetPctRank")
+        bad_pct_total = quality_outcome.get("badFeetPctTotal")
+        bad_feet_display = quality_outcome.get("badFeetDisplay") or "--"
+        bad_feet_rank = quality_outcome.get("badFeetRank")
+        bad_feet_total = quality_outcome.get("badFeetTotal")
+        direction = str(quality_outcome.get("overallDirection") or "mostly holding steady")
+
+        outcome_clause = (
+            f"{machine_name} is {self._status_outcome_rank_phrase(bad_pct_rank, bad_pct_total)} on Bad Feet % "
+            f"at {bad_pct_display}"
+        )
+        if bad_pct_rank and bad_pct_total:
+            outcome_clause += f" (rank #{bad_pct_rank} of {bad_pct_total})"
+        if bad_feet_rank and bad_feet_total:
+            outcome_clause += (
+                f", and total bad feet is {self._status_outcome_rank_phrase(bad_feet_rank, bad_feet_total)} "
+                f"at {bad_feet_display} (rank #{bad_feet_rank} of {bad_feet_total})"
+            )
+        elif bad_feet_display != "--":
+            outcome_clause += f", with total bad feet at {bad_feet_display}"
+
+        if prompt_framing == "driver":
+            if contributor_labels:
+                sentence = f"{machine_name} is being hurt mainly by {', '.join(contributor_labels[:3]).lower()}."
+            else:
+                sentence = f"{machine_name} is being hurt mainly by elevated bad-feet outcome in the current scope."
+            sentence += f" {outcome_clause}, and the overall direction is {direction}."
+            return sentence
+
+        if prompt_framing == "cause":
+            sentence = f"{outcome_clause}, which is the main reason it is ranking poorly in the current scope."
+            if contributor_labels:
+                sentence += f" The biggest contributing signals are {', '.join(contributor_labels[:3]).lower()}."
+            sentence += f" Overall, it is {direction}."
+            return sentence
+
+        sentence = f"{outcome_clause}."
+        if contributor_labels:
+            sentence += f" The main pressure is coming from {', '.join(contributor_labels[:3]).lower()}."
+        if stable_labels:
+            sentence += f" {', '.join(stable_labels[:2])} is staying steadier."
+        sentence += f" Overall direction is {direction}."
+        return sentence
+
+    def _status_category_definitions(self) -> List[Dict[str, str]]:
+        return [
+            {"metric_key": "monitoring_coverage", "label": "Monitoring Coverage"},
+            {"metric_key": "rlm_bad_feet_pct", "label": "Bad Feet %"},
+            {"metric_key": "rlm_bad_feet", "label": "Bad Feet"},
+            {"metric_key": "delta_variation", "label": "Repeat Length Variation"},
+            {"metric_key": "delta_drift", "label": "Repeat Length Drift"},
+            {"metric_key": "speed_instability", "label": "Speed Instability"},
+            {"metric_key": "tolerance_changes", "label": "Tolerance Changes"},
+        ]
+
+    def _status_category_severity(
+        self,
+        metric_key: str,
+        value: Optional[float],
+        *,
+        aggregate: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        if value is None:
+            return 0
+        if metric_key == "monitoring_coverage":
+            return self._status_signal_severity("monitoring_coverage", value)
+        if metric_key == "rlm_bad_feet_pct":
+            return self._status_signal_severity("bad_feet_pct", value)
+        if metric_key == "rlm_bad_feet":
+            severity_from_pct = self._status_signal_severity("bad_feet_pct", (aggregate or {}).get("badFeetPct"))
+            if severity_from_pct > 0:
+                return severity_from_pct
+            if value >= 1500:
+                return 3
+            if value >= 750:
+                return 2
+            if value >= 250:
+                return 1
+            return 0
+        if metric_key == "delta_variation":
+            return self._status_signal_severity("delta_variation", value)
+        if metric_key == "delta_drift":
+            return self._status_signal_severity("delta_drift", value)
+        if metric_key == "speed_instability":
+            return self._status_signal_severity("speed_instability", value)
+        if metric_key == "tolerance_changes":
+            if value >= 12:
+                return 3
+            if value >= 6:
+                return 2
+            if value >= 2:
+                return 1
+            return 0
+        return 0
+
+    def _status_condition_label(
+        self,
+        metric_key: str,
+        value: Optional[float],
+        *,
+        aggregate: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        if value is None:
+            return "Unavailable"
+        severity = self._status_category_severity(metric_key, value, aggregate=aggregate)
+        if severity >= 3:
+            return "Critical"
+        if severity == 2:
+            return "Warning"
+        if severity == 1:
+            return "Watch"
+        return "Stable" if metric_key == "rlm_bad_feet" and float(value or 0.0) > 0 else "Healthy"
+
+    def _status_trend_direction(self, metric_key: str, rows: List[Dict[str, Any]]) -> Dict[str, str]:
+        trend = self._compute_phase2a_trend(metric_key, rows)
+        direction = str(trend.get("direction") or "stable").lower()
+        scores = [self._phase2b_metric_score(metric_key, row) for row in rows]
+        usable_scores = [float(score) for score in scores if score is not None]
+        if direction == "stable" and len(usable_scores) >= 4:
+            mean_value = sum(usable_scores) / len(usable_scores)
+            span = max(usable_scores) - min(usable_scores)
+            variability_threshold = max(abs(mean_value) * 0.35, 0.15)
+            if span >= variability_threshold:
+                direction = "mixed"
+        basis = str(trend.get("basis") or "").strip()
+        if direction == "mixed" and not basis:
+            basis = "The first and second halves of the active scope do not move cleanly in one direction."
+        return {
+            "direction": direction,
+            "basis": basis or "Trend uses the active scoped rows only.",
+        }
+
+    def _status_category_interpretation(
+        self,
+        *,
+        label: str,
+        metric_key: str,
+        condition: str,
+        trend_direction: str,
+        value_display: str,
+        baseline_context: Optional[Dict[str, Any]] = None,
+        peer_context: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        condition_lower = condition.lower()
+        trend_lower = trend_direction.lower()
+        baseline_clause = ""
+        if baseline_context and baseline_context.get("label") and baseline_context.get("previousDisplay"):
+            baseline_clause = (
+                f" It is {baseline_context.get('relative')} the {baseline_context.get('label')} "
+                f"({value_display} vs {baseline_context.get('previousDisplay')})."
+            )
+        peer_clause = ""
+        if peer_context and peer_context.get("peerBand"):
+            rank = peer_context.get("rank")
+            rank_text = f" rank #{rank}" if rank is not None else ""
+            peer_clause = f" It is {peer_context.get('peerBand')}{rank_text} in this scope."
+
+        if metric_key == "monitoring_coverage":
+            core = {
+                "worsening": "Monitoring density is thinning out, which makes the rest of the scoped read less trustworthy.",
+                "improving": "Monitoring density is recovering, so confidence in the read is getting better.",
+                "mixed": "Monitoring density is uneven from reel to reel, so confidence in the read is not consistent.",
+            }.get(trend_lower, f"Monitoring density is {condition_lower}, which sets how much trust to place in the rest of the metrics.")
+        elif metric_key == "rlm_bad_feet_pct":
+            core = {
+                "worsening": "Quality loss is climbing, so a larger share of current footage is going bad.",
+                "improving": "Quality loss is easing, so less of the run is being affected.",
+                "mixed": "Quality loss is swinging around instead of holding a clean pattern.",
+            }.get(trend_lower, f"Quality loss is {condition_lower} across the active scope.")
+        elif metric_key == "rlm_bad_feet":
+            core = {
+                "worsening": "Scrap exposure is building in absolute feet, so the total hit is still accumulating.",
+                "improving": "Scrap accumulation is easing, so the press is giving back less footage.",
+                "mixed": "Scrap volume is uneven, with damage concentrated in parts of the scoped run.",
+            }.get(trend_lower, f"Scrap volume is currently {condition_lower} in the active scope.")
+        elif metric_key == "delta_variation":
+            core = {
+                "worsening": "Repeat length is getting less consistent, which can keep feeding print variation and bad feet.",
+                "improving": "Repeat length control is settling down, which should reduce defect pressure if it holds.",
+                "mixed": "Repeat length variation comes and goes, so the issue is not yet under control.",
+            }.get(trend_lower, f"Repeat length variation is {condition_lower} right now.")
+        elif metric_key == "delta_drift":
+            core = {
+                "worsening": "Repeat length is walking away over the run, which suggests a stability problem rather than isolated noise.",
+                "improving": "Repeat length drift is easing, so the run is holding closer to target.",
+                "mixed": "Repeat length drift is inconsistent, suggesting the press is not holding a steady center line.",
+            }.get(trend_lower, f"Repeat length drift is {condition_lower} in the current scope.")
+        elif metric_key == "speed_instability":
+            core = {
+                "worsening": "Speed behavior is getting rougher, which can keep feeding variation into the rest of the process.",
+                "improving": "Speed control is settling, which should help the rest of the process stabilize.",
+                "mixed": "Speed is moving around in bursts, so the process is not yet consistently calm.",
+            }.get(trend_lower, f"Speed behavior is {condition_lower} across the active scope.")
+        elif metric_key == "tolerance_changes":
+            core = {
+                "worsening": "The press needed more tolerance intervention than usual, which points to a harder-to-hold process.",
+                "improving": "Tolerance intervention is backing off, which is a sign the press is easier to hold.",
+                "mixed": "Tolerance moves are coming in clusters, which suggests the press is not fully settled.",
+            }.get(trend_lower, f"Tolerance intervention is {condition_lower} for this scope.")
+        else:
+            core = f"{label} is {condition_lower} at {value_display}."
+        return f"{core} Now at {value_display}.{baseline_clause}{peer_clause}"
+
+    def _status_overall_summary(
+        self,
+        *,
+        machine_name: str,
+        machine_id: Optional[int],
+        filters: Dict[str, Any],
+        category_summaries: List[Dict[str, Any]],
+        aggregate: Dict[str, Any],
+        prompt_framing: str = "performance",
+    ) -> Dict[str, Any]:
+        quality_outcome = self._status_quality_outcome(
+            machine_id=machine_id,
+            machine_name=machine_name,
+            filters=filters,
+            aggregate=aggregate,
+            category_summaries=category_summaries,
+        )
+        stable_areas = [
+            item for item in category_summaries
+            if str(item.get("key") or "") not in {"rlm_bad_feet_pct", "rlm_bad_feet"}
+            and int(item.get("severity") or 0) == 0 and str(item.get("trend") or "") in {"stable", "improving"}
+        ]
+        contributor_labels = []
+        for item in sorted(
+            [item for item in category_summaries if str(item.get("key") or "") not in {"rlm_bad_feet_pct", "rlm_bad_feet"}],
+            key=lambda item: (-int(item.get("severity") or 0), str(item.get("trend") or "") != "worsening", -(float(item.get("priorityScore") or 0.0))),
+        ):
+            if int(item.get("severity") or 0) >= 1 or str(item.get("trend") or "") in {"worsening", "mixed"}:
+                contributor_labels.append(str(item.get("label") or ""))
+            if len(contributor_labels) >= 3:
+                break
+        stable_labels = [str(item.get("label") or "") for item in stable_areas[:2] if item.get("label")]
+        summary = self._status_outcome_opening_sentence(
+            machine_name=machine_name,
+            quality_outcome=quality_outcome,
+            contributor_labels=contributor_labels,
+            stable_labels=stable_labels,
+            prompt_framing=prompt_framing,
+        )
+        if not summary.strip():
+            summary = quality_outcome.get("summary") or f"{machine_name} quality outcome is available for the active scope."
+        return {
+            "summary": summary,
+            "overallPerformance": quality_outcome.get("overallRankDisplay") or "",
+            "overallTrend": quality_outcome.get("overallDirection") or "",
+            "stableAreas": [item for item in stable_areas[:3] if item.get("label")],
+            "standing": quality_outcome.get("confidenceNote") or "",
+            "qualityOutcome": quality_outcome,
+        }
+
+    def _status_category_summaries(
+        self,
+        *,
+        machine_name: str,
+        machine_id: Optional[int],
+        rows: List[Dict[str, Any]],
+        aggregate: Dict[str, Any],
+        filters: Dict[str, Any],
+        prompt_framing: str = "performance",
+    ) -> Dict[str, Any]:
+        categories: List[Dict[str, Any]] = []
+        for definition in self._status_category_definitions():
+            metric_key = str(definition.get("metric_key") or "")
+            metric = self._compute_phase2a_metric(metric_key, rows)
+            trend = self._status_trend_direction(metric_key, rows)
+            value = metric.get("value")
+            condition = self._status_condition_label(metric_key, value, aggregate=aggregate)
+            baseline_context = self._status_category_baseline_context(metric_key, machine_id, filters, rows)
+            peer_context = self._status_category_peer_context(metric_key, machine_id, filters)
+            severity = self._status_category_severity(metric_key, value, aggregate=aggregate)
+            priority_score = float(severity * 10)
+            if str(trend.get("direction") or "") == "worsening":
+                priority_score += 4.0
+            elif str(trend.get("direction") or "") == "mixed":
+                priority_score += 2.0
+            if baseline_context.get("relative") == "worse than":
+                priority_score += 2.0
+            if "weaker than most peers" == peer_context.get("peerBand"):
+                priority_score += 2.0
+            interpretation = self._status_category_interpretation(
+                label=str(definition.get("label") or metric.get("metricLabel") or metric_key),
+                metric_key=metric_key,
+                condition=condition,
+                trend_direction=str(trend.get("direction") or "stable"),
+                value_display=str(metric.get("valueDisplay") or "--"),
+                baseline_context=baseline_context,
+                peer_context=peer_context,
+            )
+            categories.append(
+                {
+                    "key": metric_key,
+                    "label": str(definition.get("label") or metric.get("metricLabel") or metric_key),
+                    "currentValue": value,
+                    "currentDisplay": str(metric.get("valueDisplay") or "--"),
+                    "condition": condition,
+                    "trend": str(trend.get("direction") or "stable"),
+                    "trendBasis": str(trend.get("basis") or ""),
+                    "interpretation": interpretation,
+                    "severity": severity,
+                    "role": "outcome" if metric_key in {"rlm_bad_feet_pct", "rlm_bad_feet"} else "contributor",
+                    "baselineContext": baseline_context,
+                    "peerContext": peer_context,
+                    "previousDisplay": baseline_context.get("previousDisplay") or "--",
+                    "previousLabel": baseline_context.get("label") or "previous window",
+                    "peerRankDisplay": (
+                        f"#{peer_context.get('rank')}" if peer_context.get("rank") is not None else "--"
+                    ),
+                    "peerBand": peer_context.get("peerBand") or "",
+                    "deltaDisplay": self._status_delta_display(metric_key, baseline_context),
+                    "deltaLabel": f"vs {baseline_context.get('label')}" if baseline_context.get("label") else "vs previous window",
+                    "tags": self._status_category_tags(metric_key, severity, str(trend.get("direction") or "stable")),
+                    "trendPoints": self._status_category_trend_points(metric_key, rows),
+                    "priorityScore": priority_score,
+                }
+            )
+        overall = self._status_overall_summary(
+            machine_name=machine_name,
+            machine_id=machine_id,
+            filters=filters,
+            category_summaries=categories,
+            aggregate=aggregate,
+            prompt_framing=prompt_framing,
+        )
+        return {
+            "overallSummary": overall.get("summary"),
+            "overallPerformance": overall.get("overallPerformance") or "",
+            "overallTrend": overall.get("overallTrend") or "",
+            "qualityOutcome": overall.get("qualityOutcome") or {},
+            "stableAreas": overall.get("stableAreas") or [],
+            "standing": overall.get("standing") or "",
+            "categories": sorted(categories, key=lambda item: -float(item.get("priorityScore") or 0.0)),
+        }
+
+    def _status_category_breakdown_section(self, status_summary: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        categories = status_summary.get("categories") or []
+        if not categories:
+            return None
+        parts = [
+            (
+                f"{item.get('label')}: {item.get('currentDisplay')} now | "
+                f"{item.get('condition')} | {str(item.get('trend') or '').title()} | "
+                f"{item.get('deltaLabel') or 'vs previous window'} {item.get('deltaDisplay') or '--'} | "
+                f"Peer {item.get('peerRankDisplay') or '--'}"
+            )
+            for item in categories
+            if item.get("label")
+        ]
+        if not parts:
+            return None
+        return {"label": "Category breakdown", "text": " | ".join(parts)}
+
+    def _analysis_key_context_item(self, label: str, value: Any, auxiliary: Optional[Any] = None) -> Dict[str, str]:
+        return {
+            "label": str(label or "").strip() or "--",
+            "value": str(value if value not in (None, "") else "--"),
+            "auxiliary": str(auxiliary if auxiliary not in (None, "") else "").strip(),
+        }
+
+    def _analysis_meta_item(self, label: str, value: Any) -> Dict[str, str]:
+        return {
+            "label": str(label or "").strip() or "--",
+            "value": str(value if value not in (None, "") else "--"),
+        }
+
+    def _analysis_card(
+        self,
+        *,
+        title: str,
+        value: Any,
+        condition: Optional[str] = None,
+        trend: Optional[str] = None,
+        meta: Optional[List[Dict[str, str]]] = None,
+        tags: Optional[List[str]] = None,
+        trend_points: Optional[List[float]] = None,
+        note: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return {
+            "title": str(title or "").strip() or "--",
+            "value": str(value if value not in (None, "") else "--"),
+            "condition": str(condition or "").strip(),
+            "trend": str(trend or "").strip(),
+            "meta": [item for item in (meta or []) if item.get("label") and item.get("value")],
+            "tags": [str(tag).strip() for tag in (tags or []) if str(tag or "").strip()],
+            "trendPoints": [float(point) for point in (trend_points or []) if point is not None],
+            "note": str(note or "").strip(),
+        }
+
+    def _analysis_summary_payload(
+        self,
+        *,
+        family: str,
+        lead: str,
+        key_context: Optional[List[Dict[str, str]]] = None,
+        primary_label: Optional[str] = None,
+        primary_cards: Optional[List[Dict[str, Any]]] = None,
+        supporting_label: Optional[str] = None,
+        supporting_cards: Optional[List[Dict[str, Any]]] = None,
+        production_label: Optional[str] = None,
+        production_cards: Optional[List[Dict[str, Any]]] = None,
+        next_checks: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        return {
+            "family": str(family or "").strip() or "analysis",
+            "lead": str(lead or "").strip(),
+            "keyContext": [item for item in (key_context or []) if item.get("label")],
+            "primaryLabel": str(primary_label or "").strip(),
+            "primaryCards": [item for item in (primary_cards or []) if item.get("title")],
+            "supportingLabel": str(supporting_label or "").strip(),
+            "supportingCards": [item for item in (supporting_cards or []) if item.get("title")],
+            "productionLabel": str(production_label or "").strip(),
+            "productionCards": [item for item in (production_cards or []) if item.get("title")],
+            "nextChecks": [str(item).strip() for item in (next_checks or []) if str(item or "").strip()],
+        }
+
+    def _attach_analysis_summary(self, response: Dict[str, Any], summary: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if summary:
+            response.setdefault("context", {})["analysisSummary"] = summary
+        return response
+
+    def _status_analysis_summary(self, status_summary: Dict[str, Any], aggregate: Dict[str, Any]) -> Dict[str, Any]:
+        quality_outcome = status_summary.get("qualityOutcome") or {}
+        categories = status_summary.get("categories") or []
+        contributor_cards = [
+            self._analysis_card(
+                title=str(item.get("label") or "--"),
+                value=item.get("currentDisplay"),
+                condition=item.get("condition"),
+                trend=item.get("trend"),
+                meta=[
+                    self._analysis_meta_item(item.get("deltaLabel") or "vs previous window", item.get("deltaDisplay") or "--"),
+                    self._analysis_meta_item("Peer rank", item.get("peerRankDisplay") or "--"),
+                ],
+                tags=item.get("tags") or [],
+                trend_points=item.get("trendPoints") or [],
+                note=item.get("interpretation"),
+            )
+            for item in categories
+            if str(item.get("role") or "") != "outcome"
+        ]
+        production_cards = [
+            self._analysis_card(
+                title="Production context",
+                value=f"{aggregate.get('reelsRun') or 0} reels",
+                condition="Scope",
+                meta=[
+                    self._analysis_meta_item("Total feet", self._format_feet_value(aggregate.get("feetTotal"))),
+                    self._analysis_meta_item("Pts / 1k ft", self._format_number(aggregate.get("pointsPer1000Ft"))),
+                ],
+            )
+        ]
+        return self._analysis_summary_payload(
+            family="status",
+            lead=str(status_summary.get("overallSummary") or ""),
+            key_context=[
+                self._analysis_key_context_item("Overall plant rank", quality_outcome.get("overallRankDisplay") or "--"),
+                self._analysis_key_context_item("Bad Feet %", quality_outcome.get("badFeetPctDisplay") or "--", quality_outcome.get("badFeetPctRankDisplay") or ""),
+                self._analysis_key_context_item("Bad Feet", quality_outcome.get("badFeetDisplay") or "--", quality_outcome.get("badFeetRankDisplay") or ""),
+                self._analysis_key_context_item("Monitoring evidence", quality_outcome.get("monitoringEvidenceDisplay") or "--", quality_outcome.get("confidenceNote") or ""),
+            ],
+            primary_label="Contributing Signals",
+            primary_cards=contributor_cards,
+            production_label="Production Context",
+            production_cards=production_cards,
+        )
+
+    def _status_category_peer_context(
+        self,
+        metric_key: str,
+        machine_id: Optional[int],
+        filters: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        resolved_id = self._to_int(machine_id)
+        if resolved_id is None:
+            return {}
+        category_key_map = {
+            "monitoring_coverage": "monitoring_coverage",
+            "rlm_bad_feet_pct": "bad_feet_pct",
+            "delta_variation": "delta_variation",
+            "delta_drift": "delta_drift",
+            "speed_instability": "speed_instability",
+            "tolerance_changes": "tolerance_changes",
+        }
+        category_key = category_key_map.get(metric_key)
+        if category_key:
+            categories = self.get_press_category_breakdown_tool(resolved_id, filters).get("categories") or []
+            item = next((row for row in categories if str(row.get("key") or "") == category_key), None)
+            if item and item.get("rank") is not None:
+                rank = int(item.get("rank") or 0)
+                total = len(categories) if categories else None
+                if total and rank <= max(1, total // 3):
+                    band = "strong versus peers"
+                elif total and rank >= max(1, total - total // 3):
+                    band = "weaker than most peers"
+                else:
+                    band = "middle of the peer set"
+                return {
+                    "rank": rank,
+                    "peerBand": band,
+                    "valueDisplay": item.get("valueDisplay"),
+                    "contextLabel": item.get("contextLabel"),
+                }
+        if metric_key == "rlm_bad_feet":
+            intelligence = self._get_press_intelligence(filters)
+            rows = intelligence.get("pressRankings") or []
+            press_row = next((row for row in rows if self._to_int(row.get("machineId")) == resolved_id), None)
+            if press_row and press_row.get("rank") is not None:
+                rank = int(press_row.get("rank") or 0)
+                total = len(rows)
+                if rank <= max(1, total // 3):
+                    band = "strong versus peers"
+                elif rank >= max(1, total - total // 3):
+                    band = "weaker than most peers"
+                else:
+                    band = "middle of the peer set"
+                return {
+                    "rank": rank,
+                    "peerBand": band,
+                    "valueDisplay": self._format_feet_value(press_row.get("estimatedBadFeet")),
+                    "contextLabel": "estimated bad feet in the active scope",
+                }
+        return {}
+
+    def _status_category_baseline_context(
+        self,
+        metric_key: str,
+        machine_id: Optional[int],
+        filters: Dict[str, Any],
+        rows: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        resolved_id = self._to_int(machine_id)
+        if resolved_id is None or not rows:
+            return {}
+        previous_filters = self._previous_window_filters(filters, resolved_id)
+        if not previous_filters:
+            return {}
+        previous_dataset = self._build_filtered_dataset(previous_filters, resolved_id)
+        previous_rows = list(previous_dataset.get("rows") or [])
+        if not previous_rows:
+            return {}
+        current_metric = self._compute_phase2a_metric(metric_key, rows)
+        previous_metric = self._compute_phase2a_metric(metric_key, previous_rows, qualification=previous_dataset.get("qualification"))
+        current_value = current_metric.get("value")
+        previous_value = previous_metric.get("value")
+        if current_value is None or previous_value is None:
+            return {}
+        higher_is_better = METRIC_REGISTRY.get(metric_key, {}).get("higher_is_better")
+        delta = float(current_value) - float(previous_value)
+        threshold = max(abs(float(previous_value)) * 0.08, 0.02)
+        if abs(delta) < threshold:
+            relative = "in line with"
+        elif higher_is_better:
+            relative = "better than" if delta > 0 else "worse than"
+        else:
+            relative = "better than" if delta < 0 else "worse than"
+        return {
+            "label": self._previous_window_label(filters),
+            "previousValue": previous_value,
+            "previousDisplay": previous_metric.get("valueDisplay"),
+            "relative": relative,
+            "delta": delta,
+        }
+
+    def _status_category_trend_points(self, metric_key: str, rows: List[Dict[str, Any]]) -> List[float]:
+        points = [float(self._phase2b_metric_score(metric_key, row)) for row in rows if self._phase2b_metric_score(metric_key, row) is not None]
+        if len(points) <= 12:
+            return points
+        stride = max(1, len(points) // 12)
+        sampled = [points[index] for index in range(0, len(points), stride)]
+        if sampled[-1] != points[-1]:
+            sampled.append(points[-1])
+        return sampled[:12]
+
+    def _status_priority_label(self, severity: int, trend: str) -> str:
+        if severity >= 2:
+            return "Main concern"
+        if severity == 1 or trend == "mixed":
+            return "Secondary concern"
+        return "Relatively stable area"
+
+    def _status_why_it_matters(self, metric_key: str, priority_label: str) -> str:
+        if metric_key == "monitoring_coverage":
+            return "Low coverage weakens confidence in every other read for this scope."
+        if metric_key in {"rlm_bad_feet_pct", "rlm_bad_feet"}:
+            return "This directly reflects quality loss and scrap risk."
+        if metric_key in {"delta_variation", "delta_drift"}:
+            return "This points to repeat-length control issues that can keep driving defects."
+        if metric_key == "speed_instability":
+            return "This suggests unstable process conditions that can feed downstream quality swings."
+        if metric_key == "tolerance_changes":
+            return "Frequent tolerance moves suggest the press needed more intervention than usual."
+        if priority_label == "Relatively stable area":
+            return "This is not driving the current performance read."
+        return "This is materially affecting the current performance read."
+
+    def _status_signal_snapshot(
+        self,
+        *,
+        latest: Dict[str, Any],
+        aggregate: Dict[str, Any],
+        rows: List[Dict[str, Any]],
+    ) -> Dict[str, Dict[str, Any]]:
+        def _as_float(value: Any) -> Optional[float]:
+            try:
+                return float(value) if value is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        def _series(key: str, *, absolute: bool = False) -> List[float]:
+            values: List[float] = []
+            for row in rows:
+                raw = _as_float(row.get(key))
+                if raw is None:
+                    continue
+                values.append(abs(raw) if absolute else raw)
+            return values
+
+        def _avg(values: List[float]) -> Optional[float]:
+            return sum(values) / len(values) if values else None
+
+        bad_values = _series("estimatedBadFeetPct")
+        variation_values = _series("deltaStd")
+        drift_values = _series("avgDelta", absolute=True)
+        speed_values = _series("webspeedRange")
+        coverage_values = _series("pointsPer1000Ft")
+
+        return {
+            "bad_feet_pct": {
+                "value": _as_float(aggregate.get("badFeetPct")) if aggregate.get("badFeetPct") is not None else _avg(bad_values),
+                "latest": _as_float(latest.get("estimatedBadFeetPct") or latest.get("badFeetPct")),
+                "display": self._format_pct(_as_float(aggregate.get("badFeetPct")) if aggregate.get("badFeetPct") is not None else _avg(bad_values)),
+                "series": bad_values,
+            },
+            "delta_variation": {
+                "value": _avg(variation_values) if variation_values else _as_float(aggregate.get("deltaVariation") or latest.get("deltaStd")),
+                "latest": _as_float(latest.get("deltaStd")),
+                "display": self._format_mm(_avg(variation_values) if variation_values else _as_float(aggregate.get("deltaVariation") or latest.get("deltaStd"))),
+                "series": variation_values,
+                "spread": (max(variation_values) - min(variation_values)) if len(variation_values) >= 2 else None,
+            },
+            "delta_drift": {
+                "value": _avg(drift_values) if drift_values else abs(_as_float(aggregate.get("deltaDrift") or latest.get("avgDelta")) or 0.0),
+                "latest": abs(_as_float(latest.get("avgDelta")) or 0.0) if latest.get("avgDelta") is not None else None,
+                "display": self._format_mm(_avg(drift_values) if drift_values else abs(_as_float(aggregate.get("deltaDrift") or latest.get("avgDelta")) or 0.0)),
+                "series": drift_values,
+            },
+            "speed_instability": {
+                "value": _avg(speed_values) if speed_values else _as_float(aggregate.get("speedInstability") or latest.get("webspeedRange")),
+                "latest": _as_float(latest.get("webspeedRange")),
+                "display": self._format_number(_avg(speed_values) if speed_values else _as_float(aggregate.get("speedInstability") or latest.get("webspeedRange"))),
+                "series": speed_values,
+            },
+            "monitoring_coverage": {
+                "value": _as_float(aggregate.get("pointsPer1000Ft")) if aggregate.get("pointsPer1000Ft") is not None else _avg(coverage_values),
+                "latest": _as_float(latest.get("pointsPer1000Ft")),
+                "display": f"{self._format_number(_as_float(aggregate.get('pointsPer1000Ft')) if aggregate.get('pointsPer1000Ft') is not None else _avg(coverage_values))} pts/1k ft",
+                "series": coverage_values,
+            },
+        }
+
+    def _status_signal_severity(self, key: str, value: Optional[float]) -> int:
+        if value is None:
+            return 0
+        if key == "bad_feet_pct":
+            if value >= 5.0:
+                return 3
+            if value >= 3.0:
+                return 2
+            if value >= 2.0:
+                return 1
+            return 0
+        if key == "delta_variation":
+            if value >= 0.7:
+                return 3
+            if value >= 0.5:
+                return 2
+            if value >= 0.35:
+                return 1
+            return 0
+        if key == "delta_drift":
+            if value >= 1.0:
+                return 3
+            if value >= 0.5:
+                return 2
+            if value >= 0.3:
+                return 1
+            return 0
+        if key == "speed_instability":
+            if value >= 20.0:
+                return 3
+            if value >= 12.0:
+                return 2
+            if value >= 8.0:
+                return 1
+            return 0
+        if key == "monitoring_coverage":
+            if value <= 0:
+                return 3
+            if value < 20.0:
+                return 2
+            if value < 25.0:
+                return 1
+            return 0
+        return 0
+
+    def _status_simple_standing(self, machine_id: Optional[int], filters: Dict[str, Any]) -> str:
+        resolved_id = self._to_int(machine_id)
+        if resolved_id is None:
+            return ""
+        intelligence = self._get_press_intelligence(filters)
+        overview_rows = intelligence.get("overviewRankings", []) or []
+        overview_row = next((row for row in overview_rows if self._to_int(row.get("machineId")) == resolved_id), None)
+        if not overview_row:
+            return ""
+        total = len(overview_rows)
+        rank = int(overview_row.get("rank") or 0)
+        if rank <= max(1, total // 3):
+            band = "Upper tier in this window"
+        elif rank >= max(1, total - total // 3):
+            band = "Lower tier in this window"
+        else:
+            band = "Middle of the pack in this window"
+        category_map = {
+            str(item.get("key") or ""): item
+            for item in (self.get_press_category_breakdown_tool(resolved_id, filters).get("categories") or [])
+        }
+        weak_rank_rows: List[tuple[int, str]] = []
+        for key, label in (
+            ("bad_feet_pct", "Bad feet"),
+            ("delta_variation", "Repeat variation"),
+            ("delta_drift", "Drift"),
+            ("speed_instability", "Speed instability"),
+        ):
+            item = category_map.get(key)
+            if item and item.get("rank") is not None:
+                weak_rank_rows.append((int(item.get("rank") or 0), f"{label} #{item.get('rank')}"))
+        weak_rank_rows.sort(key=lambda item: item[0], reverse=True)
+        detail = ", ".join(label for _, label in weak_rank_rows[:2])
+        return f"{band} | Overall rank #{rank} of {total}" + (f" | Weakest ranks: {detail}" if detail else "")
+
+    def _status_simple_takeaways(self, signals: Dict[str, Dict[str, Any]], state: Dict[str, Any]) -> List[str]:
+        takeaways: List[str] = []
+        primary_keys = ["bad_feet_pct", "delta_variation", "delta_drift", "speed_instability"]
+        ranked = sorted(
+            primary_keys,
+            key=lambda key: (
+                -self._status_signal_severity(key, signals.get(key, {}).get("value")),
+                -float(signals.get(key, {}).get("value") or 0.0),
+            ),
+        )
+        for key in ranked:
+            signal = signals.get(key) or {}
+            severity = self._status_signal_severity(key, signal.get("value"))
+            if severity <= 0:
+                continue
+            if key == "bad_feet_pct":
+                takeaways.append(f"Bad feet is elevated at {signal.get('display')}")
+            elif key == "delta_variation":
+                line = f"Repeat variation is elevated at {signal.get('display')}"
+                if signal.get("spread") is not None and float(signal.get("spread") or 0.0) >= 0.15:
+                    line += f" | Window spread is {self._format_mm(signal.get('spread'))}"
+                takeaways.append(line)
+            elif key == "delta_drift":
+                takeaways.append(f"Drift is elevated at {signal.get('display')}")
+            elif key == "speed_instability":
+                takeaways.append(f"Speed instability is elevated at {signal.get('display')}")
+            if len(takeaways) >= 2:
+                break
+        if not takeaways:
+            takeaways.append("Main quality and process signals look steady")
+        coverage = signals.get("monitoring_coverage") or {}
+        coverage_severity = self._status_signal_severity("monitoring_coverage", coverage.get("value"))
+        if coverage_severity >= 2:
+            takeaways.append(f"Monitoring density is weak at {coverage.get('display')} | Treat this as a coverage caveat")
+        elif not takeaways and state.get("statusMessage"):
+            takeaways.append(str(state.get("statusMessage")))
+        return takeaways[:3]
+
+    def _status_simple_trend(
+        self,
+        signals: Dict[str, Dict[str, Any]],
+        rows: List[Dict[str, Any]],
+        trend_signal: Optional[Dict[str, Any]],
+        state: Dict[str, Any],
+    ) -> str:
+        coverage = signals.get("monitoring_coverage") or {}
+        if self._status_signal_severity("monitoring_coverage", coverage.get("value")) >= 3:
+            return "Monitoring is too weak to trust a trend call."
+        if trend_signal and trend_signal.get("detail"):
+            detail = str(trend_signal.get("detail") or "").strip()
+            context = str(trend_signal.get("context") or "").strip()
+            return detail + (f" | {context}" if context else "")
+        priority_keys = ["bad_feet_pct", "delta_variation", "delta_drift", "speed_instability"]
+        ranked = sorted(
+            priority_keys,
+            key=lambda key: (
+                -self._status_signal_severity(key, signals.get(key, {}).get("value")),
+                -float(signals.get(key, {}).get("value") or 0.0),
+            ),
+        )
+        labels = {
+            "bad_feet_pct": "Bad feet",
+            "delta_variation": "Repeat variation",
+            "delta_drift": "Drift",
+            "speed_instability": "Speed instability",
+        }
+        metric_keys = {
+            "bad_feet_pct": "rlm_bad_feet_pct",
+            "delta_variation": "delta_variation",
+            "delta_drift": "delta_drift",
+            "speed_instability": "speed_instability",
+        }
+        for key in ranked:
+            series = list(signals.get(key, {}).get("series") or [])
+            if len(series) < 3:
+                continue
+            assessment = self._trend_assessment(metric_keys[key], series)
+            if assessment.get("direction") == "unclear":
+                continue
+            if assessment.get("direction") == "stable":
+                return f"{labels[key]} is broadly stable in this window."
+            if assessment.get("direction") == "worsening":
+                return f"{labels[key]} is trending worse in this window."
+            if assessment.get("direction") == "improving":
+                return f"{labels[key]} is easing in this window."
+        return str(state.get("statusMessage") or "").strip()
+
+    def _status_simple_next_check(self, signals: Dict[str, Dict[str, Any]]) -> str:
+        coverage = signals.get("monitoring_coverage") or {}
+        if self._status_signal_severity("monitoring_coverage", coverage.get("value")) >= 2:
+            return "Confirm monitoring density before trusting the rest of the read."
+        if self._status_signal_severity("delta_variation", (signals.get("delta_variation") or {}).get("value")) >= 2:
+            if self._status_signal_severity("speed_instability", (signals.get("speed_instability") or {}).get("value")) >= 1:
+                return "Check the last few reels for repeat variation and speed swings."
+            return "Check whether the last few reels recovered or stayed unstable."
+        if self._status_signal_severity("bad_feet_pct", (signals.get("bad_feet_pct") or {}).get("value")) >= 2:
+            return "Check which recent reels are driving the bad feet."
+        return "Check the latest reels to confirm the pattern is holding."
+
+    def _status_chart_candidates(self) -> List[Dict[str, Any]]:
+        return [
+            {
+                "metric_key": "rlm_bad_feet_pct",
+                "label": "Bad Feet %",
+                "row_key": "estimatedBadFeetPct",
+                "formatter": self._format_pct,
+            },
+            {
+                "metric_key": "delta_variation",
+                "label": "Delta Std Dev",
+                "row_key": "deltaStd",
+                "formatter": self._format_mm,
+            },
+            {
+                "metric_key": "monitoring_coverage",
+                "label": "Monitoring Density",
+                "row_key": "pointsPer1000Ft",
+                "formatter": self._format_number,
+            },
+        ]
+
+    def _status_issue_bonus(
+        self,
+        candidate: Dict[str, Any],
+        latest: Dict[str, Any],
+        aggregate: Dict[str, Any],
+        state: Dict[str, Any],
+    ) -> float:
+        def as_float(value: Any) -> Optional[float]:
+            try:
+                return float(value) if value is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        metric_key = str(candidate.get("metric_key") or "")
+        latest_coverage = as_float(latest.get("pointsPer1000Ft"))
+        latest_bad_pct = as_float(latest.get("estimatedBadFeetPct"))
+        latest_delta_std = as_float(latest.get("deltaStd"))
+        aggregate_bad_pct = as_float(aggregate.get("badFeetPct"))
+        aggregate_coverage = as_float(aggregate.get("pointsPer1000Ft"))
+        state_label = str(state.get("state") or "").lower()
+
+        if metric_key == "monitoring_coverage":
+            if latest_coverage in (None, 0):
+                return 4.0
+            if latest_coverage is not None and latest_coverage < 20:
+                return 3.5
+            if state_label in {"warning", "critical"} and aggregate_coverage is not None and aggregate_coverage < 20:
+                return 2.5
+            return 0.0
+        if metric_key == "rlm_bad_feet_pct":
+            if aggregate_bad_pct is not None and aggregate_bad_pct >= 5:
+                return 4.0
+            if latest_bad_pct is not None and latest_bad_pct >= 5:
+                return 3.5
+            if aggregate_bad_pct is not None and aggregate_bad_pct >= 3:
+                return 3.0
+            if latest_bad_pct is not None and latest_bad_pct >= 3:
+                return 2.5
+            return 0.0
+        if metric_key == "delta_variation":
+            if latest_delta_std is not None and latest_delta_std >= 0.7:
+                return 3.5
+            if latest_delta_std is not None and latest_delta_std >= 0.5:
+                return 2.5
+            return 0.0
+        return 0.0
+
+    def _status_chart_metric(
+        self,
+        rows: List[Dict[str, Any]],
+        latest: Dict[str, Any],
+        aggregate: Dict[str, Any],
+        state: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        best_candidate: Optional[Dict[str, Any]] = None
+        best_score = float("-inf")
+
+        for candidate in self._status_chart_candidates():
+            row_key = str(candidate.get("row_key") or "")
+            series_rows = [row for row in rows if row.get(row_key) is not None]
+            if not self._should_render_series_chart([{"value": row.get(row_key)} for row in series_rows]):
+                continue
+            values = [float(row.get(row_key) or 0.0) for row in series_rows]
+            if len(values) < 2:
+                continue
+            span = max(values) - min(values)
+            change = abs(values[-1] - values[0])
+            baseline = max(abs(values[0]), 0.01)
+            normalized_span = span / baseline
+            normalized_change = change / baseline
+            trend = self._trend_assessment(str(candidate.get("metric_key") or ""), values)
+            confidence_bonus = 0.75 if str(trend.get("confidence") or "") == "high" else 0.35 if str(trend.get("confidence") or "") == "medium" else 0.0
+            score = (
+                self._status_issue_bonus(candidate, latest, aggregate, state)
+                + normalized_span * 1.2
+                + normalized_change * 0.8
+                + confidence_bonus
+            )
+            enriched = {
+                **candidate,
+                "series_rows": series_rows,
+                "informative_score": round(score, 3),
+                "selection_reason": (
+                    f"issue_bonus={self._status_issue_bonus(candidate, latest, aggregate, state):.2f}; "
+                    f"normalized_span={normalized_span:.2f}; normalized_change={normalized_change:.2f}; "
+                    f"trend_confidence={trend.get('confidence') or 'low'}"
+                ),
+            }
+            if score > best_score:
+                best_score = score
+                best_candidate = enriched
+
+        return best_candidate
+
+    def _status_chart_x_values(
+        self,
+        rows: List[Dict[str, Any]],
+        filters: Dict[str, Any],
+    ) -> List[str]:
+        reel_scope = filters.get("reel_scope") or {}
+        if reel_scope:
+            return [str(row.get("reelId") or f"Reel {index + 1}") for index, row in enumerate(rows)]
+        values: List[str] = []
+        for index, row in enumerate(rows):
+            stamp = row.get("productionStart") or row.get("date")
+            if stamp:
+                values.append(str(stamp))
+            else:
+                values.append(str(row.get("reelId") or f"Point {index + 1}"))
+        return values
+
+    def _chart_scope_description(
+        self,
+        *,
+        filters: Dict[str, Any],
+        scope: Optional[Dict[str, Any]] = None,
+        rows: Optional[List[Dict[str, Any]]] = None,
+        fallback: str = "selected window",
+    ) -> str:
+        label = str((scope or {}).get("label") or "").strip()
+        if label:
+            return label
+        window_text = self._scope_window_text(rows or [], filters)
+        if window_text:
+            return window_text
+        window_phrase = self._window_phrase(filters)
+        if window_phrase != "in the selected window":
+            return window_phrase
+        return fallback
+
+    def _chart_metric_value_display(
+        self,
+        metric_key: Optional[str],
+        metric_label: Optional[str],
+        value: Any,
+    ) -> str:
+        if value in (None, ""):
+            return "--"
+        normalized_key = str(metric_key or "").strip().lower()
+        normalized_label = str(metric_label or "").strip().lower()
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+        if normalized_key in {"rlm_bad_feet_pct", "bad_feet_pct"} or normalized_label == "bad feet %":
+            return self._format_pct(numeric_value)
+        if normalized_key in {"monitoring_coverage"} or normalized_label == "monitoring density":
+            return f"{self._format_number(numeric_value)} pts/1k ft"
+        if normalized_key in {"delta_variation", "delta_drift"} or "delta" in normalized_label:
+            return self._format_mm(numeric_value)
+        return self._format_number(numeric_value)
+
+    def _chart_hover_time_display(
+        self,
+        value: Any,
+        end_value: Any = None,
+    ) -> Optional[str]:
+        if not value and not end_value:
+            return None
+        start_dt = self._row_datetime({"productionStart": value, "date": value})
+        end_dt = self._row_datetime({"productionStart": end_value, "date": end_value}) if end_value else None
+        if start_dt and end_dt and end_dt != start_dt:
+            return f"{self._format_scope_datetime(start_dt)} to {self._format_scope_datetime(end_dt)}"
+        if start_dt:
+            return self._format_scope_datetime(start_dt)
+        if end_dt:
+            return self._format_scope_datetime(end_dt)
+        if value and end_value and value != end_value:
+            return f"{value} to {end_value}"
+        return str(value or end_value)
+
+    def _chart_hover_text(
+        self,
+        *,
+        reel: Any = None,
+        job: Any = None,
+        time_value: Any = None,
+        end_time_value: Any = None,
+        total_feet: Any = None,
+        bad_feet_ft: Any = None,
+        bad_feet_pct: Any = None,
+        metric_key: Optional[str] = None,
+        metric_label: Optional[str] = None,
+        metric_value: Any = None,
+        extra_lines: Optional[List[str]] = None,
+    ) -> str:
+        lines: List[str] = []
+        if job not in (None, ""):
+            lines.append(f"Job: {job}")
+        if reel not in (None, ""):
+            lines.append(f"Reel: {reel}")
+        time_display = self._chart_hover_time_display(time_value, end_time_value)
+        if time_display:
+            lines.append(f"Time: {time_display}")
+        if total_feet not in (None, ""):
+            lines.append(f"Total feet: {self._format_feet_value(total_feet)}")
+        if bad_feet_ft not in (None, ""):
+            lines.append(f"Bad feet (ft): {self._format_feet_value(bad_feet_ft)}")
+        if bad_feet_pct not in (None, ""):
+            lines.append(f"Bad feet %: {self._format_pct(bad_feet_pct)}")
+        if metric_label:
+            lines.append(f"{metric_label}: {self._chart_metric_value_display(metric_key, metric_label, metric_value)}")
+        for line in extra_lines or []:
+            if line:
+                lines.append(str(line))
+        return "<br>".join(lines)
+
+    def _attach_chart_scope_metadata(
+        self,
+        chart: Optional[Dict[str, Any]],
+        *,
+        total_points_in_scope: int,
+        displayed_points: int,
+        scope_description: str,
+    ) -> Optional[Dict[str, Any]]:
+        if not chart:
+            return None
+        normalized = dict(chart)
+        metadata = dict(normalized.get("metadata") or {})
+        metadata["totalPointsInScope"] = total_points_in_scope
+        metadata["displayedPoints"] = displayed_points
+        metadata["scopeDescription"] = scope_description
+        if displayed_points < total_points_in_scope:
+            metadata["displayLabel"] = f"Showing last {displayed_points} of {total_points_in_scope} points"
+        normalized["metadata"] = metadata
+        return normalized
+
+    def _status_chart(
+        self,
+        machine_label: str,
+        rows: List[Dict[str, Any]],
+        filters: Dict[str, Any],
+        latest: Dict[str, Any],
+        aggregate: Dict[str, Any],
+        state: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        if not rows:
+            return None
+        metric = self._status_chart_metric(rows, latest, aggregate, state)
+        if not metric:
+            return None
+        row_key = str(metric.get("row_key") or "")
+        series_rows = list(metric.get("series_rows") or [row for row in rows if row.get(row_key) is not None])
+        x_values = self._status_chart_x_values(series_rows, filters)
+        y_values = [float(row.get(row_key) or 0.0) for row in series_rows]
+        if len(x_values) != len(y_values) or len(y_values) < 2:
+            return None
+        hover_text = [
+            self._chart_hover_text(
+                reel=row.get("reelId"),
+                job=row.get("jobName"),
+                time_value=row.get("productionStart") or row.get("date"),
+                total_feet=row.get("feetTotal"),
+                bad_feet_ft=row.get("estimatedBadFeet"),
+                bad_feet_pct=row.get("estimatedBadFeetPct"),
+                metric_key=metric.get("metric_key"),
+                metric_label=metric.get("label"),
+                metric_value=row.get(row_key),
+            )
+            for row in series_rows
+        ]
+        return self._attach_chart_scope_metadata({
+            "type": "line",
+            "title": f"{machine_label} {metric.get('label')}",
+            "series": [
+                {
+                    "name": str(metric.get("label") or "Trend"),
+                    "x": x_values,
+                    "y": y_values,
+                    "hoverText": hover_text,
+                }
+            ],
+            "metadata": {
+                "metricKey": metric.get("metric_key"),
+                "metricLabel": metric.get("label"),
+                "pointCount": len(y_values),
+                "attachedAt": "evidence.chart",
+                "selectionReason": metric.get("selection_reason"),
+                "informativeScore": metric.get("informative_score"),
+            },
+        },
+            total_points_in_scope=len(series_rows),
+            displayed_points=len(series_rows),
+            scope_description=self._chart_scope_description(filters=filters, rows=series_rows),
         )
 
     def _assemble_compare_response(
@@ -3051,17 +5055,14 @@ class RLMAssistantService:
             compare_category_label,
             compare_direction,
         )
-        chart = {
-            "type": "bar",
-            "title": "Estimated Bad Feet %",
-            "series": [
-                {
-                    "name": "Estimated Bad Feet %",
-                    "x": [left_label, right_label],
-                    "y": [left.get("estimatedBadFeetPct") or 0, right.get("estimatedBadFeetPct") or 0],
-                }
-            ],
-        }
+        chart = self._compare_micro_visual(
+            left,
+            right,
+            compare_category_key,
+            compare_category_label,
+            category_result,
+            scope_description=self._chart_scope_description(filters=filters, fallback="selected comparison window"),
+        )
         if category_result:
             sections = [
                 {"label": f"{compare_category_label} comparison", "text": category_result["comparisonText"]},
@@ -3074,7 +5075,7 @@ class RLMAssistantService:
             production_section = self._compare_production_context_section(left_label, left, right_label, right)
             if production_section:
                 sections.append(production_section)
-            return self._response(
+            response = self._response(
                 answer={
                     "title": category_result["title"],
                     "summary": category_result["summary"],
@@ -3086,7 +5087,7 @@ class RLMAssistantService:
                     self._metric(f"{right_label} category rank", category_result["rightRank"]),
                     self._metric("Category result", category_result["winnerLabel"]),
                 ],
-                chart=None,
+                chart=chart,
                 tools_used=[
                     {"tool": "compare_presses", "ok": True},
                     {"tool": "get_press_category_breakdown", "ok": True},
@@ -3101,6 +5102,44 @@ class RLMAssistantService:
                 filters=filters,
                 data_semantics="filtered-window",
             )
+            return self._attach_analysis_summary(
+                response,
+                self._analysis_summary_payload(
+                    family="compare",
+                    lead=category_result["summary"],
+                    key_context=[
+                        self._analysis_key_context_item("Category", compare_category_label or "--"),
+                        self._analysis_key_context_item(f"{left_label} rank", category_result["leftRank"]),
+                        self._analysis_key_context_item(f"{right_label} rank", category_result["rightRank"]),
+                        self._analysis_key_context_item("Category result", category_result["winnerLabel"]),
+                    ],
+                    primary_label="Category Comparison",
+                    primary_cards=[
+                        self._analysis_card(
+                            title=left_label,
+                            value=category_result["leftRank"],
+                            condition="Category rank",
+                            meta=[self._analysis_meta_item("Overall", self._comparison_summary(left))],
+                        ),
+                        self._analysis_card(
+                            title=right_label,
+                            value=category_result["rightRank"],
+                            condition="Category rank",
+                            meta=[self._analysis_meta_item("Overall", self._comparison_summary(right))],
+                        ),
+                    ],
+                    supporting_label="Supporting Evidence",
+                    supporting_cards=[
+                        self._analysis_card(
+                            title="Win summary",
+                            value=category_result["winnerLabel"],
+                            condition="Category result",
+                            meta=[self._analysis_meta_item("Summary", category_summary["winText"])],
+                            note=category_result["comparisonText"],
+                        ),
+                    ],
+                ),
+            )
         sections = [
             {"label": left_label, "text": self._comparison_summary(left)},
             {"label": right_label, "text": self._comparison_summary(right)},
@@ -3113,7 +5152,7 @@ class RLMAssistantService:
         production_section = self._compare_production_context_section(left_label, left, right_label, right)
         if production_section:
             sections.append(production_section)
-        return self._response(
+        response = self._response(
             answer={
                 "title": f"{left_label} vs {right_label}: {better_label} is currently stronger on bad-feet rate.",
                 "summary": f"{left_label} is at {self._format_pct(left.get('estimatedBadFeetPct'))} estimated bad feet versus {self._format_pct(right.get('estimatedBadFeetPct'))} for {right_label}.",
@@ -3139,6 +5178,54 @@ class RLMAssistantService:
             ),
             filters=filters,
             data_semantics="filtered-window",
+        )
+        return self._attach_analysis_summary(
+            response,
+            self._analysis_summary_payload(
+                family="compare",
+                lead=f"{better_label} has the stronger quality outcome in the active comparison window, mainly on bad-feet rate.",
+                key_context=[
+                    self._analysis_key_context_item("Current winner", better_label or "--"),
+                    self._analysis_key_context_item(f"{left_label} Bad Feet %", self._format_pct(left.get("estimatedBadFeetPct"))),
+                    self._analysis_key_context_item(f"{right_label} Bad Feet %", self._format_pct(right.get("estimatedBadFeetPct"))),
+                    self._analysis_key_context_item("Category edge", category_summary.get("winnerLabel") or "--"),
+                ],
+                primary_label="Comparable Metrics",
+                primary_cards=[
+                    self._analysis_card(
+                        title=left_label,
+                        value=self._format_pct(left.get("estimatedBadFeetPct")),
+                        condition="Current read",
+                        meta=[
+                            self._analysis_meta_item("Bad feet", self._format_feet_value(left.get("estimatedBadFeet"))),
+                            self._analysis_meta_item("Monitoring", self._format_number(left.get("pointsPer1000Ft"))),
+                            self._analysis_meta_item("Delta std", self._format_mm(left.get("deltaStd"))),
+                        ],
+                        tags=["Press comparison"],
+                    ),
+                    self._analysis_card(
+                        title=right_label,
+                        value=self._format_pct(right.get("estimatedBadFeetPct")),
+                        condition="Current read",
+                        meta=[
+                            self._analysis_meta_item("Bad feet", self._format_feet_value(right.get("estimatedBadFeet"))),
+                            self._analysis_meta_item("Monitoring", self._format_number(right.get("pointsPer1000Ft"))),
+                            self._analysis_meta_item("Delta std", self._format_mm(right.get("deltaStd"))),
+                        ],
+                        tags=["Press comparison"],
+                    ),
+                ],
+                supporting_label="Supporting Differences",
+                supporting_cards=[
+                    self._analysis_card(
+                        title="Category win summary",
+                        value=category_summary.get("winnerLabel") or "--",
+                        condition="Supporting evidence",
+                        meta=[self._analysis_meta_item("Summary", category_summary.get("winText") or "--")],
+                        note=category_summary.get("comparisonText") or "",
+                    ),
+                ],
+            ),
         )
 
     def _assemble_ranking_response(self, rankings: Dict[str, Any], breakdown: Dict[str, Any], filters: Dict[str, Any]) -> Dict[str, Any]:
@@ -3192,7 +5279,7 @@ class RLMAssistantService:
         production_section = self._production_context_section(press_row)
         if production_section:
             sections.append(production_section)
-        return self._response(
+        response = self._response(
             answer={
                 "title": f"{machine_label} ranks low because {driver_text.lower()} are weak.",
                 "summary": press_row.get("rankExplanation") or "The selected press is underperforming peers in the current RLM window.",
@@ -3217,6 +5304,28 @@ class RLMAssistantService:
             ),
             filters=filters,
             data_semantics="filtered-window",
+        )
+        return self._attach_analysis_summary(
+            response,
+            self._analysis_summary_payload(
+                family="ranking",
+                lead=press_row.get("rankExplanation") or f"{machine_label} is underperforming peers in the current window.",
+                key_context=[
+                    self._analysis_key_context_item("Overall rank", f"#{overview_row.get('rank')}"),
+                    self._analysis_key_context_item("Bad feet %", self._format_pct(press_row.get("estimatedBadFeetPct"))),
+                    self._analysis_key_context_item("Pts / 1k ft", self._format_number(press_row.get("pointsPer1000Ft"))),
+                ],
+                primary_label="Ranking Drivers",
+                primary_cards=[
+                    self._analysis_card(
+                        title=str(item.get("title") or "--"),
+                        value=item.get("valueDisplay") or "--",
+                        condition="Driver",
+                        meta=[self._analysis_meta_item("Context", item.get("contextLabel") or "--")],
+                    )
+                    for item in weakest
+                ],
+            ),
         )
 
     def _assemble_ranking_summary_response(self, intent: Dict[str, Any], filters: Dict[str, Any]) -> Dict[str, Any]:
@@ -3305,6 +5414,7 @@ class RLMAssistantService:
             self._metric("Bad feet %", self._format_pct(lead.get("estimatedBadFeetPct"))),
             self._metric("Pts / 1k ft", self._format_number(lead.get("pointsPer1000Ft"))),
         ]
+        chart = self._ranking_summary_visual(merged_rows, focus, filters)
         prompts = [
             f"Why is {lead.get('machineName')} the best {window_phrase}?" if focus != "worst" else f"Why is {lead.get('machineName')} the worst {window_phrase}?",
         ]
@@ -3312,10 +5422,10 @@ class RLMAssistantService:
             prompts.append(f"Compare {selected[0].get('machineName')} vs {selected[-1].get('machineName')}")
         if selected:
             prompts.append(f"Show the bad feet trend for {lead.get('machineName')}")
-        return self._response(
+        response = self._response(
             answer={"title": title, "summary": summary, "sections": sections},
             evidence_metrics=evidence,
-            chart=None,
+            chart=chart,
             tools_used=[
                 {"tool": "get_press_rankings", "ok": True},
                 {"tool": "get_press_category_breakdown", "ok": True},
@@ -3323,6 +5433,46 @@ class RLMAssistantService:
             suggested_prompts=prompts[:3],
             filters=filters,
             data_semantics="filtered-window",
+        )
+        return self._attach_analysis_summary(
+            response,
+            self._analysis_summary_payload(
+                family="ranking_summary",
+                lead=summary,
+                key_context=[
+                    self._analysis_key_context_item("Focus", focus.title()),
+                    self._analysis_key_context_item("Lead press", lead.get("machineName") or "--"),
+                    self._analysis_key_context_item("Lead rank", f"#{lead.get('rank')}"),
+                    self._analysis_key_context_item("Window", window_phrase),
+                ],
+                primary_label="Ranking Snapshot",
+                primary_cards=[
+                    self._analysis_card(
+                        title=str(row.get("machineName") or "--"),
+                        value=self._format_pct(row.get("estimatedBadFeetPct")),
+                        condition=f"Rank #{row.get('rank')}",
+                        meta=[
+                            self._analysis_meta_item("Pts / 1k ft", self._format_number(row.get("pointsPer1000Ft"))),
+                            self._analysis_meta_item("Bad feet", self._format_feet_value(row.get("estimatedBadFeet"))),
+                        ],
+                        tags=["Ranking snapshot"],
+                    )
+                    for row in selected[:4]
+                ],
+                supporting_label="Lead Press Context",
+                supporting_cards=[
+                    self._analysis_card(
+                        title=f"{lead.get('machineName')} breakdown",
+                        value=self._format_pct(lead.get("estimatedBadFeetPct")),
+                        condition="Lead press",
+                        meta=[
+                            self._analysis_meta_item("Pts / 1k ft", self._format_number(lead.get("pointsPer1000Ft"))),
+                            self._analysis_meta_item("Bad feet", self._format_feet_value(lead.get("estimatedBadFeet"))),
+                        ],
+                        note=self._category_breakdown_text(lead_breakdown.get("categories") or []),
+                    ),
+                ],
+            ),
         )
 
     def _assemble_category_ranking_summary_response(
@@ -3399,10 +5549,11 @@ class RLMAssistantService:
             self._metric("Category rank", f"#{lead.get('rank')}"),
             self._metric("Category value", lead.get("valueDisplay") or "--"),
         ]
-        return self._response(
+        chart = self._category_ranking_visual(items, focus, category_label, filters)
+        response = self._response(
             answer={"title": title, "summary": summary, "sections": sections},
             evidence_metrics=evidence,
-            chart=None,
+            chart=chart,
             tools_used=[
                 {"tool": "get_press_rankings", "ok": True},
                 {"tool": "get_press_category_breakdown", "ok": True},
@@ -3415,6 +5566,29 @@ class RLMAssistantService:
             ),
             filters=filters,
             data_semantics="filtered-window",
+        )
+        return self._attach_analysis_summary(
+            response,
+            self._analysis_summary_payload(
+                family="ranking_summary",
+                lead=summary,
+                key_context=[
+                    self._analysis_key_context_item("Category", category_label),
+                    self._analysis_key_context_item("Lead press", lead.get("machineName") or "--"),
+                    self._analysis_key_context_item("Lead rank", f"#{lead.get('rank')}"),
+                    self._analysis_key_context_item("Window", window_phrase),
+                ],
+                primary_label=f"{category_label} Snapshot",
+                primary_cards=[
+                    self._analysis_card(
+                        title=str(row.get("machineName") or "--"),
+                        value=row.get("valueDisplay") or "--",
+                        condition=f"Rank #{row.get('rank')}",
+                        tags=[category_label],
+                    )
+                    for row in selected[:4]
+                ],
+            ),
         )
 
     def _assemble_reel_summary_response(
@@ -3440,7 +5614,7 @@ class RLMAssistantService:
                 "No reel-to-reel data matched the requested scope inside the selected window.",
                 data_semantics="filtered-window",
             )
-        recent = scoped_reels if scope else reels[-3:] if len(reels) >= 3 else reels
+        recent = scoped_reels
         first_bad = recent[0].get("estimatedBadFeetPct") or 0
         last_bad = recent[-1].get("estimatedBadFeetPct") or 0
         title, summary = self._reel_question_first_text(tool_data.get("machineName") or "This press", "reel", recent)
@@ -3453,7 +5627,21 @@ class RLMAssistantService:
         summary = f"{summary} {detail}".strip()
         chart = None
         if self._should_render_series_chart(recent):
-            chart = {
+            hover_text = [
+                self._chart_hover_text(
+                    reel=row.get("reelId"),
+                    job=row.get("jobName"),
+                    time_value=row.get("productionStart") or row.get("date"),
+                    total_feet=row.get("feetTotal"),
+                    bad_feet_ft=row.get("estimatedBadFeet"),
+                    bad_feet_pct=row.get("estimatedBadFeetPct"),
+                    metric_key="rlm_bad_feet_pct",
+                    metric_label="Bad Feet %",
+                    metric_value=row.get("estimatedBadFeetPct"),
+                )
+                for row in recent
+            ]
+            chart = self._attach_chart_scope_metadata({
                 "type": "line",
                 "title": f"{tool_data.get('machineName')} reel-to-reel bad feet %",
                 "series": [
@@ -3461,9 +5649,14 @@ class RLMAssistantService:
                         "name": "Bad Feet %",
                         "x": [row.get("reelId") for row in recent],
                         "y": [row.get("estimatedBadFeetPct") or 0 for row in recent],
+                        "hoverText": hover_text,
                     }
                 ],
-            }
+            },
+                total_points_in_scope=len(recent),
+                displayed_points=len(recent),
+                scope_description=self._chart_scope_description(filters=filters, scope=scope, rows=recent),
+            )
         trend = self._trend_assessment("rlm_bad_feet_pct", [float(row.get("estimatedBadFeetPct") or 0.0) for row in recent]).get("direction") or "unclear"
         sections = [
             {
@@ -3480,7 +5673,7 @@ class RLMAssistantService:
         production_section = self._production_context_section(tool_data.get("summary") or {})
         if production_section:
             sections.append(production_section)
-        return self._response(
+        response = self._response(
             answer={
                 "title": title,
                 "summary": summary,
@@ -3502,6 +5695,203 @@ class RLMAssistantService:
             filters=filters,
             data_semantics="filtered-window",
         )
+        return self._attach_analysis_summary(
+            response,
+            self._analysis_summary_payload(
+                family="reel_summary",
+                lead=summary,
+                key_context=[
+                    self._analysis_key_context_item("Reels in scope", len(recent)),
+                    self._analysis_key_context_item("Latest bad feet %", self._format_pct(recent[-1].get("estimatedBadFeetPct"))),
+                    self._analysis_key_context_item("Trend", trend.title()),
+                ],
+                primary_label="Scoped Reels",
+                primary_cards=[
+                    self._analysis_card(
+                        title=str(row.get("reelId") or "--"),
+                        value=self._format_pct(row.get("estimatedBadFeetPct")),
+                        condition="Reel read",
+                        meta=[
+                            self._analysis_meta_item("Delta std", self._format_mm(row.get("deltaStd"))),
+                            self._analysis_meta_item("Feet", self._format_feet_value(row.get("feetTotal"))),
+                        ],
+                        trend_points=[float(item.get("estimatedBadFeetPct") or 0.0) for item in recent],
+                        tags=["Reel summary"],
+                    )
+                    for row in recent[:4]
+                ],
+            ),
+        )
+
+    def _parse_display_number(self, value: Any) -> Optional[float]:
+        if value in (None, ""):
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        match = re.search(r"-?\d+(?:\.\d+)?", str(value).replace(",", ""))
+        if not match:
+            return None
+        try:
+            return float(match.group(0))
+        except ValueError:
+            return None
+
+    def _compare_micro_visual(
+        self,
+        left: Dict[str, Any],
+        right: Dict[str, Any],
+        category_key: str,
+        category_label: str,
+        category_result: Optional[Dict[str, Any]],
+        scope_description: str,
+    ) -> Optional[Dict[str, Any]]:
+        left_label = str(left.get("machineName") or self._press_label(self._to_int(left.get("machineId")) or 0))
+        right_label = str(right.get("machineName") or self._press_label(self._to_int(right.get("machineId")) or 0))
+        if category_result and category_label:
+            left_rank = self._parse_display_number(category_result.get("leftRank"))
+            right_rank = self._parse_display_number(category_result.get("rightRank"))
+            if left_rank is not None and right_rank is not None:
+                return self._attach_chart_scope_metadata({
+                    "type": "bar",
+                    "title": f"{category_label} rank (lower is better)",
+                    "series": [
+                        {
+                            "name": "Category rank",
+                            "x": [left_label, right_label],
+                            "y": [left_rank, right_rank],
+                        }
+                    ],
+                    "metadata": {
+                        "visualType": "compare-category-rank",
+                        "categoryKey": category_key,
+                        "categoryLabel": category_label,
+                    },
+                },
+                    total_points_in_scope=2,
+                    displayed_points=2,
+                    scope_description=scope_description,
+                )
+
+        candidates = [
+            ("estimatedBadFeetPct", "Bad Feet %"),
+            ("deltaStd", "Delta Std Dev"),
+            ("pointsPer1000Ft", "Monitoring Density"),
+        ]
+        scored: List[Tuple[float, str, str, float, float]] = []
+        for row_key, label in candidates:
+            left_value = self._parse_display_number(left.get(row_key))
+            right_value = self._parse_display_number(right.get(row_key))
+            if left_value is None or right_value is None:
+                continue
+            scale = max(abs(left_value), abs(right_value), 0.01)
+            score = abs(left_value - right_value) / scale
+            scored.append((score, row_key, label, left_value, right_value))
+        if not scored:
+            return None
+        scored.sort(key=lambda item: item[0], reverse=True)
+        _, row_key, label, left_value, right_value = scored[0]
+        return self._attach_chart_scope_metadata({
+            "type": "bar",
+            "title": f"Largest gap: {label}",
+            "series": [
+                {
+                    "name": label,
+                    "x": [left_label, right_label],
+                    "y": [left_value, right_value],
+                }
+            ],
+            "metadata": {
+                "visualType": "compare-largest-gap",
+                "metricKey": row_key,
+                "metricLabel": label,
+            },
+        },
+            total_points_in_scope=2,
+            displayed_points=2,
+            scope_description=scope_description,
+        )
+
+    def _ranking_summary_visual(
+        self,
+        merged_rows: List[Dict[str, Any]],
+        focus: str,
+        filters: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        if not merged_rows:
+            return None
+        visual_rows = list(reversed(merged_rows)) if focus in {"worst", "bottom"} else list(merged_rows)
+        if len(visual_rows) < 2:
+            return None
+        values = [self._parse_display_number(row.get("estimatedBadFeetPct")) for row in visual_rows]
+        if sum(value is not None for value in values) < 2:
+            return None
+        return self._attach_chart_scope_metadata({
+            "type": "bar",
+            "title": "Bad Feet % ranking snapshot",
+            "series": [
+                {
+                    "name": "Bad Feet %",
+                    "x": [row.get("machineName") or self._press_label(self._to_int(row.get("machineId")) or 0) for row in visual_rows],
+                    "y": [float(value or 0.0) for value in values],
+                }
+            ],
+            "metadata": {
+                "visualType": "ranking-bad-feet",
+                "focus": focus,
+            },
+        },
+            total_points_in_scope=len(merged_rows),
+            displayed_points=len(visual_rows),
+            scope_description=self._chart_scope_description(filters=filters),
+        )
+
+    def _category_ranking_visual(
+        self,
+        items: List[Dict[str, Any]],
+        focus: str,
+        category_label: str,
+        filters: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        if not items:
+            return None
+        visual_rows = list(reversed(items)) if focus in {"worst", "bottom"} else list(items)
+        if len(visual_rows) < 2:
+            return None
+        parsed_values = [self._parse_display_number(row.get("value")) for row in visual_rows]
+        has_value_series = sum(value is not None for value in parsed_values) >= 2
+        if has_value_series:
+            title = f"{category_label} snapshot"
+            series = [
+                {
+                    "name": category_label,
+                    "x": [row.get("machineName") or self._press_label(self._to_int(row.get("machineId")) or 0) for row in visual_rows],
+                    "y": [float(value or 0.0) for value in parsed_values],
+                }
+            ]
+            metadata = {"visualType": "ranking-category-value", "categoryLabel": category_label, "focus": focus}
+        else:
+            ranks = [self._parse_display_number(row.get("rank")) for row in visual_rows]
+            if sum(value is not None for value in ranks) < 2:
+                return None
+            title = f"{category_label} rank (lower is better)"
+            series = [
+                {
+                    "name": "Category rank",
+                    "x": [row.get("machineName") or self._press_label(self._to_int(row.get("machineId")) or 0) for row in visual_rows],
+                    "y": [float(value or 0.0) for value in ranks],
+                }
+            ]
+            metadata = {"visualType": "ranking-category-rank", "categoryLabel": category_label, "focus": focus}
+        return self._attach_chart_scope_metadata({
+            "type": "bar",
+            "title": title,
+            "series": series,
+            "metadata": metadata,
+        },
+            total_points_in_scope=len(items),
+            displayed_points=len(visual_rows),
+            scope_description=self._chart_scope_description(filters=filters),
+        )
 
     def _assemble_trend_response(
         self,
@@ -3522,7 +5912,21 @@ class RLMAssistantService:
             )
         chart = None
         if self._should_render_series_chart(series):
-            chart = {
+            hover_text = [
+                self._chart_hover_text(
+                    reel=row.get("reelId"),
+                    job=row.get("jobName"),
+                    time_value=row.get("productionStart") or row.get("date"),
+                    total_feet=row.get("feetTotal"),
+                    bad_feet_ft=row.get("estimatedBadFeet"),
+                    bad_feet_pct=row.get("estimatedBadFeetPct"),
+                    metric_key=metric_key,
+                    metric_label=tool_data.get("metricLabel"),
+                    metric_value=row.get("value"),
+                )
+                for row in series
+            ]
+            chart = self._attach_chart_scope_metadata({
                 "type": "line",
                 "title": f"{tool_data.get('machineName')} {tool_data.get('metricLabel')}",
                 "series": [
@@ -3530,9 +5934,14 @@ class RLMAssistantService:
                         "name": tool_data.get("metricLabel"),
                         "x": [row.get("date") for row in series],
                         "y": [row.get("value") for row in series],
+                        "hoverText": hover_text,
                     }
                 ],
-            }
+            },
+                total_points_in_scope=len(series),
+                displayed_points=len(series),
+                scope_description=self._chart_scope_description(filters=filters, scope=scope, rows=series),
+            )
         summary = tool_data.get("summary") or {}
         latest = series[-1]
         trend_context = self._press_row_for_machine(machine_id, filters) if machine_id is not None else None
@@ -3554,7 +5963,8 @@ class RLMAssistantService:
         production_section = self._production_context_section(trend_context or {})
         if production_section:
             sections.append(production_section)
-        return self._response(
+        trend_direction = str(self._trend_assessment(metric_key, [float(row.get("value") or 0.0) for row in series]).get("direction") or "--").title()
+        response = self._response(
             answer={
                 "title": title,
                 "summary": direct_summary,
@@ -3564,10 +5974,7 @@ class RLMAssistantService:
                 self._metric("Metric", tool_data.get("metricLabel") or "--"),
                 self._metric("Latest value", latest.get("valueDisplay") or str(latest.get("value"))),
                 self._metric("Points", str(len(series))),
-                self._metric(
-                    "Trend",
-                    str(self._trend_assessment(metric_key, [float(row.get("value") or 0.0) for row in series]).get("direction") or "--").title(),
-                ),
+                self._metric("Trend", trend_direction),
             ],
             chart=chart,
             tools_used=[{"tool": "get_press_metric_trend", "ok": True}],
@@ -3579,6 +5986,37 @@ class RLMAssistantService:
             ),
             filters=filters,
             data_semantics="filtered-window",
+        )
+        movement = "--"
+        if len(series) >= 2:
+            movement = f"{series[0].get('valueDisplay') or series[0].get('value')} -> {latest.get('valueDisplay') or latest.get('value')}"
+        return self._attach_analysis_summary(
+            response,
+            self._analysis_summary_payload(
+                family="trend",
+                lead=direct_summary,
+                key_context=[
+                    self._analysis_key_context_item("Metric", tool_data.get("metricLabel") or "--"),
+                    self._analysis_key_context_item("Latest value", latest.get("valueDisplay") or str(latest.get("value"))),
+                    self._analysis_key_context_item("Trend", trend_direction),
+                    self._analysis_key_context_item("Points", len(series)),
+                ],
+                primary_label="Trend Read",
+                primary_cards=[
+                    self._analysis_card(
+                        title=str(tool_data.get("metricLabel") or "--"),
+                        value=latest.get("valueDisplay") or str(latest.get("value")),
+                        condition="Latest point",
+                        trend=str(trend_direction).lower(),
+                        meta=[
+                            self._analysis_meta_item("Movement", movement),
+                            self._analysis_meta_item("Latest date", latest.get("date") or "--"),
+                        ],
+                        trend_points=[float(row.get("value") or 0.0) for row in series],
+                        note=summary.get("detail") or summary.get("headline") or "",
+                    )
+                ],
+            ),
         )
 
     def _assemble_phase2a_metric_response(
@@ -3785,7 +6223,67 @@ class RLMAssistantService:
             "selectedJob": str(filters.get("job") or "").strip() or None,
             "explanationSummary": decision_summary or comparison.get("comparisonSummary") or pattern_summary or concentration.get("summary") or run_position.get("summary"),
         }
-        return response
+        return self._attach_analysis_summary(
+            response,
+            self._analysis_summary_payload(
+                family="activity",
+                lead=summary,
+                key_context=[
+                    self._analysis_key_context_item("Metric", metric_label),
+                    self._analysis_key_context_item("Current value", metric.get("valueDisplay") or "--"),
+                    self._analysis_key_context_item("Trend", str(trend.get("direction") or "--").title()),
+                    self._analysis_key_context_item("Comparison", (comparison or {}).get("mode") or (intent or {}).get("comparisonMode") or "none"),
+                ],
+                primary_label="Primary Findings",
+                primary_cards=[
+                    self._analysis_card(
+                        title=metric_label,
+                        value=metric.get("valueDisplay") or "--",
+                        condition="Current read",
+                        trend=str(trend.get("direction") or ""),
+                        meta=[
+                            self._analysis_meta_item("Denominator", metric.get("denominatorBasis") or "--"),
+                            self._analysis_meta_item("Peer count", str(comparison.get("peerCount") or 0) if comparison else "--"),
+                            self._analysis_meta_item("Confidence", ((comparison.get("fairness") or {}).get("confidence") if comparison else None) or "--"),
+                        ],
+                        trend_points=self._status_category_trend_points(metric_key, tool_data.get("rows") or []),
+                        tags=[tag for tag in [run_position.get("pattern"), concentration.get("pattern")] if tag],
+                        note=decision_summary or comparison.get("comparisonSummary") or pattern_summary or concentration.get("summary") or run_position.get("summary") or "",
+                    ),
+                    self._analysis_card(
+                        title="Comparison",
+                        value=comparison.get("peerValueDisplay") or comparison.get("comparisonSummary") or "--",
+                        condition=(comparison or {}).get("mode") or "None",
+                        meta=[
+                            self._analysis_meta_item("Peer count", str(comparison.get("peerCount") or 0) if comparison else "--"),
+                            self._analysis_meta_item("Confidence", ((comparison.get("fairness") or {}).get("confidence") if comparison else None) or "--"),
+                        ],
+                        note=comparison.get("comparisonSummary") or "",
+                    ) if comparison else {},
+                ],
+                supporting_label="Supporting Factors",
+                supporting_cards=[
+                    self._analysis_card(
+                        title="Driver reels",
+                        value=f"{len(drivers.get('topReels') or [])} reels",
+                        condition="Drivers",
+                        meta=[
+                            self._analysis_meta_item(item.get("reelId"), f"{item.get('valueDisplay')} ({item.get('sharePct')}%)")
+                            for item in (drivers.get("topReels") or [])[:3]
+                        ],
+                    ) if drivers.get("topReels") else {},
+                    self._analysis_card(
+                        title="Driver jobs",
+                        value=f"{len(drivers.get('topJobs') or [])} jobs",
+                        condition="Drivers",
+                        meta=[
+                            self._analysis_meta_item(item.get("jobName"), f"{item.get('valueDisplay')} ({item.get('sharePct')}%)")
+                            for item in (drivers.get("topJobs") or [])[:3]
+                        ],
+                    ) if drivers.get("topJobs") else {},
+                ],
+            ),
+        )
 
     def _assemble_discovery_response(
         self,
@@ -3860,6 +6358,7 @@ class RLMAssistantService:
             metric_key=str(discovery.get("metricKey") or ""),
             metric_label=str(discovery.get("metricLabel") or ""),
             rows=discovery.get("rows") or [],
+            filters=filters,
             scope=scope,
             grouping=str((intent or {}).get("grouping") or "decision"),
             baseline_comparison=baseline_comparison,
@@ -3949,7 +6448,57 @@ class RLMAssistantService:
             "sustained_vs_spike": discovery.get("sustainedVsSpike"),
             "issue_shape": shape,
         }
-        return response
+        return self._attach_analysis_summary(
+            response,
+            self._analysis_summary_payload(
+                family="discovery",
+                lead=answer_summary or str(synthesis.get("direct_answer") or ""),
+                key_context=[
+                    self._analysis_key_context_item("Metric", discovery.get("metricLabel") or "--"),
+                    self._analysis_key_context_item("Current value", metric.get("valueDisplay") or "--"),
+                    self._analysis_key_context_item("Trend", str(trend.get("direction") or "--").title()),
+                    self._analysis_key_context_item("Issue shape", shape.get("label") or discovery.get("sustainedVsSpike") or "--"),
+                ],
+                primary_label="Primary Findings",
+                primary_cards=[
+                    self._analysis_card(
+                        title="Scoped read",
+                        value=metric.get("valueDisplay") or "--",
+                        condition="Current",
+                        trend=str(trend.get("direction") or ""),
+                        meta=[
+                            self._analysis_meta_item("Baseline", baseline_comparison.get("baselineLabel") or "--"),
+                            self._analysis_meta_item("Baseline outcome", baseline_comparison.get("outcome") or "--"),
+                            self._analysis_meta_item("Change point", change_point.get("candidate") or "--"),
+                        ],
+                        tags=[tag for tag in [shape.get("label"), concentration.get("pattern"), run_position.get("pattern")] if tag],
+                        note=synthesis.get("comparison") or baseline_comparison.get("summary") or shape.get("summary") or "",
+                    )
+                ],
+                supporting_label="Supporting Factors",
+                supporting_cards=[
+                    self._analysis_card(
+                        title="Driver reels",
+                        value=f"{len(drivers.get('topReels') or [])} reels",
+                        condition="Drivers",
+                        meta=[
+                            self._analysis_meta_item(item.get("reelId"), f"{item.get('valueDisplay')} ({item.get('sharePct')}%)")
+                            for item in (drivers.get("topReels") or [])[:3]
+                        ],
+                    ) if drivers.get("topReels") else {},
+                    self._analysis_card(
+                        title="Driver jobs",
+                        value=f"{len(drivers.get('topJobs') or [])} jobs",
+                        condition="Drivers",
+                        meta=[
+                            self._analysis_meta_item(item.get("jobName"), f"{item.get('valueDisplay')} ({item.get('sharePct')}%)")
+                            for item in (drivers.get("topJobs") or [])[:3]
+                        ],
+                    ) if drivers.get("topJobs") else {},
+                ],
+                next_checks=synthesis.get("next_checks") or [],
+            ),
+        )
 
     def _assemble_job_list_response(
         self,
@@ -3993,7 +6542,356 @@ class RLMAssistantService:
         )
         response.setdefault("context", {})["availableJobs"] = jobs
         response.setdefault("context", {})["selectedJob"] = tool_data.get("selectedJob")
-        return response
+        return self._attach_analysis_summary(
+            response,
+            self._analysis_summary_payload(
+                family="job_list",
+                lead=f"{machine_name} ran {len(jobs)} jobs in the selected scope.",
+                key_context=[
+                    self._analysis_key_context_item("Press", machine_name),
+                    self._analysis_key_context_item("Job count", len(jobs)),
+                    self._analysis_key_context_item("Selected job", tool_data.get("selectedJob") or "--"),
+                ],
+                primary_label="Recent Jobs",
+                primary_cards=[
+                    self._analysis_card(
+                        title=str(item.get("jobName") or "--"),
+                        value=f"{int(item.get('reelCount') or 0)} reels",
+                        condition="Job activity",
+                        meta=[
+                            self._analysis_meta_item("Feet", self._format_feet_value(item.get("feetTotal"))),
+                            self._analysis_meta_item("Window", f"{self._format_scope_datetime(item['start']) if item.get('start') else '--'} to {self._format_scope_datetime(item['end']) if item.get('end') else '--'}"),
+                        ],
+                    )
+                    for item in jobs[:6]
+                ],
+            ),
+        )
+
+    def _assemble_job_analysis_response(
+        self,
+        tool_data: Dict[str, Any],
+        filters: Dict[str, Any],
+        intent: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        machine_name = str(tool_data.get("machineName") or "This press")
+        selected_job = str(tool_data.get("selectedJob") or "").strip() or None
+        selected = tool_data.get("selectedJobSummary") or {}
+        ranked_jobs = tool_data.get("rankedJobs") or []
+        recent_baseline = tool_data.get("recentBaseline") or {}
+        concentration = tool_data.get("concentration") or {}
+        mode = str(tool_data.get("jobAnalysisMode") or (intent or {}).get("jobAnalysisMode") or "")
+
+        def comparison_text(selected_value: Optional[float], baseline_value: Optional[float], label: str, higher_worse: bool = True) -> str:
+            if selected_value is None or baseline_value is None:
+                return f"{label} could not be compared cleanly against recent jobs."
+            delta = float(selected_value) - float(baseline_value)
+            threshold = max(abs(float(baseline_value)) * 0.15, 0.05)
+            if abs(delta) < threshold:
+                return f"{label} is broadly in line with recent jobs on {machine_name}."
+            if (delta > 0 and higher_worse) or (delta < 0 and not higher_worse):
+                return f"{label} is worse than recent jobs on {machine_name}."
+            return f"{label} is better than recent jobs on {machine_name}."
+
+        chart = None
+        title = f"Recent job summary for {machine_name}"
+        summary = concentration.get("summary") or f"{machine_name} has {len(ranked_jobs)} recent jobs in scope."
+        sections: List[Dict[str, str]] = []
+        if mode == "selected_job_vs_recent" and selected_job and selected:
+            title = f"{selected_job} on {machine_name} versus recent jobs"
+            bad_feet_text = comparison_text(selected.get("badFeetPct"), recent_baseline.get("badFeetPct"), "Bad feet")
+            delta_text = comparison_text(selected.get("deltaStd"), recent_baseline.get("deltaStd"), "Delta instability")
+            coverage_text = comparison_text(selected.get("pointsPer1000Ft"), recent_baseline.get("pointsPer1000Ft"), "Monitoring density", higher_worse=False)
+            summary = bad_feet_text
+            sections = [
+                {
+                    "label": "Selected job",
+                    "text": f"{selected_job}: {int(selected.get('reelCount') or 0)} reels | {self._format_feet_value(selected.get('feetTotal'))} | {self._format_pct(selected.get('badFeetPct'))} bad feet | {self._format_mm(selected.get('deltaStd'))} delta std | {self._format_number(selected.get('pointsPer1000Ft'))} pts/1k ft",
+                },
+                {
+                    "label": "Recent-job baseline",
+                    "text": f"{recent_baseline.get('jobCount') or 0} other jobs | {self._format_pct(recent_baseline.get('badFeetPct'))} bad feet | {self._format_mm(recent_baseline.get('deltaStd'))} delta std | {self._format_number(recent_baseline.get('pointsPer1000Ft'))} pts/1k ft",
+                },
+                {
+                    "label": "Comparison summary",
+                    "text": f"{bad_feet_text} | {delta_text} | {coverage_text}",
+                },
+            ]
+            chart = {
+                "type": "bar",
+                "title": f"{selected_job} versus recent jobs",
+                "series": [
+                    {
+                        "name": selected_job,
+                        "x": ["Bad Feet %", "Delta Std Dev", "Monitoring Density"],
+                        "y": [
+                            float(selected.get("badFeetPct") or 0.0),
+                            float(selected.get("deltaStd") or 0.0),
+                            float(selected.get("pointsPer1000Ft") or 0.0),
+                        ],
+                        "hoverText": [
+                            self._chart_hover_text(
+                                job=selected_job,
+                                time_value=selected.get("start"),
+                                end_time_value=selected.get("end"),
+                                total_feet=selected.get("feetTotal"),
+                                bad_feet_ft=selected.get("estimatedBadFeetFeet"),
+                                bad_feet_pct=selected.get("badFeetPct"),
+                                metric_key="bad_feet_pct",
+                                metric_label="Bad Feet %",
+                                metric_value=selected.get("badFeetPct"),
+                            ),
+                            self._chart_hover_text(
+                                job=selected_job,
+                                time_value=selected.get("start"),
+                                end_time_value=selected.get("end"),
+                                total_feet=selected.get("feetTotal"),
+                                bad_feet_ft=selected.get("estimatedBadFeetFeet"),
+                                bad_feet_pct=selected.get("badFeetPct"),
+                                metric_key="delta_variation",
+                                metric_label="Delta Std Dev",
+                                metric_value=selected.get("deltaStd"),
+                            ),
+                            self._chart_hover_text(
+                                job=selected_job,
+                                time_value=selected.get("start"),
+                                end_time_value=selected.get("end"),
+                                total_feet=selected.get("feetTotal"),
+                                bad_feet_ft=selected.get("estimatedBadFeetFeet"),
+                                bad_feet_pct=selected.get("badFeetPct"),
+                                metric_key="monitoring_coverage",
+                                metric_label="Monitoring Density",
+                                metric_value=selected.get("pointsPer1000Ft"),
+                            ),
+                        ],
+                    },
+                    {
+                        "name": "Recent jobs avg",
+                        "x": ["Bad Feet %", "Delta Std Dev", "Monitoring Density"],
+                        "y": [
+                            float(recent_baseline.get("badFeetPct") or 0.0),
+                            float(recent_baseline.get("deltaStd") or 0.0),
+                            float(recent_baseline.get("pointsPer1000Ft") or 0.0),
+                        ],
+                        "hoverText": [
+                            self._chart_hover_text(
+                                job="Recent jobs avg",
+                                bad_feet_pct=recent_baseline.get("badFeetPct"),
+                                metric_key="bad_feet_pct",
+                                metric_label="Bad Feet %",
+                                metric_value=recent_baseline.get("badFeetPct"),
+                                extra_lines=[f"Jobs: {recent_baseline.get('jobCount') or 0}"],
+                            ),
+                            self._chart_hover_text(
+                                job="Recent jobs avg",
+                                bad_feet_pct=recent_baseline.get("badFeetPct"),
+                                metric_key="delta_variation",
+                                metric_label="Delta Std Dev",
+                                metric_value=recent_baseline.get("deltaStd"),
+                                extra_lines=[f"Jobs: {recent_baseline.get('jobCount') or 0}"],
+                            ),
+                            self._chart_hover_text(
+                                job="Recent jobs avg",
+                                bad_feet_pct=recent_baseline.get("badFeetPct"),
+                                metric_key="monitoring_coverage",
+                                metric_label="Monitoring Density",
+                                metric_value=recent_baseline.get("pointsPer1000Ft"),
+                                extra_lines=[f"Jobs: {recent_baseline.get('jobCount') or 0}"],
+                            ),
+                        ],
+                    },
+                ],
+                "metadata": {"visualType": "job-vs-recent", "selectedJob": selected_job},
+            }
+            chart = self._attach_chart_scope_metadata(
+                chart,
+                total_points_in_scope=2,
+                displayed_points=2,
+                scope_description="selected job and recent-job baseline",
+            )
+        elif mode in {"weakest_recent_job", "best_recent_job"} and ranked_jobs:
+            weakest = ranked_jobs[0]
+            strongest = ranked_jobs[-1]
+            selected_job_row = strongest if mode == "best_recent_job" else weakest
+            descriptor = "strongest" if mode == "best_recent_job" else "weakest"
+            summary = (
+                f"{selected_job_row.get('jobName')} stands out as the {descriptor} recent job on {machine_name}, "
+                f"with {self._format_pct(selected_job_row.get('badFeetPct'))} bad feet and {self._format_mm(selected_job_row.get('deltaStd'))} delta std."
+            )
+            title = f"{descriptor.title()} recent job on {machine_name}: {selected_job_row.get('jobName')}"
+            sections = [
+                {
+                    "label": f"{descriptor.title()} recent job",
+                    "text": f"{selected_job_row.get('jobName')}: {int(selected_job_row.get('reelCount') or 0)} reels | {self._format_feet_value(selected_job_row.get('feetTotal'))} | {self._format_pct(selected_job_row.get('badFeetPct'))} bad feet | {self._format_mm(selected_job_row.get('deltaStd'))} delta std | {self._format_number(selected_job_row.get('pointsPer1000Ft'))} pts/1k ft",
+                },
+                {
+                    "label": "Recent job ranking",
+                    "text": " | ".join(
+                        f"{item.get('jobName')}: {self._format_pct(item.get('badFeetPct'))} bad feet, {self._format_mm(item.get('deltaStd'))} delta std"
+                        for item in ranked_jobs[:4]
+                    ),
+                },
+            ]
+            chart = {
+                "type": "bar",
+                "title": f"Recent job bad feet % on {machine_name}",
+                "series": [
+                    {
+                        "name": "Bad Feet %",
+                        "x": [item.get("jobName") for item in ranked_jobs],
+                        "y": [float(item.get("badFeetPct") or 0.0) for item in ranked_jobs],
+                        "hoverText": [
+                            self._chart_hover_text(
+                                job=item.get("jobName"),
+                                time_value=item.get("start"),
+                                end_time_value=item.get("end"),
+                                total_feet=item.get("feetTotal"),
+                                bad_feet_ft=item.get("estimatedBadFeetFeet"),
+                                bad_feet_pct=item.get("badFeetPct"),
+                                metric_key="bad_feet_pct",
+                                metric_label="Bad Feet %",
+                                metric_value=item.get("badFeetPct"),
+                            )
+                            for item in ranked_jobs
+                        ],
+                    }
+                ],
+                "metadata": {"visualType": "job-ranking", "machineName": machine_name},
+            }
+            chart = self._attach_chart_scope_metadata(
+                chart,
+                total_points_in_scope=len(ranked_jobs),
+                displayed_points=len(ranked_jobs),
+                scope_description="recent jobs in scope",
+            )
+        else:
+            title = f"Recent-job concentration on {machine_name}"
+            summary = concentration.get("summary") or f"Recent weakness is spread across jobs on {machine_name}."
+            sections = [
+                {"label": "Job concentration", "text": concentration.get("summary") or "--"},
+                {
+                    "label": "Recent job ranking",
+                    "text": " | ".join(
+                        f"{item.get('jobName')}: {self._format_pct(item.get('badFeetPct'))} bad feet, {self._format_mm(item.get('deltaStd'))} delta std"
+                        for item in ranked_jobs[:4]
+                    ),
+                },
+            ]
+            chart = {
+                "type": "bar",
+                "title": f"Recent job bad feet % on {machine_name}",
+                "series": [
+                    {
+                        "name": "Bad Feet %",
+                        "x": [item.get("jobName") for item in ranked_jobs],
+                        "y": [float(item.get("badFeetPct") or 0.0) for item in ranked_jobs],
+                        "hoverText": [
+                            self._chart_hover_text(
+                                job=item.get("jobName"),
+                                time_value=item.get("start"),
+                                end_time_value=item.get("end"),
+                                total_feet=item.get("feetTotal"),
+                                bad_feet_ft=item.get("estimatedBadFeetFeet"),
+                                bad_feet_pct=item.get("badFeetPct"),
+                                metric_key="bad_feet_pct",
+                                metric_label="Bad Feet %",
+                                metric_value=item.get("badFeetPct"),
+                            )
+                            for item in ranked_jobs
+                        ],
+                    }
+                ],
+                "metadata": {"visualType": "job-concentration", "machineName": machine_name},
+            } if len(ranked_jobs) >= 2 else None
+            chart = self._attach_chart_scope_metadata(
+                chart,
+                total_points_in_scope=len(ranked_jobs),
+                displayed_points=len(ranked_jobs),
+                scope_description="recent jobs in scope",
+            )
+
+        response = self._response(
+            answer={"title": title, "summary": summary, "sections": sections},
+            evidence_metrics=[
+                self._metric("Selected job", selected_job or "--"),
+                self._metric("Recent jobs", str(len(ranked_jobs))),
+                self._metric("Weakest recent job", (ranked_jobs[0].get("jobName") if ranked_jobs else "--") or "--"),
+                self._metric("Concentration", concentration.get("label") or "--"),
+            ],
+            chart=chart,
+            tools_used=[{"tool": "get_machine_job_analysis", "ok": True}],
+            suggested_prompts=self._contextual_follow_up_prompts(
+                response_kind="job_analysis",
+                filters={**filters, "machine_id": tool_data.get("machineId") or filters.get("machine_id"), "job": selected_job or filters.get("job")},
+                machine_label=machine_name,
+                selected_job=selected_job,
+            ),
+            filters={**filters, "machine_id": tool_data.get("machineId") or filters.get("machine_id"), "job": selected_job or filters.get("job")},
+            data_semantics="filtered-window",
+        )
+        response.setdefault("context", {})["selectedJob"] = selected_job
+        response.setdefault("context", {})["jobAnalysis"] = {
+            "selectedJob": selected_job,
+            "recentBaseline": recent_baseline,
+            "rankedJobs": ranked_jobs,
+            "concentration": concentration,
+            "jobAnalysisMode": mode,
+        }
+        primary_cards: List[Dict[str, Any]] = []
+        if selected_job and selected:
+            primary_cards.append(
+                self._analysis_card(
+                    title=selected_job,
+                    value=self._format_pct(selected.get("badFeetPct")),
+                    condition="Selected job",
+                    meta=[
+                        self._analysis_meta_item("Delta std", self._format_mm(selected.get("deltaStd"))),
+                        self._analysis_meta_item("Monitoring", self._format_number(selected.get("pointsPer1000Ft"))),
+                        self._analysis_meta_item("Feet", self._format_feet_value(selected.get("feetTotal"))),
+                    ],
+                )
+            )
+        if recent_baseline:
+            primary_cards.append(
+                self._analysis_card(
+                    title="Recent-job baseline",
+                    value=self._format_pct(recent_baseline.get("badFeetPct")),
+                    condition="Baseline",
+                    meta=[
+                        self._analysis_meta_item("Delta std", self._format_mm(recent_baseline.get("deltaStd"))),
+                        self._analysis_meta_item("Monitoring", self._format_number(recent_baseline.get("pointsPer1000Ft"))),
+                        self._analysis_meta_item("Jobs", recent_baseline.get("jobCount") or "--"),
+                    ],
+                )
+            )
+        return self._attach_analysis_summary(
+            response,
+            self._analysis_summary_payload(
+                family="job_analysis",
+                lead=summary,
+                key_context=[
+                    self._analysis_key_context_item("Press", machine_name),
+                    self._analysis_key_context_item("Selected job", selected_job or "--"),
+                    self._analysis_key_context_item("Recent jobs", len(ranked_jobs)),
+                    self._analysis_key_context_item("Concentration", concentration.get("label") or "--"),
+                ],
+                primary_label="Job Read",
+                primary_cards=primary_cards,
+                supporting_label="Recent Jobs",
+                supporting_cards=[
+                    self._analysis_card(
+                        title=str(item.get("jobName") or "--"),
+                        value=self._format_pct(item.get("badFeetPct")),
+                        condition="Recent job",
+                        meta=[
+                            self._analysis_meta_item("Delta std", self._format_mm(item.get("deltaStd"))),
+                            self._analysis_meta_item("Feet", self._format_feet_value(item.get("feetTotal"))),
+                        ],
+                    )
+                    for item in ranked_jobs[:4]
+                ],
+            ),
+        )
 
     def _get_press_intelligence(self, filters: Dict[str, Any]) -> Dict[str, Any]:
         if filters.get("reel_scope"):
@@ -4341,6 +7239,7 @@ class RLMAssistantService:
         metric_key: str,
         metric_label: str,
         rows: List[Dict[str, Any]],
+        filters: Dict[str, Any],
         scope: Dict[str, Any],
         grouping: str,
         baseline_comparison: Dict[str, Any],
@@ -4355,7 +7254,7 @@ class RLMAssistantService:
             label = row.get("reelId") or row.get("productionStart")
             if label is None:
                 continue
-            series_rows.append({"label": label, "value": value})
+            series_rows.append({"label": label, "value": value, "row": row})
         if len(series_rows) < 2:
             return None
         if len({round(float(item["value"]), 6) for item in series_rows}) <= 1:
@@ -4376,6 +7275,20 @@ class RLMAssistantService:
                 "name": metric_label,
                 "x": [item["label"] for item in series_rows],
                 "y": [item["value"] for item in series_rows],
+                "hoverText": [
+                    self._chart_hover_text(
+                        reel=(item.get("row") or {}).get("reelId"),
+                        job=(item.get("row") or {}).get("jobName"),
+                        time_value=(item.get("row") or {}).get("productionStart") or (item.get("row") or {}).get("date"),
+                        total_feet=(item.get("row") or {}).get("feetTotal"),
+                        bad_feet_ft=(item.get("row") or {}).get("estimatedBadFeet"),
+                        bad_feet_pct=(item.get("row") or {}).get("estimatedBadFeetPct"),
+                        metric_key=metric_key,
+                        metric_label=metric_label,
+                        metric_value=item.get("value"),
+                    )
+                    for item in series_rows
+                ],
             }
         ]
         if baseline_comparison.get("available") and baseline_comparison.get("previousValue") is not None:
@@ -4384,34 +7297,162 @@ class RLMAssistantService:
                     "name": str(baseline_comparison.get("baselineLabel") or "Previous window"),
                     "x": [item["label"] for item in series_rows],
                     "y": [float(baseline_comparison.get("previousValue") or 0.0) for _ in series_rows],
+                    "hoverText": [
+                        self._chart_hover_text(
+                            reel=(item.get("row") or {}).get("reelId"),
+                            job=(item.get("row") or {}).get("jobName"),
+                            time_value=(item.get("row") or {}).get("productionStart") or (item.get("row") or {}).get("date"),
+                            total_feet=(item.get("row") or {}).get("feetTotal"),
+                            bad_feet_ft=(item.get("row") or {}).get("estimatedBadFeet"),
+                            bad_feet_pct=(item.get("row") or {}).get("estimatedBadFeetPct"),
+                            metric_key=metric_key,
+                            metric_label=str(baseline_comparison.get("baselineLabel") or "Previous window"),
+                            metric_value=baseline_comparison.get("previousValue"),
+                        )
+                        for item in series_rows
+                    ],
                 }
             )
         markers = self._discovery_chart_markers(metric_key, rows)
         shift_label = change_point.get("candidate") or markers.get("shiftLabel")
         shift_value = markers.get("shiftValue")
         if change_point.get("available") and shift_label is not None and shift_value is not None:
+            shift_row = next((item.get("row") for item in series_rows if item.get("label") == shift_label), None) or {}
             series.append(
                 {
                     "name": "Shift point",
                     "x": [shift_label],
                     "y": [shift_value],
+                    "hoverText": [
+                        self._chart_hover_text(
+                            reel=shift_row.get("reelId"),
+                            job=shift_row.get("jobName"),
+                            time_value=shift_row.get("productionStart") or shift_row.get("date"),
+                            total_feet=shift_row.get("feetTotal"),
+                            bad_feet_ft=shift_row.get("estimatedBadFeet"),
+                            bad_feet_pct=shift_row.get("estimatedBadFeetPct"),
+                            metric_key=metric_key,
+                            metric_label=metric_label,
+                            metric_value=shift_value,
+                            extra_lines=["Marker: Shift point"],
+                        )
+                    ],
                 }
             )
         if shape.get("recoveryAfterShift") and markers.get("recoveryLabel") is not None and markers.get("recoveryValue") is not None:
+            recovery_label = markers.get("recoveryLabel")
+            recovery_row = next((item.get("row") for item in series_rows if item.get("label") == recovery_label), None) or {}
             series.append(
                 {
                     "name": "Recovery",
-                    "x": [markers.get("recoveryLabel")],
+                    "x": [recovery_label],
                     "y": [markers.get("recoveryValue")],
+                    "hoverText": [
+                        self._chart_hover_text(
+                            reel=recovery_row.get("reelId"),
+                            job=recovery_row.get("jobName"),
+                            time_value=recovery_row.get("productionStart") or recovery_row.get("date"),
+                            total_feet=recovery_row.get("feetTotal"),
+                            bad_feet_ft=recovery_row.get("estimatedBadFeet"),
+                            bad_feet_pct=recovery_row.get("estimatedBadFeetPct"),
+                            metric_key=metric_key,
+                            metric_label=metric_label,
+                            metric_value=markers.get("recoveryValue"),
+                            extra_lines=["Marker: Recovery"],
+                        )
+                    ],
                 }
             )
         if not self._should_render_series_chart([{"value": item["value"]} for item in series_rows]):
             return None
-        return {
-            "type": "line",
-            "title": title,
-            "series": series,
-        }
+        annotations = self._discovery_chart_annotations(
+            series_rows=series_rows,
+            baseline_comparison=baseline_comparison,
+            change_point=change_point,
+            shape=shape,
+            markers=markers,
+        )
+        return self._attach_chart_scope_metadata(
+            {
+                "type": "line",
+                "title": title,
+                "series": series,
+                "annotations": annotations,
+                "metadata": {
+                    "visualType": "discovery-sequence",
+                    "metricKey": metric_key,
+                    "metricLabel": metric_label,
+                },
+            },
+            total_points_in_scope=len(series_rows),
+            displayed_points=len(series_rows),
+            scope_description=self._chart_scope_description(filters=filters, scope=scope, rows=ordered),
+        )
+
+    def _discovery_chart_annotations(
+        self,
+        *,
+        series_rows: List[Dict[str, Any]],
+        baseline_comparison: Dict[str, Any],
+        change_point: Dict[str, Any],
+        shape: Dict[str, Any],
+        markers: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        if not series_rows:
+            return []
+        annotations: List[Dict[str, Any]] = []
+        labels = [item.get("label") for item in series_rows if item.get("label") is not None]
+        values = [float(item.get("value") or 0.0) for item in series_rows]
+        if not labels or not values:
+            return []
+
+        shift_label = change_point.get("candidate") or markers.get("shiftLabel")
+        if change_point.get("shift_detected") and shift_label in labels:
+            annotations.append(
+                {
+                    "kind": "vertical-line",
+                    "x": shift_label,
+                    "label": "Shift",
+                    "color": "#d97706",
+                    "dash": "dot",
+                }
+            )
+
+        if baseline_comparison.get("available"):
+            annotations.append(
+                {
+                    "kind": "vertical-line",
+                    "x": labels[0],
+                    "label": "Current window",
+                    "color": "#94a3b8",
+                    "dash": "dash",
+                }
+            )
+
+        recovery_label = markers.get("recoveryLabel")
+        recovery_value = markers.get("recoveryValue")
+        if shape.get("recoveryAfterShift") and recovery_label in labels and recovery_value is not None:
+            annotations.append(
+                {
+                    "kind": "point-label",
+                    "x": recovery_label,
+                    "y": float(recovery_value),
+                    "label": "Recovery",
+                    "color": "#16a34a",
+                }
+            )
+        elif change_point.get("shift_detected") and not shape.get("recoveryAfterShift"):
+            annotations.append(
+                {
+                    "kind": "text-label",
+                    "x": labels[-1],
+                    "y": values[-1],
+                    "label": "No clear recovery",
+                    "color": "#b45309",
+                }
+            )
+
+        return annotations[:3]
 
     def _compute_discovery_baseline_comparison(
         self,
@@ -5090,6 +8131,12 @@ class RLMAssistantService:
                     "date": timestamp or row.get("reelId"),
                     "value": value,
                     "valueDisplay": self._format_metric_value(metric_key, value),
+                    "reelId": row.get("reelId"),
+                    "jobName": row.get("jobName"),
+                    "productionStart": row.get("productionStart"),
+                    "feetTotal": row.get("feetTotal"),
+                    "estimatedBadFeet": row.get("estimatedBadFeet"),
+                    "estimatedBadFeetPct": row.get("estimatedBadFeetPct"),
                 }
             )
         return scoped_rows
@@ -5117,15 +8164,11 @@ class RLMAssistantService:
             if machine_id is not None:
                 reels = [row for row in reels if int(row.machine_id or 0) == int(machine_id)]
             reel_ids = [row.reel_db_id for row in reels]
-            latest_tolerances = self.press_service._get_latest_tolerances(session, reel_ids)
-            tolerance_change_counts = self.press_service._get_tolerance_change_counts(session, reel_ids)
-            monitoring = self.press_service._get_monitoring_aggregates(session, reel_ids)
+            repeat_length = self.press_service._get_repeat_length_batch(session, reel_ids)
             phase_aggregates = self._get_phase_interval_aggregates(session, reel_ids)
         rows = self.press_service._compute_reel_metrics(
             reels,
-            monitoring,
-            latest_tolerances,
-            tolerance_change_counts,
+            repeat_length,
         )
         for row in rows:
             aggregate = phase_aggregates.get(int(row.get("reelDbId") or 0), {})
@@ -5217,6 +8260,9 @@ class RLMAssistantService:
             "feetTotal": round(feet_total, 3),
             "estimatedBadFeet": round(bad_feet, 3),
             "badFeetPct": round((bad_feet / feet_total * 100.0), 3) if feet_total else None,
+            "deltaPointCount": delta_points,
+            "oobPointCount": oob_points,
+            "monitoringPointsTotal": monitor_points,
             "oobPointPct": round((oob_points / delta_points * 100.0), 3) if delta_points else None,
             "pointsPer1000Ft": round((monitor_points / feet_total * 1000.0), 3) if feet_total else None,
             "latestReelId": latest.get("reelId"),
@@ -5917,6 +8963,8 @@ class RLMAssistantService:
         has_scope = bool(((sticky.get("timeScope") or {}).get("label")) or ((sticky.get("reelScope") or {}).get("label")))
         focus = str(current_focus or "").strip().lower()
         shape = str(issue_shape or "").strip().lower()
+        compare_labels = [str(label or "").strip() for label in (machine_labels or []) if str(label or "").strip()]
+        compare_subject = " and ".join(compare_labels[:2]) if len(compare_labels) >= 2 else None
 
         def job_or_subject(template: str) -> str:
             if job_name:
@@ -5927,28 +8975,41 @@ class RLMAssistantService:
             if job_name:
                 return self._dedupe_prompts(
                     [
-                        "Analyze this job's delta behavior",
-                        "Compare this job to average",
-                        "Was this job broadly unstable or just spikes?",
-                        "Did speed instability line up for this job?",
-                        "Which reels drove the bad feet for this job?",
+                        f"How is {job_name} performing?",
+                        f"Is {job_name} worse than recent runs?",
+                        f"Show delta behavior for {job_name}",
+                        "Which recent job performed the worst?",
+                        "Are the problems concentrated in one job?",
                     ]
                 )
             if has_scope or self._is_valid_machine_id(self._to_int(sticky.get("pressId"))):
                 return self._dedupe_prompts(
                     [
+                        f"How is {subject} performing?",
                         f"What changed on {subject}?",
                         f"Show delta behavior for {subject}",
-                        "What really changed?",
-                        "Compare it to average",
-                        "Was this just a few reels or the whole run?",
+                        f"Compare {subject} to average",
+                        f"Show recent jobs for {subject}",
                     ]
                 )
             return self._dedupe_prompts(
                 [
+                    "How is Press 8 performing?",
                     "What changed on Press 8 today?",
-                    "Investigate Press 5 in the last 10 reels",
-                    "What jobs ran on Press 5 in the last 24 hours?",
+                    "Show delta behavior for Press 8",
+                    "Compare Press 8 to average",
+                    "Show recent jobs for Press 8",
+                ]
+            )
+
+        if response_kind == "ranking_summary":
+            return self._dedupe_prompts(
+                [
+                    f"How is {subject} performing?" if self._is_valid_machine_id(self._to_int(filters.get("machine_id"))) or self._is_valid_machine_id(self._to_int(sticky.get("pressId"))) else "",
+                    "Which press should I check first?",
+                    "What stands out in the ranking?",
+                    "Compare the top two presses",
+                    "Show delta behavior for the weakest press",
                 ]
             )
 
@@ -5959,10 +9020,30 @@ class RLMAssistantService:
             return self._dedupe_prompts(
                 [
                     f"Use Job {first_job}" if first_job else "",
-                    "Analyze only that job",
-                    "Compare that job's delta behavior to average",
-                    "Which job had the most bad feet?",
-                    "Did one job stand out as the weakest?",
+                    "Which one was worst?",
+                    "Which one was best?",
+                    "Use the worst one",
+                    "Are problems concentrated in one job or spread across jobs?",
+                ]
+            )
+
+        if response_kind == "job_analysis":
+            if job_name:
+                return self._dedupe_prompts(
+                    [
+                        "How is it performing?",
+                        "Is this job worse than this machine's recent runs?",
+                        "What stands out?",
+                        "Are the problems concentrated in one job or spread across jobs?",
+                        "Which recent job performed the worst?",
+                    ]
+                )
+            return self._dedupe_prompts(
+                [
+                    f"Show me the weakest recent job on {subject}",
+                    f"Show me the strongest recent job on {subject}",
+                    "Are the problems concentrated in one recent job or spread across jobs?",
+                    "Show me recent jobs",
                 ]
             )
 
@@ -5970,103 +9051,99 @@ class RLMAssistantService:
             if metric_family == "operational":
                 return self._dedupe_prompts(
                     [
-                        "Did weaker monitoring affect the comparison?",
-                        "Compare delta behavior too",
-                        "Was the system active less often for this job?" if job_name else "Was the system active less often too?",
-                        "Is this difference still true over the last 10 reels?",
+                        "Which metric differs most?",
+                        "Is the gap big or small?",
+                        f"What stands out between {compare_subject}?" if compare_subject else "What stands out between them?",
+                        "Which side should I check first?",
                     ]
                 )
             return self._dedupe_prompts(
                 [
-                    "What stands out between them?",
-                    "Was this just a few reels or the whole job?",
-                    "Was the issue at the beginning, middle, or end?",
+                    f"What stands out between {compare_subject}?" if compare_subject else "What stands out between them?",
+                    "Which metric differs most?",
+                    "Is the gap big or small?",
+                    "Which side should I check first?",
                     "Was this comparison fair?",
-                    "Did speed instability line up too?",
                 ]
             )
 
         if response_kind == "discovery":
             prompts: List[str] = []
+            prompts.append("What really changed?")
             if focus != "run_position":
                 prompts.append("Where did behavior shift?" if shift_detected or baseline_available else "Where in the run did this show up?")
             if focus != "concentration":
                 if shape == "isolated spike":
-                    prompts.append(job_or_subject("Was it just a short spike or did it spread later?"))
+                    prompts.append(job_or_subject("Was this just a few reels or the whole run?"))
                 elif shape == "sustained deterioration":
-                    prompts.append(job_or_subject("Was it sustained across the run or did it concentrate in one section?"))
+                    prompts.append(job_or_subject("Was this just a few reels or the whole run?"))
                 else:
                     prompts.append(job_or_subject("Was it spikes or sustained?"))
             if focus != "episodes":
                 prompts.append("Did it recover after the shift?" if shift_detected else "Did it recover?")
-            prompts.append("Which reels drove this?")
-            if comparison_mode == "none":
-                prompts.append("Compare it to average")
-            if metric_family != "process":
-                prompts.append("Did speed instability line up too?")
-            else:
-                prompts.append("Did tolerance changes happen?")
+            prompts.append("Where did behavior shift?")
             return self._dedupe_prompts(prompts[:5])
 
         if response_kind == "activity":
             if metric_family == "operational" and comparison_mode in {"press_vs_press", "press_vs_average"}:
                 return self._dedupe_prompts(
                     [
-                        "Did weaker monitoring affect the comparison?",
-                        "Compare delta behavior too",
-                        "Was the system active less often for this job?" if job_name else f"Was the system active less often on {subject}?",
-                        "Is this difference still true over the last 10 reels?",
+                        "Which metric differs most?",
+                        "Is the gap big or small?",
+                        "What stands out versus average?" if comparison_mode == "press_vs_average" else f"What stands out between {compare_subject}?" if compare_subject else "What stands out between them?",
+                        "Which side should I check first?",
                     ]
                 )
             if comparison_mode in {"press_vs_press", "press_vs_average"}:
                 return self._dedupe_prompts(
                     [
-                        "What stands out between them?" if comparison_mode == "press_vs_press" else "What stands out versus average?",
-                        "Was this just a few reels or the whole job?",
-                        "Was the issue at the beginning, middle, or end?",
+                        "What stands out versus average?" if comparison_mode == "press_vs_average" else f"What stands out between {compare_subject}?" if compare_subject else "What stands out between them?",
+                        "Which metric differs most?",
+                        "Is the gap big or small?",
+                        "Which side should I check first?",
                         "Was this comparison fair?",
-                        "Did speed instability line up too?",
                     ]
                 )
             if metric_family == "process":
                 return self._dedupe_prompts(
                     [
-                        "Did it recover?",
-                        "Compare it to average" if comparison_mode == "none" else "Was this comparison fair?",
+                        "What stands out?",
+                        "What changed?",
+                        "Compare it to average",
+                        "Is it getting worse reel to reel?",
                         "Where did behavior shift?",
-                        "Did tolerance changes happen?",
-                        "Which reels drove this?",
                     ]
                 )
             if metric_family == "outcome":
                 return self._dedupe_prompts(
                     [
-                        "Was this just a few reels or the whole job?",
-                        "Where did behavior shift?",
-                        "Which reels drove this?",
+                        "What stands out?",
+                        "What changed?",
+                        "Is it getting worse reel to reel?",
                         "Compare it to average" if comparison_mode == "none" else "Was this comparison fair?",
-                        "Did speed instability line up too?",
+                        "Show delta behavior",
                     ]
                 )
 
         if response_kind in {"trend", "reel_summary"}:
             return self._dedupe_prompts(
                 [
-                    "Did it recover?",
-                    "Where did behavior shift?",
-                    "Was it spikes or sustained?",
+                    "What stands out?",
+                    "What changed?",
+                    "Is it getting worse reel to reel?",
                     "Compare it to average",
-                    "Did tolerance changes happen?",
-                    "Which reels drove this?",
+                    "Show delta behavior",
                 ]
             )
 
         if response_kind == "status":
             return self._dedupe_prompts(
                 [
-                    f"Show delta behavior for {subject}",
+                    f"What changed on {subject}?",
                     f"Is {subject} getting worse reel to reel?",
-                    "What really changed?",
+                    f"Show delta behavior for {subject}",
+                    f"Compare {subject} to average",
+                    f"What stands out on {subject}?",
                 ]
             )
 
@@ -7003,6 +10080,32 @@ class RLMAssistantService:
             evidence_metrics=[self._metric("Result", "Empty")],
             chart=None,
             tools_used=[{"tool": tool, "ok": False} for tool in tools],
+            suggested_prompts=self._contextual_follow_up_prompts(
+                response_kind="session-filter-update",
+                filters=filters,
+            ),
+            filters=filters,
+            data_semantics=data_semantics,
+        )
+
+    def _clarification_response(
+        self,
+        filters: Dict[str, Any],
+        title: str,
+        summary: str,
+        *,
+        tools: Optional[List[str]] = None,
+        data_semantics: str,
+    ) -> Dict[str, Any]:
+        return self._response(
+            answer={
+                "title": title,
+                "summary": summary,
+                "sections": [],
+            },
+            evidence_metrics=[self._metric("Status", "Needs clarification")],
+            chart=None,
+            tools_used=[{"tool": tool, "ok": False} for tool in (tools or ["clarification"])],
             suggested_prompts=self._contextual_follow_up_prompts(
                 response_kind="session-filter-update",
                 filters=filters,
