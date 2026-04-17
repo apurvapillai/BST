@@ -126,6 +126,7 @@ class ReferenceImage(Base):
 
     filename = Column(String(255))
     image_src = Column(String(255))
+    format = Column(String(50))
 
     reel = relationship("Reel", back_populates="reference_images")
 

@@ -383,7 +383,7 @@ def extract_one(
                 )
 
             if save_images and reference_img_dir:
-                ref_entries: List[Dict[str, str]] = []
+                ref_entries: List[Dict[str, Optional[str]]] = []
 
                 for ref_node in root.findall(".//reference_images/*"):
                     attrs = dict(ref_node.attrib)
@@ -392,9 +392,18 @@ def extract_one(
                         or attrs.get("href")
                         or attrs.get("file")
                         or attrs.get("name")
+                        or ((ref_node.text or "").strip() if ref_node.text else None)
                     )
+                    ref_id = attrs.get("id")
+                    format_val = ref_id.split("_")[-1] if ref_id and "_" in ref_id else None
+
                     if path:
-                        ref_entries.append({"path": path.replace("../", "").replace("\\", "/")})
+                        ref_entries.append(
+                            {
+                                "path": path.replace("../", "").replace("\\", "/"),
+                                "format": format_val,
+                            }
+                        )
 
                 if not ref_entries:
                     for root_dir, _, files in os.walk(tmp_dir):
@@ -405,7 +414,7 @@ def extract_one(
                                     os.path.join(root_dir, fn),
                                     start=tmp_dir,
                                 ).replace("\\", "/")
-                                ref_entries.append({"path": rel})
+                                ref_entries.append({"path": rel, "format": None})
 
                 seen_ref_basenames = set()
                 for ref in ref_entries:
@@ -427,6 +436,7 @@ def extract_one(
                             reel_id=reel.reel_id,
                             filename=basename,
                             image_src=image_src_rel,
+                            format=ref.get("format"),
                         )
                     )
 
