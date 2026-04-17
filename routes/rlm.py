@@ -19,7 +19,7 @@ from db.rlm_models import (
     RLMReel,
     RLMTolerance,
 )
-from services.rlm_reel_footage import RLM_REEL_FEET_PER_RANGE_UNIT
+from services.rlm_reel_footage import MM_PER_FOOT, compute_feet_per_range_unit, compute_reel_feet_from_range
 from services.rlm_repeat_length_service import RLMRepeatLengthService
 
 RLM_DEFAULT_RANGE_DAYS = 1
@@ -175,6 +175,10 @@ def _parse_min_feet_value(value) -> Optional[float]:
     return parsed
 
 
+def _reel_feet_expr():
+    return ((RLMReel.reel_end - RLMReel.reel_start) * RLMReel.format_length) / MM_PER_FOOT
+
+
 def _selection_job_clause(job_pairs):
     pair_clauses = []
     for job_name, order_number in job_pairs:
@@ -274,7 +278,7 @@ def _build_delta_trend_options(session, start: datetime, end: datetime, min_feet
                 RLMReel.reel_start.isnot(None),
                 RLMReel.reel_end.isnot(None),
                 RLMReel.reel_end >= RLMReel.reel_start,
-                (RLMReel.reel_end - RLMReel.reel_start) * RLM_REEL_FEET_PER_RANGE_UNIT >= min_feet,
+                _reel_feet_expr() >= min_feet,
             )
         )
         .group_by(RLMMachine.machine_id, RLMMachine.machine_name, RLMReel.job_name, RLMReel.order_number)
@@ -306,10 +310,28 @@ def _build_delta_trend_options(session, start: datetime, end: datetime, min_feet
 
 
 def _serialize_delta_trend_point(reel, point: Dict[str, object]):
+    reel_start = _to_float(getattr(reel, "reel_start", None))
+    reel_end = _to_float(getattr(reel, "reel_end", None))
+    format_length = _to_float(getattr(reel, "format_length", None))
+    format_value = _to_float(point.get("formatValue"))
+    reel_feet_total = compute_reel_feet_from_range(reel_start, reel_end, format_length)
+    feet_per_range_unit = compute_feet_per_range_unit(format_length)
+    feet_from_reel_start = (
+        max(min((format_value - reel_start) * feet_per_range_unit, float(reel_feet_total or 0.0)), 0.0)
+        if format_value is not None and reel_start is not None and reel_feet_total is not None and feet_per_range_unit is not None
+        else None
+    )
     return {
         "id": point.get("monitoringId"),
         "timestamp": point.get("timestamp"),
         "delta": point.get("delta"),
+        "webspeed": point.get("webspeed"),
+        "formatValue": format_value,
+        "reelStart": reel_start,
+        "reelEnd": reel_end,
+        "formatLength": format_length,
+        "feetFromReelStart": feet_from_reel_start,
+        "reelFeetTotal": reel_feet_total,
         "reelDbId": reel.reel_db_id,
         "reelId": reel.reel_id,
         "machineId": reel.machine_id,
@@ -324,6 +346,71 @@ def _serialize_delta_trend_point(reel, point: Dict[str, object]):
     }
 
 
+def _serialize_delta_trend_reel(reel):
+    reel_start = _to_float(getattr(reel, "reel_start", None))
+    reel_end = _to_float(getattr(reel, "reel_end", None))
+    format_length = _to_float(getattr(reel, "format_length", None))
+    reel_feet_total = compute_reel_feet_from_range(reel_start, reel_end, format_length)
+    return {
+        "reelDbId": reel.reel_db_id,
+        "reelId": reel.reel_id,
+        "machineId": reel.machine_id,
+        "machineName": reel.machine.machine_name if reel.machine else None,
+        "jobName": reel.job_name,
+        "orderNumber": reel.order_number,
+        "jobLabel": _format_job_label(reel.job_name, reel.order_number),
+        "productionStart": _iso(reel.production_start_dt),
+        "productionEnd": _iso(reel.production_end_dt),
+        "formatLength": format_length,
+        "reelFeetTotal": reel_feet_total,
+    }
+
+
+def _build_delta_timeline_reels(session, reel_ids: list[int], start: datetime, end: datetime, selections: list[dict[str, object]], min_feet: Optional[float] = None):
+    point_reels = (
+        session.query(RLMReel)
+        .options(selectinload(RLMReel.machine))
+        .filter(RLMReel.reel_db_id.in_(reel_ids))
+        .all()
+    )
+    point_reel_id_set = {int(reel.reel_db_id) for reel in point_reels}
+    overlap_query = session.query(RLMReel).options(selectinload(RLMReel.machine))
+    overlap_query = _apply_machine_job_selections(overlap_query, selections)
+    if min_feet:
+        overlap_query = overlap_query.filter(RLMReel.reel_start.isnot(None))
+        overlap_query = overlap_query.filter(RLMReel.reel_end.isnot(None))
+        overlap_query = overlap_query.filter(RLMReel.reel_end >= RLMReel.reel_start)
+        overlap_query = overlap_query.filter(_reel_feet_expr() >= min_feet)
+    overlap_query = overlap_query.filter(
+        or_(
+            and_(
+                RLMReel.production_start_dt.isnot(None),
+                RLMReel.production_start_dt <= end,
+                or_(RLMReel.production_end_dt.is_(None), RLMReel.production_end_dt >= start),
+            ),
+            RLMReel.reel_db_id.in_(reel_ids),
+        )
+    )
+    overlap_reels = overlap_query.order_by(
+        RLMReel.machine_id.asc(),
+        RLMReel.production_start_dt.asc(),
+        RLMReel.reel_db_id.asc(),
+    ).all()
+
+    reels_by_id = {int(reel.reel_db_id): reel for reel in point_reels}
+    for reel in overlap_reels:
+        reels_by_id.setdefault(int(reel.reel_db_id), reel)
+    ordered_reels = sorted(
+        reels_by_id.values(),
+        key=lambda reel: (
+            int(reel.machine_id or 0),
+            reel.production_start_dt or reel.production_end_dt or datetime.min,
+            int(reel.reel_db_id or 0),
+        ),
+    )
+    return ordered_reels, point_reel_id_set
+
+
 def _build_delta_trend_dataset(session, start: datetime, end: datetime, selections: list[dict[str, object]], min_feet: Optional[float] = None):
     monitoring_query = (
         session.query(func.distinct(RLMMonitoring.reel_db_id))
@@ -335,20 +422,25 @@ def _build_delta_trend_dataset(session, start: datetime, end: datetime, selectio
         monitoring_query = monitoring_query.filter(RLMReel.reel_start.isnot(None))
         monitoring_query = monitoring_query.filter(RLMReel.reel_end.isnot(None))
         monitoring_query = monitoring_query.filter(RLMReel.reel_end >= RLMReel.reel_start)
-        monitoring_query = monitoring_query.filter((RLMReel.reel_end - RLMReel.reel_start) * RLM_REEL_FEET_PER_RANGE_UNIT >= min_feet)
+        monitoring_query = monitoring_query.filter(_reel_feet_expr() >= min_feet)
     monitoring_query = _apply_machine_job_selections(monitoring_query, selections)
     reel_ids = [int(row[0]) for row in monitoring_query.all() if row and row[0] is not None]
     if not reel_ids:
         return []
 
-    reels = (
-        session.query(RLMReel)
-        .options(selectinload(RLMReel.machine))
-        .filter(RLMReel.reel_db_id.in_(reel_ids))
-        .all()
+    timeline_reels, point_reel_id_set = _build_delta_timeline_reels(
+        session,
+        reel_ids,
+        start,
+        end,
+        selections,
+        min_feet=min_feet,
     )
-    reels_by_id = {int(reel.reel_db_id): reel for reel in reels}
-    repeat_length = repeat_length_service.fetch_reel_batch(session, reel_ids)
+    reels_by_id = {int(reel.reel_db_id): reel for reel in timeline_reels}
+    # Delta trends only render points inside the requested monitoring window.
+    # Keep full reel/tolerance structure for those reels, but trim monitoring rows
+    # early so long-running reels do not pull full-history monitoring payloads.
+    repeat_length = repeat_length_service.fetch_reel_batch(session, reel_ids, start=start, end=end)
 
     selected_jobs_by_machine = {
         int(selection["machine_id"]): {
@@ -365,8 +457,18 @@ def _build_delta_trend_dataset(session, start: datetime, end: datetime, selectio
             "selectedJobs": [],
             "reelIds": set(),
             "points": [],
+            "reels": [],
         }
     )
+    for reel in timeline_reels:
+        machine_id = int(reel.machine_id)
+        machine_bucket = grouped[machine_id]
+        machine_bucket["machineId"] = machine_id
+        machine_bucket["machineName"] = reel.machine.machine_name if reel.machine else f"Press {machine_id}"
+        selected_jobs = selected_jobs_by_machine.get(machine_id) or {"keys": [], "labels": []}
+        machine_bucket["selectionMode"] = "selected_jobs" if selected_jobs["keys"] else "all_jobs"
+        machine_bucket["selectedJobs"] = selected_jobs["labels"]
+        machine_bucket["reels"].append(_serialize_delta_trend_reel(reel))
     for reel_id in reel_ids:
         reel = reels_by_id.get(int(reel_id))
         if not reel:
@@ -378,12 +480,10 @@ def _build_delta_trend_dataset(session, start: datetime, end: datetime, selectio
         selected_jobs = selected_jobs_by_machine.get(machine_id) or {"keys": [], "labels": []}
         machine_bucket["selectionMode"] = "selected_jobs" if selected_jobs["keys"] else "all_jobs"
         machine_bucket["selectedJobs"] = selected_jobs["labels"]
-        machine_bucket["reelIds"].add(int(reel.reel_db_id))
+        if int(reel.reel_db_id) in point_reel_id_set:
+            machine_bucket["reelIds"].add(int(reel.reel_db_id))
         raw_points = repeat_length.get(int(reel.reel_db_id), {}).get("points") or []
         for point in raw_points:
-            timestamp = _parse_date(point.get("timestamp"))
-            if not timestamp or timestamp < start or timestamp > end:
-                continue
             delta = point.get("delta")
             if delta is None:
                 continue
@@ -404,6 +504,7 @@ def _build_delta_trend_dataset(session, start: datetime, end: datetime, selectio
                 "selectedJobs": machine_bucket["selectedJobs"],
                 "reelCount": len(machine_bucket["reelIds"]),
                 "pointCount": len(points),
+                "reels": machine_bucket["reels"],
                 "points": points,
             }
         )
@@ -446,7 +547,7 @@ def _apply_reel_filters(query, filters):
         query = query.filter(RLMReel.reel_start.isnot(None))
         query = query.filter(RLMReel.reel_end.isnot(None))
         query = query.filter(RLMReel.reel_end >= RLMReel.reel_start)
-        query = query.filter((RLMReel.reel_end - RLMReel.reel_start) * RLM_REEL_FEET_PER_RANGE_UNIT >= min_feet)
+        query = query.filter(_reel_feet_expr() >= min_feet)
     return query
 
 
@@ -489,7 +590,7 @@ def _monitorings_query(session, filters):
         query = query.filter(RLMReel.reel_start.isnot(None))
         query = query.filter(RLMReel.reel_end.isnot(None))
         query = query.filter(RLMReel.reel_end >= RLMReel.reel_start)
-        query = query.filter((RLMReel.reel_end - RLMReel.reel_start) * RLM_REEL_FEET_PER_RANGE_UNIT >= min_feet)
+        query = query.filter(_reel_feet_expr() >= min_feet)
     return query
 
 

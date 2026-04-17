@@ -6,7 +6,6 @@
   const CONTEXT_PREVIOUS_COLORS = ["#06b6d4", "#8b5cf6", "#10b981", "#e11d48", "#14b8a6"];
   const CONTEXT_NEXT_COLORS = ["#f97316", "#eab308", "#ef4444", "#6366f1", "#84cc16"];
   const jobColorMap = new Map();
-  const FEET_PER_FORMAT_UNIT = 3.20824;
     const SPEED_TRACE_BAND = 0.33;
 
   const state = {
@@ -2222,7 +2221,7 @@
       const outOfRange = Boolean(point.outOfRange);
       const meta = state.reelMeta[point.reelDbId] || {};
       const formatValue = toNumber(point.formatValue);
-      const formatFeetLocation = Number.isFinite(formatValue) ? computeFeetFromValues(meta.formatStart, formatValue) : null;
+      const formatFeetLocation = Number.isFinite(formatValue) ? computeFeetFromValues(meta.formatStart, formatValue, meta.formatLength) : null;
       totalPoints += 1;
       if (outOfRange) outOfRangeCount += 1;
       const reelLabel = meta.reelId || point.reelId || point.reelDbId;
@@ -3552,11 +3551,12 @@
     return values.join(" → ");
   }
 
-  function computeFeetFromValues(start, end) {
+  function computeFeetFromValues(start, end, formatLength) {
     if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+    if (!Number.isFinite(formatLength) || formatLength <= 0) return null;
     const delta = end - start;
     if (delta < 0) return null;
-    return delta * FEET_PER_FORMAT_UNIT;
+    return delta * (formatLength / 304.8);
   }
 
   function formatNumber(value, digits = 0) {

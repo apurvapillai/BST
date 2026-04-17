@@ -3,8 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, Optional
 
-
-RLM_REEL_FEET_PER_RANGE_UNIT = 3.20824
+MM_PER_FOOT = 304.8
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -31,8 +30,18 @@ def compute_reel_range_units(reel_start: Any, reel_end: Any) -> Optional[float]:
     return delta
 
 
-def compute_reel_feet_from_range(reel_start: Any, reel_end: Any) -> Optional[float]:
+def compute_feet_per_range_unit(format_length: Any) -> Optional[float]:
+    format_length_value = _to_float(format_length)
+    if format_length_value is None or format_length_value <= 0:
+        return None
+    return format_length_value / MM_PER_FOOT
+
+
+def compute_reel_feet_from_range(reel_start: Any, reel_end: Any, format_length: Any) -> Optional[float]:
     units = compute_reel_range_units(reel_start, reel_end)
     if units is None:
         return None
-    return units * RLM_REEL_FEET_PER_RANGE_UNIT
+    feet_per_range_unit = compute_feet_per_range_unit(format_length)
+    if feet_per_range_unit is None:
+        return None
+    return units * feet_per_range_unit

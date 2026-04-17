@@ -16,9 +16,6 @@
     ];
     const COVERAGE_DEFAULT_MIN_FEET = 4000;
     const COVERAGE_MIN_STORAGE_KEY = "job.coverageMinReelLength";
-    const FEET_TO_METERS = 0.3048;
-    const METERS_TO_FEET = 3.28084;
-
     let coverageMinLengthFilter = loadCoverageMinLength();
 
     let state = {
@@ -568,8 +565,7 @@
       const applyBtn = document.getElementById("coverageMinReelLengthApply");
       const clearBtn = document.getElementById("coverageMinLengthClear");
       if (input) {
-        const feetValue = coverageMinLengthFilter ? coverageMinLengthFilter * METERS_TO_FEET : 0;
-        input.value = feetValue ? Math.round(feetValue) : "";
+        input.value = coverageMinLengthFilter ? Math.round(coverageMinLengthFilter) : "";
         input.addEventListener("keydown", (event) => {
           if (event.key === "Enter") {
             event.preventDefault();
@@ -588,7 +584,7 @@
 
     function applyCoverageMinLength(rawValue) {
       const parsed = Number(rawValue);
-      const nextValue = Number.isFinite(parsed) && parsed > 0 ? parsed * FEET_TO_METERS : 0;
+      const nextValue = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
       if (nextValue === coverageMinLengthFilter) {
         updateCoverageMinChip();
         return;
@@ -597,8 +593,7 @@
       persistCoverageMinLength(coverageMinLengthFilter);
       const input = document.getElementById("coverageMinReelLengthInput");
       if (input) {
-        const feetValue = coverageMinLengthFilter ? coverageMinLengthFilter * METERS_TO_FEET : 0;
-        input.value = feetValue ? Math.round(feetValue) : "";
+        input.value = coverageMinLengthFilter ? Math.round(coverageMinLengthFilter) : "";
       }
       updateCoverageMinChip();
       state.page = 1;
@@ -612,7 +607,7 @@
       if (coverageMinLengthFilter > 0) {
         chip.classList.remove("hidden");
         if (text) {
-          text.textContent = `Min reel length ≥ ${Utils.formatMeters(coverageMinLengthFilter)}`;
+          text.textContent = `Min reel feet ≥ ${Utils.formatNumber(coverageMinLengthFilter, 0)} ft`;
         }
       } else {
         chip.classList.add("hidden");
@@ -623,23 +618,22 @@
     }
 
     function loadCoverageMinLength() {
-      const defaultMeters = COVERAGE_DEFAULT_MIN_FEET * FEET_TO_METERS;
-      if (typeof sessionStorage === "undefined") return defaultMeters;
+      if (typeof sessionStorage === "undefined") return COVERAGE_DEFAULT_MIN_FEET;
       try {
         const raw = sessionStorage.getItem(COVERAGE_MIN_STORAGE_KEY);
         if (raw === null || raw === undefined) {
-          return defaultMeters;
+          return COVERAGE_DEFAULT_MIN_FEET;
         }
         const parsed = Number(raw);
         if (!Number.isFinite(parsed)) {
-          return defaultMeters;
+          return COVERAGE_DEFAULT_MIN_FEET;
         }
         if (parsed <= 0) {
           return 0;
         }
         return parsed;
       } catch (err) {
-        return defaultMeters;
+        return COVERAGE_DEFAULT_MIN_FEET;
       }
     }
 
@@ -659,7 +653,7 @@
       if (totalNode) {
         totalNode.textContent = Utils.formatNumber(qualifyingCount, 0);
       }
-      renderCoverageInsightCard("jobBstCoverageCard", insights.bst_coverage || {}, "BST fully active");
+      renderCoverageInsightCard("jobBstCoverageCard", insights.bst_coverage || {}, "BST >1% active");
       renderCoverageInsightCard("jobRlmCoverageCard", insights.rlm_coverage || {}, "RLM active");
       renderReferenceSummaryCard("jobReferenceSummaryCard", insights.reference_summary || {});
       renderSensitivitySummaryCard("jobSensitivitySummaryCard", insights.sensitivity_summary || {});
@@ -1109,7 +1103,7 @@
           </div>
           <div class="summary-metadata">
             <span>Machine: ${reel.machine || "N/A"}</span>
-            <span>Length: ${Utils.formatMeters(reelMeters)}</span>
+            <span>Feet: ${Utils.formatMeters(reelMeters)}</span>
             <span>Format: ${Utils.formatNumber(reel.format_length, 2)} × ${Utils.formatNumber(reel.format_width, 2)}</span>
             <span data-classification-label>Classification: ${classificationLabel(classificationValue)}</span>
             ${addButton}

@@ -7,6 +7,7 @@
   const TAB_SCRIPT_CONFIG = {
     job: { path: "/static/js/tabs/job_explorer.js", exportName: "JobExplorerTab" },
     defects: { path: "/static/js/tabs/defect_explorer.js", exportName: "DefectExplorerTab" },
+    "defect-trends": { path: "/static/js/tabs/defect_trends.js", exportName: "DefectTrendsTab" },
     "defect-drivers": { path: "/static/js/tabs/defect_drivers.js", exportName: "DefectDriversTab" },
     "qc-review": { path: "/static/js/tabs/qc_review.js", exportName: "QcReviewTab" },
     heatmap: { path: "/static/js/tabs/heatmap.js", exportName: "HeatmapTab" },
@@ -27,6 +28,7 @@
     const shouldRequire = guardedTabs.has(tabName);
     document.body.classList.toggle("requires-job-tab", shouldRequire);
     document.body.classList.toggle("reference-check-tab", tabName === "reference-check");
+    document.body.classList.toggle("defect-trends-tab", tabName === "defect-trends");
   }
 
   // normalizeDashboardUrl() disabled to allow deep links (previously stripped ? and # from /dashboard)
@@ -87,11 +89,36 @@
     if (!jobModal || !jobModalSelect) return;
     requestedJobTab = targetTab || "";
     const options = Filters.getJobOptions ? Filters.getJobOptions() : [];
+    const autoSelected = autoSelectLatestJob(targetTab, options);
+    if (autoSelected) {
+      return;
+    }
     Utils.populateSelect(jobModalSelect, options, { placeholder: "Select a job" });
     jobModalSelect.value = "";
     jobModal.classList.remove("hidden");
     jobModal.setAttribute("aria-hidden", "false");
     jobModalSelect.focus();
+  }
+
+  function autoSelectLatestJob(targetTab, options) {
+    const selectedJob =
+      Filters && typeof Filters.getState === "function" ? String(Filters.getState().job || "").trim() : "";
+    if (selectedJob) {
+      const target = targetTab || requestedJobTab || "job";
+      requestedJobTab = "";
+      Router.setActive(target);
+      return true;
+    }
+    const entries = Array.isArray(options) ? options.filter((option) => option && option.value) : [];
+    if (!entries.length) return false;
+    const latestJob = String(entries[0].value || "").trim();
+    if (!latestJob) return false;
+    requestedJobTab = targetTab || "";
+    Filters.set("job", latestJob, { emit: true, updateUrl: true });
+    const target = targetTab || requestedJobTab || "job";
+    requestedJobTab = "";
+    Router.setActive(target);
+    return true;
   }
 
   function closeJobModal() {
@@ -143,6 +170,7 @@
     Router.register("overview", OverviewTab);
     Router.register("job", createLazyTab("job"));
     Router.register("defects", createLazyTab("defects"));
+    Router.register("defect-trends", createLazyTab("defect-trends"));
     Router.register("defect-drivers", createLazyTab("defect-drivers"));
     Router.register("qc-review", createLazyTab("qc-review"));
     Router.register("heatmap", createLazyTab("heatmap"));

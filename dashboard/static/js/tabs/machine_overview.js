@@ -8,8 +8,6 @@
 
     const pendingReelHydration = new Set();
     const MIN_LENGTH_STORAGE_KEY = "overview.minReelLength";
-    const FEET_TO_METERS = 0.3048;
-    const METERS_TO_FEET = 3.28084;
     const DEFAULT_MIN_REEL_LENGTH_FEET = 4000;
     let minReelLengthFilter = loadStoredMinLength();
     let jobLengthsToggleBound = false;
@@ -1800,8 +1798,7 @@
       const applyBtn = document.getElementById("defectMinReelLengthApply");
       const clearBtn = document.getElementById("defectMinLengthClear");
       if (input) {
-        const feetValue = minReelLengthFilter ? minReelLengthFilter / FEET_TO_METERS : 0;
-        input.value = feetValue ? Math.round(feetValue) : "";
+        input.value = minReelLengthFilter ? Math.round(minReelLengthFilter) : "";
         input.addEventListener("keydown", (event) => {
           if (event.key === "Enter") {
             event.preventDefault();
@@ -1822,7 +1819,7 @@
 
     function applyMinReelLength(rawValue) {
       const parsed = Number(rawValue);
-      const nextValue = Number.isFinite(parsed) && parsed > 0 ? parsed * FEET_TO_METERS : 0;
+      const nextValue = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
       if (nextValue === minReelLengthFilter) {
         updateMinLengthChip();
         return;
@@ -1831,8 +1828,7 @@
       persistMinReelLength(minReelLengthFilter);
       const input = document.getElementById("defectMinReelLengthInput");
       if (input) {
-        const feetValue = minReelLengthFilter ? minReelLengthFilter / FEET_TO_METERS : 0;
-        input.value = feetValue ? Math.round(feetValue) : "";
+        input.value = minReelLengthFilter ? Math.round(minReelLengthFilter) : "";
       }
       updateMinLengthChip();
       load.flush();
@@ -1845,7 +1841,7 @@
       if (minReelLengthFilter > 0) {
         chip.classList.remove("hidden");
         if (text) {
-          text.textContent = `Min reel length ≥ ${Utils.formatMeters(minReelLengthFilter)}`;
+          text.textContent = `Min reel feet ≥ ${Utils.formatNumber(minReelLengthFilter, 0)} ft`;
         }
       } else {
         chip.classList.add("hidden");
@@ -1854,23 +1850,22 @@
     }
 
     function loadStoredMinLength() {
-      const defaultMeters = DEFAULT_MIN_REEL_LENGTH_FEET * FEET_TO_METERS;
-      if (typeof sessionStorage === "undefined") return defaultMeters;
+      if (typeof sessionStorage === "undefined") return DEFAULT_MIN_REEL_LENGTH_FEET;
       try {
         const raw = sessionStorage.getItem(MIN_LENGTH_STORAGE_KEY);
         if (raw === null || raw === undefined) {
-          return defaultMeters;
+          return DEFAULT_MIN_REEL_LENGTH_FEET;
         }
         const parsed = Number(raw);
         if (!Number.isFinite(parsed)) {
-          return defaultMeters;
+          return DEFAULT_MIN_REEL_LENGTH_FEET;
         }
         if (parsed <= 0) {
-          return defaultMeters;
+          return 0;
         }
         return parsed;
       } catch (err) {
-        return defaultMeters;
+        return DEFAULT_MIN_REEL_LENGTH_FEET;
       }
     }
 

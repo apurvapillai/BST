@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from db.rlm_connection import RLMSessionLocal
 from db.rlm_models import RLMMachine, RLMMonitoring, RLMReel, RLMTolerance
-from services.rlm_reel_footage import RLM_REEL_FEET_PER_RANGE_UNIT, compute_reel_feet_from_range
+from services.rlm_reel_footage import MM_PER_FOOT, compute_reel_feet_from_range
 from services.rlm_repeat_length_service import RLMRepeatLengthService
 DEFAULT_MIN_MONITORING_POINTS_PER_1000_FT = 20.0
 ISSUE_CLASSES = {
@@ -114,7 +114,7 @@ class RLMPressIntelligenceService:
             query = query.filter(RLMReel.reel_start.isnot(None))
             query = query.filter(RLMReel.reel_end.isnot(None))
             query = query.filter(RLMReel.reel_end >= RLMReel.reel_start)
-            query = query.filter((RLMReel.reel_end - RLMReel.reel_start) * RLM_REEL_FEET_PER_RANGE_UNIT >= filters.min_feet)
+            query = query.filter(((RLMReel.reel_end - RLMReel.reel_start) * RLMReel.format_length) / MM_PER_FOOT >= filters.min_feet)
         return query.all()
 
     def _get_latest_tolerances(self, session, reel_ids: Iterable[int]) -> Dict[int, Dict[str, Any]]:
@@ -1209,7 +1209,7 @@ class RLMPressIntelligenceService:
         return ISSUE_CLASSES.get(ranked[0][0], ISSUE_CLASSES["mixed"])
 
     def _feet_from_reel(self, reel: RLMReel) -> float:
-        feet = compute_reel_feet_from_range(reel.reel_start, reel.reel_end)
+        feet = compute_reel_feet_from_range(reel.reel_start, reel.reel_end, reel.format_length)
         return feet if feet is not None else 0.0
 
     def _mean(self, values: Iterable[Optional[float]]) -> Optional[float]:

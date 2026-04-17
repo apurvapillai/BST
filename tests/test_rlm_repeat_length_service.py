@@ -118,16 +118,17 @@ class RLMRepeatLengthServiceTests(unittest.TestCase):
         )
 
     def test_standard_reel_feet_conversion_short_and_long(self) -> None:
-        self.assertAlmostEqual(compute_reel_feet_from_range(0, 100), 320.824, places=3)
-        self.assertAlmostEqual(compute_reel_feet_from_range(125.5, 925.5), 2566.592, places=3)
+        self.assertAlmostEqual(compute_reel_feet_from_range(0, 100, 1000), 328.084, places=3)
+        self.assertAlmostEqual(compute_reel_feet_from_range(125.5, 925.5, 914.4), 2400.0, places=3)
 
     def test_standard_reel_feet_conversion_invalid_inputs(self) -> None:
-        self.assertIsNone(compute_reel_feet_from_range(None, 100))
-        self.assertIsNone(compute_reel_feet_from_range(100, None))
-        self.assertIsNone(compute_reel_feet_from_range(200, 100))
+        self.assertIsNone(compute_reel_feet_from_range(None, 100, 1000))
+        self.assertIsNone(compute_reel_feet_from_range(100, None, 1000))
+        self.assertIsNone(compute_reel_feet_from_range(200, 100, 1000))
+        self.assertIsNone(compute_reel_feet_from_range(0, 100, None))
 
     def test_build_reel_summary_uses_canonical_feet_and_point_outputs(self) -> None:
-        reel = SimpleNamespace(reel_start=10.0, reel_end=110.0)
+        reel = SimpleNamespace(reel_start=10.0, reel_end=110.0, format_length=1000.0)
         repeat = {
             "totalMonitoringPoints": 6,
             "matchedMonitoringPoints": 5,
@@ -141,7 +142,7 @@ class RLMRepeatLengthServiceTests(unittest.TestCase):
         }
         summary = self.service.build_reel_summary(reel, repeat)
 
-        self.assertAlmostEqual(summary["feet_total"], 320.824, places=3)
+        self.assertAlmostEqual(summary["feet_total"], 328.084, places=3)
         self.assertEqual(summary["total_monitoring_points"], 6)
         self.assertEqual(summary["matched_monitoring_points"], 5)
         self.assertEqual(summary["unmatched_monitoring_points"], 1)
@@ -149,15 +150,15 @@ class RLMRepeatLengthServiceTests(unittest.TestCase):
         self.assertEqual(summary["bad_monitoring_points"], 2)
         self.assertAlmostEqual(summary["bad_point_pct"], 40.0, places=3)
         self.assertAlmostEqual(summary["good_point_pct"], 60.0, places=3)
-        self.assertAlmostEqual(summary["estimated_bad_feet"], 128.3296, places=3)
-        self.assertAlmostEqual(summary["estimated_good_feet"], 192.4944, places=3)
+        self.assertAlmostEqual(summary["estimated_bad_feet"], 131.2336, places=3)
+        self.assertAlmostEqual(summary["estimated_good_feet"], 196.8504, places=3)
         self.assertEqual(summary["tolerance_segment_count"], 2)
         self.assertEqual(len(summary["segment_breakdown"]), 2)
 
     def test_build_reel_summary_batch_preserves_per_reel_contract(self) -> None:
         reels = [
-            SimpleNamespace(reel_db_id=1, reel_start=0.0, reel_end=100.0),
-            SimpleNamespace(reel_db_id=2, reel_start=50.0, reel_end=150.0),
+            SimpleNamespace(reel_db_id=1, reel_start=0.0, reel_end=100.0, format_length=1000.0),
+            SimpleNamespace(reel_db_id=2, reel_start=50.0, reel_end=150.0, format_length=1000.0),
         ]
         repeat_batch = {
             1: {"matchedMonitoringPoints": 2, "goodMonitoringPoints": 2, "badMonitoringPoints": 0, "badPointPct": 0.0, "goodPointPct": 100.0},
@@ -167,8 +168,8 @@ class RLMRepeatLengthServiceTests(unittest.TestCase):
 
         self.assertEqual(set(summaries.keys()), {1, 2})
         self.assertAlmostEqual(summaries[1]["estimated_bad_feet"], 0.0, places=3)
-        self.assertAlmostEqual(summaries[2]["estimated_bad_feet"], 240.618, places=3)
-        self.assertAlmostEqual(summaries[2]["estimated_good_feet"], 80.206, places=3)
+        self.assertAlmostEqual(summaries[2]["estimated_bad_feet"], 246.063, places=3)
+        self.assertAlmostEqual(summaries[2]["estimated_good_feet"], 82.021, places=3)
         self.assertEqual(summaries[2]["matchedMonitoringPoints"], 4)
         self.assertEqual(summaries[2]["badPointPct"], 75.0)
 

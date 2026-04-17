@@ -1371,7 +1371,7 @@ class RLMLiveService:
             return None
 
     def _feet_from_reel(self, reel: RLMReel) -> float:
-        feet = compute_reel_feet_from_range(reel.reel_start, reel.reel_end)
+        feet = compute_reel_feet_from_range(reel.reel_start, reel.reel_end, reel.format_length)
         return feet if feet is not None else 0.0
 
     def _mean(self, values: List[Optional[float]]) -> Optional[float]:
