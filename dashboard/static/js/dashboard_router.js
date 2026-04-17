@@ -116,6 +116,7 @@
     const hashToRoute = {
       "job-explorer": "job",
       "defect-explorer": "defects",
+      "defect-trends": "defect-trends",
       "defect-drivers": "defect-drivers",
       "reference-check": "reference-check",
       overview: "overview",
@@ -123,10 +124,12 @@
       "qc-review": "qc-review",
       job: "job",
       defects: "defects",
+      "defect-trends": "defect-trends",
     };
     const routeToHash = {
       job: "job-explorer",
       defects: "defect-explorer",
+      "defect-trends": "defect-trends",
       "defect-drivers": "defect-drivers",
       "reference-check": "reference-check",
       overview: "overview",

@@ -6,6 +6,7 @@
   <title>Press Dashboard</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/rlm_delta_trends.css') }}">
   <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
   <script src="{{ url_for('static', filename='js/filter_state.js') }}"></script>
 </head>
@@ -122,6 +123,7 @@
       <button type="button" class="tab tab-active" data-tab="overview">Overview</button>
       <button type="button" class="tab" data-tab="job">Job Explorer</button>
       <button type="button" class="tab" data-tab="defects">Defect Explorer</button>
+      <button type="button" class="tab" data-tab="defect-trends">Defect Trends</button>
       <button type="button" class="tab" data-tab="qc-review">QC Review</button>
       <button type="button" class="tab" data-tab="heatmap">Heatmap</button>
       <button type="button" class="tab" data-tab="reference-check">Reference Check</button>
@@ -189,14 +191,14 @@
               <small id="defectTypeSummary">Waiting for defect data…</small>
             </div>
             <div class="defect-length-filter">
-              <label for="defectMinReelLengthInput">Min Reel Length (ft)</label>
+              <label for="defectMinReelLengthInput">Min Reel Feet</label>
               <input type="number" id="defectMinReelLengthInput" min="0" step="10" placeholder="4000">
               <button type="button" id="defectMinReelLengthApply">Apply</button>
             </div>
           </div>
           <div class="defect-length-chip hidden" id="defectMinLengthChip">
             <span></span>
-            <button type="button" id="defectMinLengthClear" aria-label="Clear min reel length filter">&times;</button>
+            <button type="button" id="defectMinLengthClear" aria-label="Clear min reel feet filter">&times;</button>
           </div>
           <div class="kpi-grid kpi-grid--defects kpi-grid--summary" id="defectTypeBreakdown" aria-live="polite">
             <div class="kpi-card kpi-card--highlight" data-kpi="total_defects">
@@ -292,7 +294,7 @@
         </div>
         <div class="job-coverage-chip hidden" id="coverageMinLengthChip">
           <span></span>
-          <button type="button" id="coverageMinLengthClear" aria-label="Clear min reel length filter">&times;</button>
+          <button type="button" id="coverageMinLengthClear" aria-label="Clear min reel feet filter">&times;</button>
         </div>
         <div class="job-insights-grid">
         <div class="job-insight-card" id="jobBstCoverageCard">
@@ -394,7 +396,7 @@
           <div class="drivers-chip-row">
             <div class="job-coverage-chip hidden" id="driversMinLengthChip">
               <span></span>
-              <button type="button" id="driversMinLengthClear" aria-label="Clear min reel length filter">&times;</button>
+              <button type="button" id="driversMinLengthClear" aria-label="Clear min reel feet filter">&times;</button>
             </div>
           </div>
 
@@ -674,6 +676,136 @@
         <div class="defect-footprints-legend-grid">
           <div class="heatmap-legend heatmap-legend-job" id="heatmap-defect-explorer-legend"></div>
         </div>
+      </div>
+    </section>
+
+    <section id="tab-defect-trends" class="tab-content hidden">
+      <div class="rlm-delta-trends-app dashboard-defect-trends-app"
+           data-default-start="{{ defect_trends_default_start.strftime('%Y-%m-%dT%H:%M') if defect_trends_default_start else '' }}"
+           data-default-end="{{ defect_trends_default_end.strftime('%Y-%m-%dT%H:%M') if defect_trends_default_end else '' }}">
+        <div class="delta-trends-loading-overlay hidden" id="defectTrendsLoadingOverlay" aria-hidden="true">
+          <div class="delta-trends-loading-overlay__dialog" role="status" aria-live="polite" aria-busy="true">
+            <div class="delta-trends-loading-overlay__spinner"></div>
+            <p id="defectTrendsLoadingText">Loading defect trend data…</p>
+          </div>
+        </div>
+
+        <section class="filters filters--with-header delta-trends-filters" aria-labelledby="defectTrendsFiltersTitle">
+          <div class="filters-header">
+            <div>
+              <p class="kpi-section__title">Global Filters</p>
+              <small id="defectTrendsFiltersTitle">Compare defect behavior across presses, then narrow specific presses to selected jobs and orders.</small>
+            </div>
+            <div class="delta-trends-header-actions">
+              <button type="button" class="filters-clear-btn filters-clear-btn--ghost" id="defectTrendsSelectAll">All presses</button>
+              <button type="button" class="filters-clear-btn filters-clear-btn--ghost" id="defectTrendsClearAll">Clear</button>
+            </div>
+          </div>
+          <div class="filters-body">
+            <div class="filter-grid delta-trends-filter-grid">
+              <div class="filter-card">
+                <label for="defectTrendsStart">Start date/time</label>
+                <input type="datetime-local" id="defectTrendsStart" value="{{ defect_trends_default_start.strftime('%Y-%m-%dT%H:%M') if defect_trends_default_start else '' }}">
+              </div>
+              <div class="filter-card">
+                <label for="defectTrendsEnd">End date/time</label>
+                <input type="datetime-local" id="defectTrendsEnd" value="{{ defect_trends_default_end.strftime('%Y-%m-%dT%H:%M') if defect_trends_default_end else '' }}">
+              </div>
+              <div class="filter-card delta-trends-filter-card">
+                <label>Current view</label>
+                <div class="delta-trends-selection-summary" id="defectTrendsSelectionSummary">Loading presses…</div>
+              </div>
+            </div>
+            <div class="delta-trends-selector-card">
+              <div class="delta-trends-selector-card__header">
+                <div>
+                  <p class="delta-trends-selector-card__eyebrow">Press / Job Selection</p>
+                  <h3>Select presses and optional job overrides</h3>
+                </div>
+                <span class="delta-trends-selector-card__hint">If a press has no checked jobs, all jobs for that press are included.</span>
+              </div>
+              <div id="defectTrendsMachineSelector" class="delta-trends-machine-selector"></div>
+            </div>
+            <div class="filter-chips delta-trends-global-filter-chips" id="defectTrendsGlobalFilterChips"></div>
+          </div>
+        </section>
+
+        <section class="delta-trends-local-filters" aria-labelledby="defectTrendsLocalFiltersTitle">
+          <div class="delta-trends-local-filters__header">
+            <div>
+              <p class="delta-trends-local-filters__eyebrow">Local Trend Filters</p>
+              <h2 id="defectTrendsLocalFiltersTitle">Trend-specific controls</h2>
+            </div>
+          </div>
+          <p class="delta-trends-local-filters__subtitle">Use these filters for reel-foot filtering and manual defect chart bounds. Blank values stay on auto.</p>
+          <div class="delta-trends-local-filter-grid">
+            <div class="filter-card delta-trends-local-filter-group">
+              <div>
+                <label for="defectTrendsMinFeet">Minimum reel feet</label>
+                <small class="delta-trends-local-filter-help">Exclude short reels from the trend view. Leave blank to keep all reels.</small>
+              </div>
+                <input type="number" id="defectTrendsMinFeet" min="0" step="10" placeholder="Auto">
+            </div>
+            <div class="filter-card delta-trends-local-filter-group">
+              <div>
+                <label for="defectTrendsYMin">Trend Y Range</label>
+                <small class="delta-trends-local-filter-help">Set manual chart bounds for defect count. Leave either side blank to keep that bound on auto.</small>
+              </div>
+              <div class="delta-trends-local-filter-pair">
+                <input type="number" id="defectTrendsYMin" step="0.001" placeholder="Y min">
+                <input type="number" id="defectTrendsYMax" step="0.001" placeholder="Y max">
+              </div>
+            </div>
+            <div class="filter-card delta-trends-local-filter-card">
+              <label>&nbsp;</label>
+              <button type="button" class="filters-clear-btn delta-trends-apply-btn" id="defectTrendsApply">Apply Filters</button>
+            </div>
+          </div>
+          <div class="filter-chips delta-trends-local-filter-chips" id="defectTrendsLocalFilterChips"></div>
+        </section>
+
+        <section class="delta-trends-panel">
+          <div class="delta-trends-panel__header">
+            <div>
+              <p class="delta-trends-panel__eyebrow">Cross-Press Comparison</p>
+              <h2>Combined Defect Trend</h2>
+            </div>
+            <p class="delta-trends-panel__subtitle" id="defectTrendsCombinedSubtitle">All selected presses in one view.</p>
+          </div>
+          <div class="delta-trends-chart-card">
+            <div id="defectTrendsCombinedChart" class="delta-trends-chart"></div>
+          </div>
+        </section>
+
+        <section class="delta-trends-panel">
+          <div class="delta-trends-panel__header">
+            <div>
+              <p class="delta-trends-panel__eyebrow">Press Detail</p>
+              <h2>Per-Press Defect Count Trends</h2>
+            </div>
+            <p class="delta-trends-panel__subtitle" id="defectTrendsDetailSubtitle">Each selected press rendered as grouped defect count by feet bin.</p>
+          </div>
+          <div class="delta-trends-detail-legend" aria-label="Per-press defect trend controls">
+            <label class="delta-trends-detail-legend__item">
+              <span>Bin size (ft)</span>
+              <input type="number" id="defectTrendsBinSize" min="1" step="1" placeholder="500">
+            </label>
+            <label class="delta-trends-detail-legend__item">
+              <input type="checkbox" id="defectTrendsLegendShowImageDefects" checked>
+              <span class="delta-trends-detail-legend__swatch delta-trends-detail-legend__swatch--repeat"></span>
+              <span>Only defects with images</span>
+            </label>
+            <label class="delta-trends-detail-legend__item">
+              <input type="checkbox" id="defectTrendsLegendShowReferenceFlags" checked>
+              <span>Show New Ref</span>
+            </label>
+            <label class="delta-trends-detail-legend__item">
+              <input type="checkbox" id="defectTrendsLegendShowMaskFlags" checked>
+              <span>Show Mask Chg</span>
+            </label>
+          </div>
+          <div id="defectTrendsMachinePanels" class="delta-trends-machine-panels"></div>
+        </section>
       </div>
     </section>
 
@@ -1069,7 +1201,7 @@
           </div>
           <div class="job-coverage-chip hidden" id="referenceCheckMinLengthChip">
             <span></span>
-            <button type="button" id="referenceCheckMinLengthClear" aria-label="Clear min reel length filter">&times;</button>
+            <button type="button" id="referenceCheckMinLengthClear" aria-label="Clear min reel feet filter">&times;</button>
           </div>
         </div>
 

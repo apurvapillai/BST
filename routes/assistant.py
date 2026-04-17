@@ -62,7 +62,7 @@ def _assistant_press_rankings_today() -> list[Dict[str, Any]]:
     total_feet_by_machine: Dict[int, float] = {}
     for reel in reels:
         machine_id = int(reel.machine_id or 0)
-        feet = compute_reel_feet_from_range(reel.reel_start, reel.reel_end)
+        feet = compute_reel_feet_from_range(reel.reel_start, reel.reel_end, reel.format_length)
         if feet is None:
             continue
         total_feet_by_machine[machine_id] = float(total_feet_by_machine.get(machine_id) or 0.0) + float(feet)

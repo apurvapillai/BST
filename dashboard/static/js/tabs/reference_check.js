@@ -1,6 +1,4 @@
   const ReferenceCheckTab = (() => {
-    const FEET_TO_METERS = 0.3048;
-    const METERS_TO_FEET = 3.28084;
     const DEFAULT_MIN_REEL_LENGTH_FEET = 4000;
     const MIN_LENGTH_STORAGE_KEY = "referenceCheck.minReelLength";
     let initialized = false;
@@ -211,17 +209,16 @@
     }
 
     function loadMinReelLength() {
-      const defaultMeters = DEFAULT_MIN_REEL_LENGTH_FEET * FEET_TO_METERS;
-      if (typeof sessionStorage === "undefined") return defaultMeters;
+      if (typeof sessionStorage === "undefined") return DEFAULT_MIN_REEL_LENGTH_FEET;
       try {
         const raw = sessionStorage.getItem(MIN_LENGTH_STORAGE_KEY);
-        if (raw === null || raw === undefined) return defaultMeters;
+        if (raw === null || raw === undefined) return DEFAULT_MIN_REEL_LENGTH_FEET;
         const parsed = Number(raw);
-        if (!Number.isFinite(parsed)) return defaultMeters;
+        if (!Number.isFinite(parsed)) return DEFAULT_MIN_REEL_LENGTH_FEET;
         if (parsed <= 0) return 0;
         return parsed;
       } catch (err) {
-        return defaultMeters;
+        return DEFAULT_MIN_REEL_LENGTH_FEET;
       }
     }
 
@@ -236,8 +233,7 @@
 
     function setupMinReelLengthControls() {
       if (elements.minLengthInput) {
-        const feetValue = minReelLengthFilter ? minReelLengthFilter * METERS_TO_FEET : 0;
-        elements.minLengthInput.value = feetValue ? Math.round(feetValue) : "";
+        elements.minLengthInput.value = minReelLengthFilter ? Math.round(minReelLengthFilter) : "";
         elements.minLengthInput.addEventListener("keydown", (event) => {
           if (event.key === "Enter") {
             event.preventDefault();
@@ -258,7 +254,7 @@
 
     function applyMinReelLength(rawValue) {
       const parsed = Number(rawValue);
-      const nextValue = Number.isFinite(parsed) && parsed > 0 ? parsed * FEET_TO_METERS : 0;
+      const nextValue = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
       if (nextValue === minReelLengthFilter) {
         updateMinLengthChip();
         return;
@@ -266,8 +262,7 @@
       minReelLengthFilter = nextValue;
       persistMinReelLength(minReelLengthFilter);
       if (elements.minLengthInput) {
-        const feetValue = minReelLengthFilter ? minReelLengthFilter * METERS_TO_FEET : 0;
-        elements.minLengthInput.value = feetValue ? Math.round(feetValue) : "";
+        elements.minLengthInput.value = minReelLengthFilter ? Math.round(minReelLengthFilter) : "";
       }
       updateMinLengthChip();
       load();
@@ -280,7 +275,7 @@
       if (minReelLengthFilter > 0) {
         chip.classList.remove("hidden");
         if (text) {
-          text.textContent = `Min reel length ≥ ${Utils.formatMeters(minReelLengthFilter)}`;
+          text.textContent = `Min reel feet ≥ ${Utils.formatNumber(minReelLengthFilter, 0)} ft`;
         }
       } else {
         chip.classList.add("hidden");

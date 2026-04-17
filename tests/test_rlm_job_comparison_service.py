@@ -9,7 +9,7 @@ class RLMJobComparisonServiceTests(unittest.TestCase):
         self.service = RLMJobComparisonService()
 
     def test_reel_zone_summary_splits_points_into_early_middle_late(self) -> None:
-        reel = SimpleNamespace(reel_start=0.0, reel_end=100.0)
+        reel = SimpleNamespace(reel_start=0.0, reel_end=100.0, format_length=1000.0)
         points = [
             {"formatValue": 10.0, "matchedTolerance": True, "outOfRange": True, "delta": 0.4},
             {"formatValue": 40.0, "matchedTolerance": True, "outOfRange": False, "delta": 0.1},

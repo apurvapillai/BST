@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from db.rlm_connection import RLMSessionLocal
 from db.rlm_models import RLMMachine, RLMPhaseInterval, RLMReel
-from services.rlm_reel_footage import RLM_REEL_FEET_PER_RANGE_UNIT, compute_reel_feet_from_range
+from services.rlm_reel_footage import MM_PER_FOOT, compute_reel_feet_from_range
 from services.rlm_repeat_length_service import RLMRepeatLengthService
 
 ZONE_SPECS = (
@@ -123,7 +123,11 @@ class RLMJobComparisonService:
         total_feet = 0.0
         reels_with_feet = 0
         for reel in reels:
-            feet = compute_reel_feet_from_range(getattr(reel, "reel_start", None), getattr(reel, "reel_end", None))
+            feet = compute_reel_feet_from_range(
+                getattr(reel, "reel_start", None),
+                getattr(reel, "reel_end", None),
+                getattr(reel, "format_length", None),
+            )
             if feet is None:
                 continue
             total_feet += float(feet)
@@ -155,7 +159,7 @@ class RLMJobComparisonService:
             query = query.filter(RLMReel.reel_start.isnot(None))
             query = query.filter(RLMReel.reel_end.isnot(None))
             query = query.filter(RLMReel.reel_end >= RLMReel.reel_start)
-            query = query.filter((RLMReel.reel_end - RLMReel.reel_start) * RLM_REEL_FEET_PER_RANGE_UNIT >= filters.min_feet)
+            query = query.filter(((RLMReel.reel_end - RLMReel.reel_start) * RLMReel.format_length) / MM_PER_FOOT >= filters.min_feet)
         return query.all()
 
     def _get_phase_interval_aggregates(self, session, reel_ids: Iterable[int]) -> Dict[int, Dict[str, Any]]:

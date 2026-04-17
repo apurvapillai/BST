@@ -5602,6 +5602,13 @@ body.reference-check-tab #activeFilterChips .filter-chip[data-key="reel_id"] {
   pointer-events: none;
 }
 
+body.defect-trends-tab #globalFilters,
+body.defect-trends-tab #activeFilterChips,
+body.defect-trends-tab #tabNav,
+body.defect-trends-tab #defectLocalChips {
+  display: none !important;
+}
+
 .modal-field {
   display: flex;
   flex-direction: column;
@@ -7129,5 +7136,17 @@ body.reference-check-modal-open {
   .reference-check-modal__stage {
     min-height: 220px;
     max-height: 38vh;
+  }
+}
+.dashboard-defect-trends-app .delta-trends-local-filter-grid {
+  grid-template-columns:
+    minmax(0, 1.2fr)
+    minmax(0, 1.6fr)
+    minmax(160px, 0.8fr);
+}
+
+@media (max-width: 1100px) {
+  .dashboard-defect-trends-app .delta-trends-local-filter-grid {
+    grid-template-columns: 1fr;
   }
 }

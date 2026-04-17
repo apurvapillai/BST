@@ -16,6 +16,7 @@ from db.rlm_live_models import RLMLiveMachineThreshold
 from db.rlm_models import RLMMachine, RLMReel
 from services.dashboard_live_service import DashboardLiveService
 from services.rlm_live_service import RLMLiveService
+from services.rlm_reel_footage import compute_feet_per_range_unit
 
 BST_LOOKBACK_DAYS = 3
 RLM_LOOKBACK_DAYS = 7
@@ -1486,6 +1487,11 @@ class StatusOverviewService:
         return abs(end - start) * self._bst_feet_multiplier(reel, machine_name)
 
     def _bst_feet_multiplier(self, reel: Optional[Reel], machine_name: Optional[str] = None) -> float:
+        if reel is not None:
+            format_length = self._to_float(getattr(reel, "format_length", None))
+            computed = compute_feet_per_range_unit(format_length)
+            if computed is not None:
+                return float(computed)
         normalized = self._normalize_reel_token(machine_name)
         if not normalized and reel is not None:
             normalized = self._normalize_reel_token(getattr(reel, "_status_overview_machine_name", None))

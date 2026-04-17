@@ -126,6 +126,7 @@ class ReferenceImage(Base):
 
     filename = Column(String(255))
     image_src = Column(String(255))
+    format = Column("format", String(255))
 
     reel = relationship("Reel", back_populates="reference_images")
 
@@ -210,6 +211,7 @@ class RLMMonitoring(Base):
     reel_id = Column(Integer, ForeignKey("reels.reel_id", ondelete="CASCADE"), index=True)
 
     timestamp = Column(DateTime, index=True)
+    format_value = Column(DECIMAL(10, 2))
     curlength = Column(DECIMAL(10, 3))
     webspeed = Column(DECIMAL(10, 3))
 

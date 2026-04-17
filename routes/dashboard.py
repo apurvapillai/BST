@@ -6,6 +6,7 @@ import math
 import os
 import time
 from collections import Counter, defaultdict, namedtuple
+from bisect import bisect_left
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
@@ -31,7 +32,11 @@ from db.models import (
     ReelReview,
     HeatmapRegion,
 )
+from db.rlm_connection import RLMSessionLocal
+from db.rlm_models import RLMMachine as RLMDbMachine, RLMMonitoring as RLMDbMonitoring, RLMReel as RLMDbReel
 from services.dashboard_live_service import DashboardLiveService
+from services.rlm_reel_footage import compute_reel_feet_from_range
+from services.rlm_reel_footage import MM_PER_FOOT
 from routes.assistant import build_assistant_chat_response
 from services.rlm_assistant_service import RLMAssistantService
 
@@ -459,7 +464,8 @@ def _apply_reel_filters(query, filters: Dict[str, Any], include_reel_code: bool 
     if min_length:
         start_expr = func.coalesce(Reel.reel_start, 0.0)
         end_expr = func.coalesce(Reel.reel_end, 0.0)
-        query = query.filter((end_expr - start_expr) >= min_length)
+        format_length_expr = func.coalesce(Reel.format_length, 0.0)
+        query = query.filter(((end_expr - start_expr) * format_length_expr) / MM_PER_FOOT >= min_length)
     return query
 
 
@@ -1443,6 +1449,7 @@ def dashboard_home():
         if default_end is None:
             default_end = datetime.utcnow()
         default_start = default_end - timedelta(days=DAYS_DEFAULT_RANGE)
+        defect_trends_default_start = default_end - timedelta(days=1)
         default_start_date = default_start.date().isoformat()
         default_end_date = default_end.date().isoformat()
         default_machine = next((m for m in machines if (m.name or "").lower() == "press 5"), None)
@@ -1462,6 +1469,8 @@ def dashboard_home():
         default_machine_id=default_machine_id,
         default_start=default_start,
         default_end=default_end,
+        defect_trends_default_start=defect_trends_default_start,
+        defect_trends_default_end=default_end,
         default_start_date=default_start_date,
         default_end_date=default_end_date,
         default_job=default_job,
@@ -2870,10 +2879,8 @@ def _driver_class_breakdown(counter: Counter) -> List[Dict[str, object]]:
 
 
 def _reel_length_feet(reel: Reel) -> float:
-    start_value = _to_float(reel.reel_start) or 0.0
-    end_value = _to_float(reel.reel_end) or 0.0
-    meters = max(end_value - start_value, 0.0)
-    return round(meters * 3.28084, 2)
+    feet = compute_reel_feet_from_range(reel.reel_start, reel.reel_end, reel.format_length)
+    return round(float(feet or 0.0), 2)
 
 
 def _rate_per_1000ft(defect_count: int, length_ft: Optional[float]) -> Optional[float]:
@@ -7172,7 +7179,7 @@ def api_job_explorer():
                 continue
             inspection_pct = inspection_pct_by_reel.get(reel_id, {})
             active_pct = inspection_pct.get("active", 0.0) if inspection_pct else 0.0
-            if active_pct >= 99.9:
+            if active_pct > 1.0:
                 bst_active_count += 1
 
             rlm_pct = rlm_pct_by_reel.get(reel_id, {})
@@ -7203,7 +7210,7 @@ def api_job_explorer():
                 "inactive_count": max(qualifying_count - bst_active_count, 0),
                 "active_pct": _pct(bst_active_count, qualifying_count),
                 "inactive_pct": _pct(max(qualifying_count - bst_active_count, 0), qualifying_count),
-                "subtitle": "100% active inspection across qualifying reels.",
+                "subtitle": "More than 1% active inspection across qualifying reels.",
             },
             "rlm_coverage": {
                 "qualifying_reel_count": qualifying_count,
@@ -7966,6 +7973,653 @@ def _build_defect_query(
     return query
 
 
+def _defect_trends_parse_window(source: Optional[Dict[str, object]] = None) -> Tuple[datetime, datetime]:
+    raw_start = ""
+    raw_end = ""
+    if isinstance(source, dict):
+        raw_start = str(source.get("start") or "").strip()
+        raw_end = str(source.get("end") or "").strip()
+    else:
+        raw_start = str(request.args.get("start") or "").strip()
+        raw_end = str(request.args.get("end") or "").strip()
+    start = _parse_datetime(raw_start)
+    end = _parse_datetime(raw_end)
+    if not (start and end and start < end):
+        return _default_window()
+    return start, end
+
+
+def _defect_trends_parse_min_feet(value: Optional[object]) -> Optional[float]:
+    try:
+        parsed = float(value) if value not in {None, ""} else None
+    except (TypeError, ValueError):
+        return None
+    if parsed is None or parsed <= 0:
+        return None
+    return parsed
+
+
+def _defect_trends_reel_feet_expr():
+    start_expr = func.coalesce(Reel.reel_start, 0.0)
+    end_expr = func.coalesce(Reel.reel_end, 0.0)
+    format_length_expr = func.coalesce(Reel.format_length, 0.0)
+    return ((end_expr - start_expr) * format_length_expr) / MM_PER_FOOT
+
+
+def _defect_trends_job_key(job_name: Optional[str], order_number: Optional[str]) -> Optional[str]:
+    cleaned_job = str(job_name or "").strip()
+    if not cleaned_job:
+        return None
+    cleaned_order = str(order_number or "").strip()
+    return f"{cleaned_job}|||{cleaned_order}"
+
+
+def _defect_trends_parse_job_key(value: Optional[str]) -> Optional[Tuple[str, Optional[str]]]:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return None
+    if "|||" not in cleaned:
+        return cleaned, None
+    job_name, order_number = cleaned.split("|||", 1)
+    job_name = job_name.strip()
+    order_number = order_number.strip()
+    if not job_name:
+        return None
+    return job_name, order_number or None
+
+
+def _defect_trends_format_job_label(job_name: Optional[str], order_number: Optional[str]) -> str:
+    cleaned_job = str(job_name or "").strip() or "Unknown Job"
+    cleaned_order = str(order_number or "").strip()
+    return f"{cleaned_job} - {cleaned_order}" if cleaned_order else cleaned_job
+
+
+def _normalize_defect_trend_selections(payload: object) -> List[Dict[str, object]]:
+    raw_items = payload.get("selections") if isinstance(payload, dict) else []
+    if not isinstance(raw_items, list):
+        raw_items = []
+    selections: List[Dict[str, object]] = []
+    seen_machine_ids: Set[int] = set()
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            machine_id = int(item.get("machineId"))
+        except (TypeError, ValueError):
+            continue
+        if machine_id in seen_machine_ids:
+            continue
+        job_pairs: List[Tuple[str, Optional[str]]] = []
+        for raw_key in item.get("jobKeys") or []:
+            parsed = _defect_trends_parse_job_key(raw_key)
+            if parsed and parsed not in job_pairs:
+                job_pairs.append(parsed)
+        selections.append(
+            {
+                "machine_id": machine_id,
+                "enabled": item.get("enabled") is not False,
+                "job_pairs": job_pairs,
+            }
+        )
+        seen_machine_ids.add(machine_id)
+    return selections
+
+
+def _defect_trends_selection_clause(selections: List[Dict[str, object]]):
+    enabled = [selection for selection in selections if selection.get("enabled") is not False]
+    if not enabled:
+        return None
+    machine_clauses = []
+    for selection in enabled:
+        clauses = [Reel.machine_id == selection["machine_id"]]
+        job_pairs = selection.get("job_pairs") or []
+        if job_pairs:
+            job_clauses = []
+            for job_name, order_number in job_pairs:
+                if order_number:
+                    job_clauses.append(and_(Reel.job_name == job_name, Reel.order_number == order_number))
+                else:
+                    job_clauses.append(
+                        and_(
+                            Reel.job_name == job_name,
+                            or_(Reel.order_number.is_(None), Reel.order_number == ""),
+                        )
+                    )
+            clauses.append(or_(*job_clauses))
+        machine_clauses.append(and_(*clauses))
+    return or_(*machine_clauses) if machine_clauses else None
+
+
+def _build_defect_trend_options(session: Session, start: datetime, end: datetime, min_feet: Optional[float] = None):
+    defect_reels_subq = (
+        session.query(
+            Defect.reel_id.label("reel_id"),
+            func.max(Defect.defect_time).label("latest_defect_time"),
+            func.count(Defect.defect_id).label("defect_count"),
+        )
+        .filter(Defect.defect_time >= start)
+        .filter(Defect.defect_time <= end)
+        .group_by(Defect.reel_id)
+        .subquery()
+    )
+
+    query = (
+        session.query(
+            Reel.machine_id.label("machine_id"),
+            Machine.name.label("machine_name"),
+            Reel.job_name.label("job_name"),
+            Reel.order_number.label("order_number"),
+            func.max(defect_reels_subq.c.latest_defect_time).label("latest_defect_time"),
+            func.count(func.distinct(Reel.reel_id)).label("reel_count"),
+            func.sum(defect_reels_subq.c.defect_count).label("defect_count"),
+        )
+        .join(defect_reels_subq, Reel.reel_id == defect_reels_subq.c.reel_id)
+        .join(Machine, Reel.machine_id == Machine.machine_id)
+        .filter(Reel.time_start <= end)
+        .filter(Reel.time_end >= start)
+    )
+    if min_feet is not None:
+        query = query.filter(_defect_trends_reel_feet_expr() >= min_feet)
+    rows = (
+        query.group_by(Reel.machine_id, Machine.name, Reel.job_name, Reel.order_number)
+        .order_by(Machine.name.asc(), text("latest_defect_time DESC"))
+        .all()
+    )
+
+    machines_by_id: Dict[int, Dict[str, object]] = {}
+    for row in rows:
+        machine_id = getattr(row, "machine_id", None)
+        if machine_id is None:
+            continue
+        entry = machines_by_id.setdefault(
+            machine_id,
+            {
+                "machineId": machine_id,
+                "machineName": getattr(row, "machine_name", None) or f"Press {machine_id}",
+                "reelCount": 0,
+                "defectCount": 0,
+                "latestTime": None,
+                "jobOptions": [],
+            },
+        )
+        reel_count = int(getattr(row, "reel_count", 0) or 0)
+        defect_count = int(getattr(row, "defect_count", 0) or 0)
+        latest_dt = getattr(row, "latest_defect_time", None)
+        entry["reelCount"] += reel_count
+        entry["defectCount"] += defect_count
+        if latest_dt and (entry["latestTime"] is None or latest_dt > datetime.fromisoformat(entry["latestTime"])):
+            entry["latestTime"] = _iso(latest_dt)
+        job_key = _defect_trends_job_key(getattr(row, "job_name", None), getattr(row, "order_number", None))
+        if not job_key:
+            continue
+        entry["jobOptions"].append(
+            {
+                "value": job_key,
+                "label": _defect_trends_format_job_label(getattr(row, "job_name", None), getattr(row, "order_number", None)),
+                "jobName": getattr(row, "job_name", None),
+                "orderNumber": getattr(row, "order_number", None),
+                "reelCount": reel_count,
+                "defectCount": defect_count,
+                "latestTime": _iso(latest_dt),
+            }
+        )
+
+    machine_rows = sorted(
+        machines_by_id.values(),
+        key=lambda item: (
+            _machine_sort_key(item.get("machineName")),
+            (item.get("machineName") or "").lower(),
+        ),
+    )
+    return {"machines": machine_rows}
+
+
+def _machine_sort_key(name: Optional[str]) -> Tuple[int, str]:
+    label = str(name or "").strip().lower()
+    digits = "".join(ch for ch in label if ch.isdigit())
+    if digits:
+        try:
+            return int(digits), label
+        except ValueError:
+            pass
+    return 10_000, label
+
+
+def _nearest_monitoring_sample(
+    samples: List[Dict[str, object]],
+    timestamps: List[datetime],
+    target_ts: Optional[datetime],
+) -> Optional[Dict[str, object]]:
+    if not samples or not timestamps or target_ts is None:
+        return None
+    index = bisect_left(timestamps, target_ts)
+    if index <= 0:
+        return samples[0]
+    if index >= len(samples):
+        return samples[-1]
+    before = samples[index - 1]
+    after = samples[index]
+    before_ts = timestamps[index - 1]
+    after_ts = timestamps[index]
+    if abs((target_ts - before_ts).total_seconds()) <= abs((after_ts - target_ts).total_seconds()):
+        return before
+    return after
+
+
+def _build_defect_trend_payload(
+    session: Session,
+    start: datetime,
+    end: datetime,
+    min_feet: Optional[float],
+    selections: List[Dict[str, object]],
+) -> Dict[str, object]:
+    selection_clause = _defect_trends_selection_clause(selections)
+    if selection_clause is None:
+        return {"machines": []}
+
+    defect_exists = (
+        session.query(Defect.defect_id)
+        .filter(Defect.reel_id == Reel.reel_id)
+        .filter(Defect.defect_time >= start)
+        .filter(Defect.defect_time <= end)
+        .exists()
+    )
+    reel_query = (
+        session.query(Reel)
+        .options(selectinload(Reel.machine), selectinload(Reel.reference_images), selectinload(Reel.masks))
+        .filter(Reel.time_start <= end)
+        .filter(Reel.time_end >= start)
+        .filter(selection_clause)
+        .filter(defect_exists)
+    )
+    if min_feet is not None:
+        reel_query = reel_query.filter(_defect_trends_reel_feet_expr() >= min_feet)
+    reels = reel_query.order_by(Reel.machine_id.asc(), Reel.time_start.asc(), Reel.reel_id.asc()).all()
+    if not reels:
+        return {"machines": []}
+
+    reels_by_id = {reel.reel_id: reel for reel in reels if reel.reel_id is not None}
+    reel_ids = list(reels_by_id.keys())
+    defects = (
+        session.query(Defect)
+        .filter(Defect.reel_id.in_(reel_ids))
+        .filter(Defect.defect_time >= start)
+        .filter(Defect.defect_time <= end)
+        .order_by(Defect.reel_id.asc(), Defect.defect_time.asc(), Defect.defect_id.asc())
+        .all()
+    )
+    phase_rows = (
+        session.query(
+            InspectionPhase.reel_id,
+            InspectionPhase.phase,
+            InspectionPhase.start_format,
+            InspectionPhase.end_format,
+            InspectionPhase.start_time,
+            InspectionPhase.end_time,
+        )
+        .filter(InspectionPhase.reel_id.in_(reel_ids))
+        .order_by(InspectionPhase.reel_id.asc(), InspectionPhase.start_time.asc())
+        .all()
+    )
+
+    monitoring_by_reel: Dict[int, List[Dict[str, object]]] = defaultdict(list)
+    monitoring_times_by_reel: Dict[int, List[datetime]] = defaultdict(list)
+    rlm_reel_by_dashboard_reel: Dict[int, RLMDbReel] = {}
+    reel_codes = sorted({str(reel.reel_code or "").strip() for reel in reels if str(reel.reel_code or "").strip()})
+    machine_names = sorted({str(reel.machine.name or "").strip() for reel in reels if reel.machine and str(reel.machine.name or "").strip()})
+    if reel_codes and machine_names:
+        with RLMSessionLocal() as rlm_session:
+            rlm_machine_rows = (
+                rlm_session.query(RLMDbMachine)
+                .filter(RLMDbMachine.machine_name.in_(machine_names))
+                .all()
+            )
+            rlm_machine_by_name = {
+                str(machine.machine_name or "").strip().lower(): machine
+                for machine in rlm_machine_rows
+                if str(machine.machine_name or "").strip()
+            }
+            rlm_machine_ids = [machine.machine_id for machine in rlm_machine_rows if machine.machine_id is not None]
+            rlm_reels = []
+            if rlm_machine_ids:
+                rlm_reels = (
+                    rlm_session.query(RLMDbReel)
+                    .join(RLMDbMachine, RLMDbReel.machine_id == RLMDbMachine.machine_id)
+                    .filter(RLMDbReel.machine_id.in_(rlm_machine_ids))
+                    .filter(RLMDbReel.reel_id.in_(reel_codes))
+                    .filter(RLMDbReel.production_start_dt <= end)
+                    .filter(or_(RLMDbReel.production_end_dt.is_(None), RLMDbReel.production_end_dt >= start))
+                    .order_by(RLMDbMachine.machine_name.asc(), RLMDbReel.production_start_dt.asc(), RLMDbReel.reel_db_id.asc())
+                    .all()
+                )
+            rlm_reels_by_key: Dict[Tuple[str, str], List[RLMDbReel]] = defaultdict(list)
+            for rlm_reel in rlm_reels:
+                rlm_machine_name = str(rlm_reel.machine.machine_name if rlm_reel.machine else "").strip().lower()
+                rlm_reel_code = str(rlm_reel.reel_id or "").strip().lower()
+                if rlm_machine_name and rlm_reel_code:
+                    rlm_reels_by_key[(rlm_machine_name, rlm_reel_code)].append(rlm_reel)
+
+            matched_rlm_reel_ids: List[int] = []
+            for reel in reels:
+                dashboard_reel_id = getattr(reel, "reel_id", None)
+                dashboard_reel_code = str(reel.reel_code or "").strip().lower()
+                dashboard_machine_name = str(reel.machine.name if reel.machine else "").strip().lower()
+                if dashboard_reel_id is None or not dashboard_reel_code or not dashboard_machine_name:
+                    continue
+                candidates = rlm_reels_by_key.get((dashboard_machine_name, dashboard_reel_code), [])
+                if not candidates:
+                    continue
+                target_ts = reel.time_start or reel.time_end or datetime.min
+                matched_reel = min(
+                    candidates,
+                    key=lambda candidate: abs(((candidate.production_start_dt or candidate.production_end_dt or datetime.min) - target_ts).total_seconds()),
+                )
+                rlm_reel_by_dashboard_reel[dashboard_reel_id] = matched_reel
+                if matched_reel.reel_db_id is not None:
+                    matched_rlm_reel_ids.append(int(matched_reel.reel_db_id))
+
+            if matched_rlm_reel_ids:
+                monitoring_rows = (
+                    rlm_session.query(
+                        RLMDbMonitoring.reel_db_id,
+                        RLMDbMonitoring.monitoring_ts,
+                        RLMDbMonitoring.webspeed,
+                        RLMDbMonitoring.format_value,
+                        RLMDbMonitoring.monitoring_id,
+                    )
+                    .filter(RLMDbMonitoring.reel_db_id.in_(matched_rlm_reel_ids))
+                    .filter(RLMDbMonitoring.monitoring_ts >= start)
+                    .filter(RLMDbMonitoring.monitoring_ts <= end)
+                    .order_by(RLMDbMonitoring.reel_db_id.asc(), RLMDbMonitoring.monitoring_ts.asc(), RLMDbMonitoring.monitoring_id.asc())
+                    .all()
+                )
+                dashboard_reel_ids_by_rlm_reel_id: Dict[int, List[int]] = defaultdict(list)
+                for dashboard_reel_id, rlm_reel in rlm_reel_by_dashboard_reel.items():
+                    if rlm_reel and rlm_reel.reel_db_id is not None:
+                        dashboard_reel_ids_by_rlm_reel_id[int(rlm_reel.reel_db_id)].append(int(dashboard_reel_id))
+                for row in monitoring_rows:
+                    rlm_reel_id = getattr(row, "reel_db_id", None)
+                    timestamp = getattr(row, "monitoring_ts", None)
+                    webspeed = _to_float(getattr(row, "webspeed", None))
+                    format_value = _to_float(getattr(row, "format_value", None))
+                    if rlm_reel_id is None or timestamp is None or webspeed is None:
+                        continue
+                    for dashboard_reel_id in dashboard_reel_ids_by_rlm_reel_id.get(int(rlm_reel_id), []):
+                        monitoring_by_reel[dashboard_reel_id].append({
+                            "timestamp": timestamp,
+                            "webspeed": webspeed,
+                            "formatValue": format_value,
+                        })
+                        monitoring_times_by_reel[dashboard_reel_id].append(timestamp)
+
+    inactive_segments_by_reel: Dict[int, List[Dict[str, object]]] = defaultdict(list)
+    for row in phase_rows:
+        reel_id = getattr(row, "reel_id", None)
+        if reel_id is None:
+            continue
+        reel = reels_by_id.get(reel_id)
+        if not reel:
+            continue
+        phase_name = str(getattr(row, "phase", "") or "").strip().lower()
+        if phase_name != "inactive":
+            continue
+        total_feet = _reel_length_feet(reel)
+        start_value = _to_float(reel.reel_start)
+        feet_per_unit = _to_float(reel.format_length)
+        phase_start = _to_float(getattr(row, "start_format", None))
+        phase_end = _to_float(getattr(row, "end_format", None))
+        if start_value is None or feet_per_unit is None or phase_start is None or phase_end is None:
+            continue
+        start_feet = ((phase_start - start_value) * feet_per_unit) / MM_PER_FOOT
+        end_feet = ((phase_end - start_value) * feet_per_unit) / MM_PER_FOOT
+        start_feet = max(0.0, min(total_feet, start_feet))
+        end_feet = max(0.0, min(total_feet, end_feet))
+        if end_feet <= start_feet:
+            continue
+        inactive_segments_by_reel[reel_id].append(
+            {
+                "phase": phase_name,
+                "startFeet": round(start_feet, 3),
+                "endFeet": round(end_feet, 3),
+                "startTime": _iso(getattr(row, "start_time", None)),
+                "endTime": _iso(getattr(row, "end_time", None)),
+            }
+        )
+
+    defects_by_reel: Dict[int, List[Dict[str, object]]] = defaultdict(list)
+    for defect in defects:
+        reel = reels_by_id.get(defect.reel_id)
+        if not reel:
+            continue
+        total_feet = _reel_length_feet(reel)
+        start_value = _to_float(reel.reel_start)
+        format_position = _to_float(defect.format_position)
+        local_feet = None
+        if start_value is not None and format_position is not None:
+            feet_per_unit = _to_float(reel.format_length)
+            if feet_per_unit is not None:
+                local_feet = ((format_position - start_value) * feet_per_unit) / MM_PER_FOOT
+                if total_feet:
+                    local_feet = max(0.0, min(total_feet, local_feet))
+        matched_sample = _nearest_monitoring_sample(
+            monitoring_by_reel.get(defect.reel_id, []),
+            monitoring_times_by_reel.get(defect.reel_id, []),
+            defect.defect_time,
+        )
+        defects_by_reel[defect.reel_id].append(
+            {
+                "defectId": defect.defect_id,
+                "time": _iso(defect.defect_time),
+                "timeRaw": defect.defect_time,
+                "className": defect.class_name,
+                "magnitudeValue": _to_float(defect.magnitude_value),
+                "severityValue": _to_float(defect.severity_value),
+                "imageSrc": (defect.image_src or "").replace("\\", "/"),
+                "formatPosition": format_position,
+                "feetFromReelStart": round(local_feet, 3) if local_feet is not None else None,
+                "reelFeetTotal": round(total_feet, 3) if total_feet is not None else None,
+                "webspeed": matched_sample.get("webspeed") if matched_sample else None,
+                "jobName": reel.job_name,
+                "orderNumber": reel.order_number,
+                "reelCode": reel.reel_code,
+                "reelId": reel.reel_id,
+                "machineId": reel.machine_id,
+                "machineName": reel.machine.name if reel.machine else f"Press {reel.machine_id}",
+            }
+        )
+
+    machines_payload: List[Dict[str, object]] = []
+    reels_by_machine: Dict[int, List[Reel]] = defaultdict(list)
+    for reel in reels:
+        reels_by_machine[reel.machine_id].append(reel)
+
+    for machine_id, machine_reels in reels_by_machine.items():
+        if not machine_reels:
+            continue
+        machine_reels.sort(key=lambda reel: (reel.time_start or datetime.min, reel.reel_id or 0))
+        points: List[Dict[str, object]] = []
+        speed_points: List[Dict[str, object]] = []
+        reference_image_events: List[Dict[str, object]] = []
+        mask_events: List[Dict[str, object]] = []
+        reel_rows: List[Dict[str, object]] = []
+        total_defects = 0
+        total_speed_points = 0
+        previous_reference_filename: Optional[str] = None
+        previous_reference_display_name: Optional[str] = None
+        previous_reference_image_src: Optional[str] = None
+        previous_mask_coords: Optional[str] = None
+        previous_mask_detail: Optional[Dict[str, object]] = None
+        for reel in machine_reels:
+            total_feet = _reel_length_feet(reel)
+            rlm_reel = rlm_reel_by_dashboard_reel.get(reel.reel_id) if reel.reel_id is not None else None
+            reel_rows.append(
+                {
+                    "reelId": reel.reel_id,
+                    "reelCode": reel.reel_code,
+                    "jobName": reel.job_name,
+                    "orderNumber": reel.order_number,
+                    "timeStart": _iso(reel.time_start),
+                    "timeEnd": _iso(reel.time_end),
+                    "reelFeetTotal": round(total_feet, 3),
+                    "bstOffSegments": inactive_segments_by_reel.get(reel.reel_id, []),
+                }
+            )
+            ordered_reference_images = sorted(
+                [
+                    image
+                    for image in (reel.reference_images or [])
+                    if (image.filename and image.filename.strip()) or (image.image_src and image.image_src.strip())
+                ],
+                key=lambda image: (
+                    _to_float(getattr(image, "format", None)) if _to_float(getattr(image, "format", None)) is not None else float("inf"),
+                    int(image.ref_image_id or 0),
+                ),
+            )
+            for image in ordered_reference_images:
+                current_filename = str(image.filename or image.image_src or "").strip()
+                if not current_filename:
+                    continue
+                current_filename_key = current_filename.lower()
+                current_image_src = (image.image_src or "").replace("\\", "/")
+                image_format = _to_float(getattr(image, "format", None))
+                image_local_feet = None
+                reel_start_value = _to_float(reel.reel_start)
+                reel_format_length_bst = _to_float(reel.format_length)
+                if reel_start_value is not None and reel_format_length_bst is not None and image_format is not None:
+                    image_local_feet = ((image_format - reel_start_value) * reel_format_length_bst) / MM_PER_FOOT
+                    if total_feet:
+                        image_local_feet = max(0.0, min(total_feet, image_local_feet))
+                if previous_reference_filename is not None and current_filename_key != previous_reference_filename:
+                    reference_image_events.append(
+                        {
+                            "reelId": reel.reel_id,
+                            "reelCode": reel.reel_code,
+                            "jobName": reel.job_name,
+                            "orderNumber": reel.order_number,
+                            "time": _iso(reel.time_start or reel.time_end),
+                            "formatPosition": image_format,
+                            "feetFromReelStart": round(image_local_feet, 3) if image_local_feet is not None else None,
+                            "filename": current_filename,
+                            "previousFilename": previous_reference_display_name,
+                            "imageSrc": current_image_src,
+                            "previousImageSrc": previous_reference_image_src,
+                        }
+                    )
+                previous_reference_filename = current_filename_key
+                previous_reference_display_name = current_filename
+                previous_reference_image_src = current_image_src
+            ordered_masks = sorted(
+                list(reel.masks or []),
+                key=lambda mask: (
+                    _to_float(getattr(mask, "format_value", None)) if _to_float(getattr(mask, "format_value", None)) is not None else float("inf"),
+                    mask.timestamp or datetime.min,
+                    int(mask.mask_id or 0),
+                ),
+            )
+            for mask in ordered_masks:
+                current_coords = (mask.coords or "").strip()
+                mask_format = _to_float(getattr(mask, "format_value", None))
+                mask_local_feet = None
+                reel_start_value_bst = _to_float(reel.reel_start)
+                reel_format_length_bst = _to_float(reel.format_length)
+                serialized_mask = _serialize_mask_detail(mask)
+                if reel_start_value_bst is not None and reel_format_length_bst is not None and mask_format is not None:
+                    mask_local_feet = ((mask_format - reel_start_value_bst) * reel_format_length_bst) / MM_PER_FOOT
+                    if total_feet:
+                        mask_local_feet = max(0.0, min(total_feet, mask_local_feet))
+                if previous_mask_coords is not None and current_coords != previous_mask_coords:
+                    mask_events.append(
+                        {
+                            "reelId": reel.reel_id,
+                            "reelCode": reel.reel_code,
+                            "jobName": reel.job_name,
+                            "orderNumber": reel.order_number,
+                            "time": _iso(mask.timestamp or reel.time_start or reel.time_end),
+                            "formatPosition": mask_format,
+                            "feetFromReelStart": round(mask_local_feet, 3) if mask_local_feet is not None else None,
+                            "coords": current_coords,
+                            "previousCoords": previous_mask_coords,
+                            "formatWidth": _to_float(reel.format_width),
+                            "formatLength": _to_float(reel.format_length),
+                            "beforeMasks": _active_mask_details([previous_mask_detail] if previous_mask_detail else []),
+                            "afterMasks": _active_mask_details([serialized_mask]),
+                        }
+                    )
+                previous_mask_coords = current_coords
+                previous_mask_detail = serialized_mask
+            reel_start_value = _to_float(rlm_reel.reel_start) if rlm_reel else None
+            reel_format_length = _to_float(rlm_reel.format_length) if rlm_reel else None
+            reel_total_feet = compute_reel_feet_from_range(
+                _to_float(rlm_reel.reel_start) if rlm_reel else None,
+                _to_float(rlm_reel.reel_end) if rlm_reel else None,
+                reel_format_length,
+            ) if rlm_reel else None
+            for sample in monitoring_by_reel.get(reel.reel_id, []):
+                sample_local_feet = None
+                format_value = _to_float(sample.get("formatValue"))
+                if reel_start_value is not None and reel_format_length is not None and format_value is not None:
+                    sample_local_feet = ((format_value - reel_start_value) * reel_format_length) / MM_PER_FOOT
+                    if reel_total_feet:
+                        sample_local_feet = max(0.0, min(reel_total_feet, sample_local_feet))
+                speed_points.append(
+                    {
+                        "time": _iso(sample.get("timestamp")),
+                        "webspeed": _to_float(sample.get("webspeed")),
+                        "formatPosition": format_value,
+                        "feetFromReelStart": round(sample_local_feet, 3) if sample_local_feet is not None else None,
+                        "reelFeetTotal": round(reel_total_feet, 3) if reel_total_feet is not None else None,
+                        "jobName": reel.job_name,
+                        "orderNumber": reel.order_number,
+                        "reelCode": reel.reel_code,
+                        "reelId": reel.reel_id,
+                        "machineId": reel.machine_id,
+                        "machineName": reel.machine.name if reel.machine else f"Press {reel.machine_id}",
+                    }
+                )
+                total_speed_points += 1
+            previous_speed = None
+            for point in defects_by_reel.get(reel.reel_id, []):
+                speed = _to_float(point.get("webspeed"))
+                speed_delta = None
+                if speed is not None and previous_speed is not None:
+                    speed_delta = round(speed - previous_speed, 3)
+                elif speed is not None:
+                    speed_delta = 0.0
+                previous_speed = speed if speed is not None else previous_speed
+                enriched = {
+                    **point,
+                    "speedDelta": speed_delta,
+                }
+                points.append(enriched)
+                total_defects += 1
+        machine_name = machine_reels[0].machine.name if machine_reels[0].machine else f"Press {machine_id}"
+        job_names = {
+            _defect_trends_format_job_label(reel.job_name, reel.order_number)
+            for reel in machine_reels
+            if str(reel.job_name or "").strip()
+        }
+        machines_payload.append(
+            {
+                "machineId": machine_id,
+                "machineName": machine_name,
+                "reels": reel_rows,
+                "points": points,
+                "speedPoints": speed_points,
+                "referenceImageEvents": reference_image_events,
+                "maskEvents": mask_events,
+                "stats": {
+                    "reelCount": len(machine_reels),
+                    "defectCount": total_defects,
+                    "speedPointCount": total_speed_points,
+                    "jobCount": len(job_names),
+                },
+            }
+        )
+
+    machines_payload.sort(key=lambda item: (_machine_sort_key(item.get("machineName")), (item.get("machineName") or "").lower()))
+    return {"machines": machines_payload}
+
+
 def _histogram_from_subquery(session: Session, subquery, column, bins: List[Tuple[float, float, str]]):
     if not bins:
         return []
@@ -7992,6 +8646,38 @@ def _histogram_from_subquery(session: Session, subquery, column, bins: List[Tupl
             }
         )
     return histogram
+
+
+@dashboard_bp.route("/api/defect-trends/options")
+def api_defect_trend_options():
+    with SessionLocal() as session:
+        try:
+            start, end = _defect_trends_parse_window()
+            min_feet = _defect_trends_parse_min_feet(request.args.get("min_feet"))
+            return jsonify(_build_defect_trend_options(session, start, end, min_feet))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            current_app.logger.exception("Failed to build defect trend options")
+            return jsonify({"error": f"Unable to load defect trend options: {exc}"}), 500
+
+
+@dashboard_bp.route("/api/defect-trends/data", methods=["POST"])
+def api_defect_trend_data():
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Invalid JSON payload."}), 400
+    with SessionLocal() as session:
+        try:
+            start, end = _defect_trends_parse_window(payload)
+            min_feet = _defect_trends_parse_min_feet(payload.get("min_feet"))
+            selections = _normalize_defect_trend_selections(payload)
+            return jsonify(_build_defect_trend_payload(session, start, end, min_feet, selections))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            current_app.logger.exception("Failed to build defect trend data")
+            return jsonify({"error": f"Unable to load defect trend data: {exc}"}), 500
 
 
 @dashboard_bp.route("/api/defects")

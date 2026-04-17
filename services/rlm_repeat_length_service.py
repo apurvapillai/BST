@@ -26,12 +26,18 @@ class ToleranceSegment:
 
 
 class RLMRepeatLengthService:
-    def fetch_reel_batch(self, session, reel_ids: Iterable[int]) -> Dict[int, Dict[str, Any]]:
+    def fetch_reel_batch(
+        self,
+        session,
+        reel_ids: Iterable[int],
+        start: Optional[datetime] = None,
+        end: Optional[datetime] = None,
+    ) -> Dict[int, Dict[str, Any]]:
         clean_ids = [int(reel_id) for reel_id in reel_ids if reel_id is not None]
         if not clean_ids:
             return {}
 
-        monitoring_rows = (
+        monitoring_query = (
             session.query(
                 RLMMonitoring.monitoring_id,
                 RLMMonitoring.reel_db_id,
@@ -41,7 +47,18 @@ class RLMRepeatLengthService:
                 RLMMonitoring.webspeed,
             )
             .filter(RLMMonitoring.reel_db_id.in_(clean_ids))
-            .order_by(RLMMonitoring.reel_db_id.asc(), RLMMonitoring.monitoring_id.asc())
+        )
+        if start is not None:
+            monitoring_query = monitoring_query.filter(RLMMonitoring.monitoring_ts >= start)
+        if end is not None:
+            monitoring_query = monitoring_query.filter(RLMMonitoring.monitoring_ts <= end)
+        monitoring_rows = (
+            monitoring_query
+            .order_by(
+                RLMMonitoring.reel_db_id.asc(),
+                RLMMonitoring.monitoring_ts.asc(),
+                RLMMonitoring.monitoring_id.asc(),
+            )
             .all()
         )
         tolerance_rows = (
@@ -212,7 +229,11 @@ class RLMRepeatLengthService:
 
     def build_reel_summary(self, reel: Any, repeat_length: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         repeat = dict(repeat_length or {})
-        feet_total = compute_reel_feet_from_range(getattr(reel, "reel_start", None), getattr(reel, "reel_end", None))
+        feet_total = compute_reel_feet_from_range(
+            getattr(reel, "reel_start", None),
+            getattr(reel, "reel_end", None),
+            getattr(reel, "format_length", None),
+        )
         matched_monitoring_points = int(repeat.get("matchedMonitoringPoints") or 0)
         unmatched_monitoring_points = int(repeat.get("unmatchedMonitoringPoints") or 0)
         good_monitoring_points = int(repeat.get("goodMonitoringPoints") or 0)
