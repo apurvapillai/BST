@@ -1,4 +1,5 @@
 (function () {
+  const PLOTLY_TRACE_TYPE = "scatter";
   const REPEAT_DELTA_COLOR = "#2563eb";
   const REEL_EDGE_FILL_COLOR = "rgba(148, 163, 184, 0.8)";
   const RLM_OFF_BAND_FILL = "rgba(220, 38, 38, 0.16)";
@@ -40,6 +41,7 @@
     optionsError: "",
     dataError: "",
     rawDataCoverage: new Map(),
+    machineOptionIndex: new Map(),
   };
 
   const elements = {};
@@ -282,6 +284,7 @@
       const normalized = normalizeOptionsResponse(payload);
       console.info("[RLM Delta Trends] options response count:", normalized.machines.length);
       state.machineOptions = normalized.machines;
+      state.machineOptionIndex = buildMachineOptionIndex(normalized.machines);
       state.optionsStatus = "ready";
       reconcileSelections();
       renderMachineSelector();
@@ -301,6 +304,7 @@
       if (error && error.name === "AbortError") return;
       if (requestToken !== optionsRequestToken) return;
       state.machineOptions = [];
+      state.machineOptionIndex = new Map();
       state.selections = new Map();
       state.rawDataCoverage = new Map();
       state.optionsStatus = "error";
@@ -1010,6 +1014,7 @@
               data-axis-span="${escapeAttr(machineSpan)}"
               data-baseline-span="${escapeAttr(baselineSpan)}"
             >
+              <div class="delta-machine-panel__chart-axis-spacer" aria-hidden="true"></div>
               <div
                 class="delta-machine-panel__chart-wrap"
                 style="width:${escapeAttr(scrollWidthPercent)}%"
@@ -1073,6 +1078,9 @@
         }),
         { displayModeBar: true, responsive: true }
       );
+      window.requestAnimationFrame(() => {
+        updateStickyYAxis(machine.machineId);
+      });
       bindDetailLegendSync(target);
     });
   }
@@ -1119,12 +1127,20 @@
     const timelineScroll = document.querySelector(`[data-machine-scroll="timeline-${machineId}"]`);
     const chartScroll = document.querySelector(`[data-machine-scroll="chart-${machineId}"]`);
     if (!timelineScroll || !chartScroll) return;
+    if (chartScroll.dataset.scrollBound === "true") {
+      updateStickyYAxis(machineId);
+      return;
+    }
+    chartScroll.dataset.scrollBound = "true";
     let syncing = false;
     const mirrorScroll = (source, target) => {
       source.addEventListener("scroll", () => {
         if (syncing) return;
         syncing = true;
         target.scrollLeft = source.scrollLeft;
+        if (source === chartScroll || target === chartScroll) {
+          updateStickyYAxis(machineId);
+        }
         if (source === chartScroll && !machineScrollSyncing) {
           syncAllMachineCharts(chartScroll);
         }
@@ -1135,6 +1151,7 @@
     };
     mirrorScroll(timelineScroll, chartScroll);
     mirrorScroll(chartScroll, timelineScroll);
+    updateStickyYAxis(machineId);
   }
 
   function syncAllMachineCharts(sourceScroll) {
@@ -1152,10 +1169,26 @@
       const clampedAxisOffset = Math.max(0, Math.min(axisOffset, maxAxisOffset));
       const nextScrollLeft = (clampedAxisOffset / targetBaselineSpan) * targetClientWidth;
       targetScroll.scrollLeft = nextScrollLeft;
+      const targetMachineId = String(targetScroll.dataset.machineId || "");
+      if (targetMachineId) updateStickyYAxis(targetMachineId);
     });
     window.requestAnimationFrame(() => {
       machineScrollSyncing = false;
     });
+  }
+
+  function updateStickyYAxis(machineId) {
+    const chartScroll = document.querySelector(`[data-machine-scroll="chart-${machineId}"]`);
+    if (!chartScroll) return;
+    const chart = chartScroll.querySelector(".delta-machine-panel__chart.js-plotly-plot");
+    if (!chart) return;
+    const scrollLeft = chartScroll.scrollLeft || 0;
+    chart
+      .querySelectorAll(".yaxislayer-above, .yaxislayer-below, .infolayer .g-ytitle")
+      .forEach((node) => {
+        node.style.transform = `translateX(${scrollLeft}px)`;
+        node.style.transformOrigin = "left top";
+      });
   }
 
   function renderMachineTimeline(machine, axisModel = null) {
@@ -1362,7 +1395,7 @@
     const gapThresholdMs = computeGapThresholdMs(indexedPoints);
     const segmentedLine = buildSegmentedLineSeries(indexedPoints, machine, gapThresholdMs, speedDeltaLookup);
     const lineTrace = {
-      type: "scatter",
+      type: PLOTLY_TRACE_TYPE,
       mode: "lines",
       name: options.detailLegend ? "Repeat Delta" : machine.machineName,
       x: segmentedLine.x,
@@ -1381,7 +1414,7 @@
     const oobTrace =
       state.showOobMarkers && oobPoints.length > 0
         ? {
-            type: "scatter",
+            type: PLOTLY_TRACE_TYPE,
             mode: "markers",
             x: oobEntries.map((entry) => entry.x),
             y: oobPoints.map((point) => point.delta),
@@ -1428,7 +1461,7 @@
       y.push(entry.speedDelta);
     });
     return {
-      type: "scatter",
+      type: PLOTLY_TRACE_TYPE,
       mode: "lines",
       x,
       y,
@@ -1478,7 +1511,7 @@
     }
     if (!x.length) return null;
     return {
-      type: "scatter",
+      type: PLOTLY_TRACE_TYPE,
       mode: "lines",
       x,
       y,
@@ -1497,9 +1530,13 @@
   }
 
   function buildAxisModel(machine) {
+    const cacheKey = state.compressGaps ? "__axisModelCompressedCache" : "__axisModelTimeCache";
+    if (machine[cacheKey]) {
+      return machine[cacheKey];
+    }
     const points = getSortedMachinePoints(machine);
     if (!state.compressGaps) {
-      return {
+      const axisModel = {
         entries: points.map((point, index) => ({
           point,
           index,
@@ -1507,10 +1544,12 @@
         })),
         rlmOffSegments: [],
       };
+      machine[cacheKey] = axisModel;
+      return axisModel;
     }
     const reels = getSortedMachineReels(machine, points);
     if (!reels.length) {
-      return {
+      const axisModel = {
         entries: points.map((point, index) => ({
           point,
           index,
@@ -1521,6 +1560,8 @@
         })),
         rlmOffSegments: [],
       };
+      machine[cacheKey] = axisModel;
+      return axisModel;
     }
     const pointsByReel = new Map();
     points.forEach((point) => {
@@ -1609,7 +1650,9 @@
     if (pendingOffSegment) {
       rlmOffSegments.push(pendingOffSegment);
     }
-    return { entries, rlmOffSegments };
+    const axisModel = { entries, rlmOffSegments };
+    machine[cacheKey] = axisModel;
+    return axisModel;
   }
 
   function getMachineScrollSpan(machine, axisModel = null) {
@@ -1621,14 +1664,22 @@
   }
 
   function getSortedMachinePoints(machine) {
-    return (machine.points || []).slice().sort((left, right) => {
+    if (Array.isArray(machine.__sortedPointsCache)) {
+      return machine.__sortedPointsCache;
+    }
+    const sortedPoints = (machine.points || []).slice().sort((left, right) => {
       const timeDiff = new Date(left.timestamp) - new Date(right.timestamp);
       if (timeDiff !== 0) return timeDiff;
       return Number(left.id || 0) - Number(right.id || 0);
     });
+    machine.__sortedPointsCache = sortedPoints;
+    return sortedPoints;
   }
 
   function getSortedMachineReels(machine, points = []) {
+    if (machine.__sortedReelsPointsRef === points && Array.isArray(machine.__sortedReelsCache)) {
+      return machine.__sortedReelsCache;
+    }
     const reelMap = new Map();
     (machine.reels || []).forEach((reel, index) => {
       const key = buildReelLookupKey(reel);
@@ -1653,7 +1704,7 @@
         __sortIndex: index + 100000,
       });
     });
-    return Array.from(reelMap.values()).sort((left, right) => {
+    const sortedReels = Array.from(reelMap.values()).sort((left, right) => {
       const timeDiff = safeTimestamp(left.productionStart) - safeTimestamp(right.productionStart);
       if (timeDiff !== 0) return timeDiff;
       const reelIdDiff = compareMaybeNumeric(left.reelId, right.reelId);
@@ -1662,6 +1713,9 @@
       if (dbDiff !== 0) return dbDiff;
       return Number(left.__sortIndex || 0) - Number(right.__sortIndex || 0);
     });
+    machine.__sortedReelsPointsRef = points;
+    machine.__sortedReelsCache = sortedReels;
+    return sortedReels;
   }
 
   function buildReelLookupKey(value) {
@@ -1866,7 +1920,7 @@
       if (!Number.isFinite(previousTime) || !Number.isFinite(currentTime)) continue;
       if (currentTime - previousTime <= gapThresholdMs) continue;
       traces.push({
-        type: "scatter",
+        type: PLOTLY_TRACE_TYPE,
         mode: "lines",
         x: [previous.x, current.x],
         y: [previous.point.delta, current.point.delta],
@@ -2140,6 +2194,19 @@
     };
   }
 
+  function buildMachineOptionIndex(machines) {
+    const index = new Map();
+    (machines || []).forEach((machine) => {
+      const jobIndex = new Map();
+      (machine.jobOptions || []).forEach((jobOption) => {
+        if (!jobOption?.value) return;
+        jobIndex.set(jobOption.value, jobOption.label || jobOption.value);
+      });
+      index.set(String(machine.machineId), jobIndex);
+    });
+    return index;
+  }
+
   function buildJobOptionLabel(job) {
     const explicit = String(job?.label || "").trim();
     if (explicit) return explicit;
@@ -2187,6 +2254,7 @@
     const selectionByMachineId = new Map(
       (selectionsPayload || []).map((selection) => [String(selection.machineId), selection])
     );
+    const hasDisplayOverrides = hasActivePointDisplayOverrides();
     return (machines || [])
       .map((machine) => {
         const selection = selectionByMachineId.get(String(machine.machineId));
@@ -2201,17 +2269,17 @@
           ? reels
           : reels.filter((reel) => selectedJobKeys.includes(buildJobKey(reel.jobName, reel.orderNumber)));
         if (!filteredPoints.length) return null;
-        const derivedPoints = filteredPoints.map((point) => applyPointDisplayOverrides(point));
+        const derivedPoints = hasDisplayOverrides
+          ? filteredPoints.map((point) => applyPointDisplayOverrides(point))
+          : filteredPoints;
         const selectedJobs = !selectedJobKeys.length
           ? machine.selectedJobs || []
           : selectedJobKeys
-              .map((jobKey) => {
-                const option = (state.machineOptions || [])
-                  .find((optionMachine) => String(optionMachine.machineId) === String(machine.machineId))
-                  ?.jobOptions?.find((jobOption) => jobOption.value === jobKey);
-                return option ? option.label : null;
-              })
+              .map((jobKey) => state.machineOptionIndex.get(String(machine.machineId))?.get(jobKey) || null)
               .filter(Boolean);
+        if (!selectedJobKeys.length && !hasDisplayOverrides) {
+          return machine;
+        }
         return {
           ...machine,
           selectedJobs,
@@ -2222,6 +2290,10 @@
         };
       })
       .filter(Boolean);
+  }
+
+  function hasActivePointDisplayOverrides() {
+    return Number.isFinite(state.errShrink) || Number.isFinite(state.errExpand);
   }
 
   function applyPointDisplayOverrides(point) {
@@ -2359,7 +2431,26 @@
     if (resolvedRange) {
       yaxis.range = resolvedRange;
     }
+    const integerTicks = buildIntegerYAxisTicks(resolvedRange);
+    if (integerTicks) {
+      yaxis.tickmode = "array";
+      yaxis.tickvals = integerTicks;
+      yaxis.ticktext = integerTicks.map((value) => String(value));
+    }
     return yaxis;
+  }
+
+  function buildIntegerYAxisTicks(range) {
+    if (!Array.isArray(range) || range.length !== 2) return null;
+    const minValue = Number(range[0]);
+    const maxValue = Number(range[1]);
+    if (!Number.isFinite(minValue) || !Number.isFinite(maxValue)) return null;
+    const start = Math.ceil(Math.min(minValue, maxValue));
+    const end = Math.floor(Math.max(minValue, maxValue));
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+    const tickCount = end - start + 1;
+    if (tickCount < 2 || tickCount > 21) return null;
+    return Array.from({ length: tickCount }, (_, index) => start + index);
   }
 
   function resolveYAxisRange(machines) {
@@ -2385,6 +2476,9 @@
   }
 
   function buildMachineStats(machine) {
+    if (machine.__statsCache) {
+      return machine.__statsCache;
+    }
     const points = Array.isArray(machine.points) ? machine.points : [];
     const deltas = points
       .map((point) => Number(point.delta))
@@ -2398,7 +2492,7 @@
     }, null);
     const avgDelta = computeMean(deltas);
     const deltaRange = computeMinMax(deltas);
-    return {
+    const stats = {
       machineName: machine.machineName || "Unknown Press",
       reelCount: Number(machine.reelCount) || 0,
       pointCount: points.length,
@@ -2411,6 +2505,8 @@
       badPct: points.length ? (oobCount / points.length) * 100 : null,
       latestTimestamp,
     };
+    machine.__statsCache = stats;
+    return stats;
   }
 
   function countMachineOobPoints(machine) {

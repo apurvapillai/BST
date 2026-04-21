@@ -6,7 +6,7 @@
   <title>RLM Delta Trends</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/rlm_delta_trends.css') }}">
-  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <script defer src="https://cdn.plot.ly/plotly-latest.min.js"></script>
 </head>
 <body class="rlm-delta-trends-page">
   <div class="app-layout">
@@ -205,7 +205,7 @@
     </div>
   </div>
 
-  <script src="{{ url_for('static', filename='js/nav.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/rlm_delta_trends.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='js/nav.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='js/rlm_delta_trends.js') }}"></script>
 </body>
 </html>

@@ -877,13 +877,25 @@ body.dark-mode .rlm-delta-trends-page {
 }
 
 .delta-machine-panel__chart-scroll {
+  position: relative;
   margin-top: 0.9rem;
   overflow-x: auto;
   overflow-y: hidden;
   padding-bottom: 0.25rem;
 }
 
+.delta-machine-panel__chart-axis-spacer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0.25rem;
+  width: 76px;
+  pointer-events: none;
+  background: linear-gradient(90deg, var(--surface) 0%, var(--surface) 78%, rgba(255, 255, 255, 0) 100%);
+}
+
 .delta-machine-panel__chart-wrap {
+  position: relative;
   min-width: 100%;
 }
 

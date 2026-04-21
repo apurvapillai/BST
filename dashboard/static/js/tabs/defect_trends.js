@@ -2,6 +2,10 @@ const DefectTrendsTab = (() => {
   const MAGNITUDE_COLOR = "#2563eb";
   const SPEED_COLOR = "rgba(34, 197, 94, 0.5)";
   const PRESS_COLORS = ["#2563eb", "#f97316", "#10b981", "#e11d48", "#8b5cf6", "#14b8a6", "#f59e0b", "#0ea5e9"];
+  const BST_OFF_ANNOTATION_Y = 0.94;
+  const REEL_CHANGE_ANNOTATION_Y = 0.78;
+  const REFERENCE_CHANGE_ANNOTATION_Y = 0.62;
+  const MASK_CHANGE_ANNOTATION_Y = 0.28;
 
   const state = {
     initialized: false,
@@ -888,6 +892,7 @@ const DefectTrendsTab = (() => {
     const scaledSolidSpeedDelta = scaleFixedSpeedDeltaToTopBand(speedSeries.solidY, yRange, 0.3, 5);
     const scaledDashedSpeedDelta = scaleFixedSpeedDeltaToTopBand(speedSeries.dashedY, yRange, 0.3, 5);
     const bstOffLayout = buildBstOffLayout(machine);
+    const reelMarkerLayout = buildReelMarkerLayout(machine);
     const referenceImageLayout = buildReferenceImageChangeLayout(machine);
     const maskLayout = buildMaskChangeLayout(machine);
     const traces = [
@@ -939,12 +944,13 @@ const DefectTrendsTab = (() => {
       showLegend: true,
       shapes: [
         ...bstOffLayout.shapes,
-        ...buildReelMarkerShapes(machine),
+        ...reelMarkerLayout.shapes,
         ...(state.showReferenceFlags ? referenceImageLayout.shapes : []),
         ...(state.showMaskFlags ? maskLayout.shapes : []),
       ],
       annotations: [
         ...bstOffLayout.annotations,
+        ...reelMarkerLayout.annotations,
         ...(state.showReferenceFlags ? referenceImageLayout.annotations : []),
         ...(state.showMaskFlags ? maskLayout.annotations : []),
       ],
@@ -1244,7 +1250,8 @@ const DefectTrendsTab = (() => {
           const bt = b && b.time ? new Date(b.time).getTime() : 0;
           return at - bt || Number(a.defectId || 0) - Number(b.defectId || 0);
         });
-      const visibleReelDefectCount = reelPoints.reduce((sum, point) => sum + (pointIsVisible(point) ? 1 : 0), 0);
+      const cumulativeVisibleByLocalBin = new Map();
+      let visibleReelDefectCount = 0;
       const reelSpanFeet = Number.isFinite(reelFeetValue(reel, reelPoints[reelPoints.length - 1]))
         ? reelFeetValue(reel, reelPoints[reelPoints.length - 1])
         : Math.max(Number(reel && reel.reelFeetTotal) || 0, 0);
@@ -1254,15 +1261,20 @@ const DefectTrendsTab = (() => {
         reelCode: reel && reel.reelCode ? reel.reelCode : "Unknown Reel",
         jobLabel: formatJobLabel(reel && reel.jobName, reel && reel.orderNumber),
         visibleReelDefectCount,
+        cumulativeVisibleByLocalBin,
       });
       reelPoints.forEach((point) => {
         const localFeet = Number(point && point.feetFromReelStart);
         const xValue = cumulativeFeet + (Number.isFinite(localFeet) ? localFeet : 0);
         if (pointIsVisible(point)) {
+          visibleReelDefectCount += 1;
+          const localBinStart = Math.floor(Math.max(Number.isFinite(localFeet) ? localFeet : 0, 0) / binSize) * binSize;
+          cumulativeVisibleByLocalBin.set(localBinStart, visibleReelDefectCount);
           const binStart = Math.floor(Math.max(xValue, 0) / binSize) * binSize;
           binCounts.set(binStart, (binCounts.get(binStart) || 0) + 1);
         }
       });
+      reelSpans[reelSpans.length - 1].visibleReelDefectCount = visibleReelDefectCount;
       cumulativeFeet += Number.isFinite(reelFeetValue(reel, reelPoints[reelPoints.length - 1]))
         ? reelFeetValue(reel, reelPoints[reelPoints.length - 1])
         : 0;
@@ -1385,6 +1397,7 @@ const DefectTrendsTab = (() => {
 
   function buildBinHoverText(machine, binStart, binSize, defectCount, maxFeet, reelContext, avgSpeedDelta) {
     const rangeEnd = Math.min(binStart + binSize, Math.max(maxFeet, binStart + binSize));
+    const reelCumulativeDefects = resolveReelCumulativeDefects(reelContext, binStart, binSize);
     const parts = [
       `<b>${escapeHtml(machine && machine.machineName || "")}</b>`,
       `Job: ${escapeHtml(reelContext && reelContext.jobLabel ? reelContext.jobLabel : "--")}`,
@@ -1392,9 +1405,23 @@ const DefectTrendsTab = (() => {
       `Speed delta: ${Number.isFinite(Number(avgSpeedDelta)) ? escapeHtml(formatSignedNumber(avgSpeedDelta, 3)) : "--"}`,
       `Feet bin: ${escapeHtml(formatNumber(binStart, 0))}–${escapeHtml(formatNumber(rangeEnd, 0))} ft`,
       `Defect count: ${escapeHtml(formatNumber(defectCount, 0))}`,
-      `Reel cumulative defects: ${escapeHtml(formatNumber(reelContext && reelContext.visibleReelDefectCount, 0))}`,
+      `Reel cumulative defects: ${escapeHtml(formatNumber(reelCumulativeDefects, 0))}`,
     ];
     return parts.join("<br>");
+  }
+
+  function resolveReelCumulativeDefects(reelContext, globalBinStart, binSize) {
+    if (!reelContext) return 0;
+    const localBinStart = Math.floor(Math.max((Number(globalBinStart) || 0) - (Number(reelContext.xStart) || 0), 0) / binSize) * binSize;
+    const cumulativeMap = reelContext.cumulativeVisibleByLocalBin;
+    if (!(cumulativeMap instanceof Map) || !cumulativeMap.size) return 0;
+    let cumulativeCount = 0;
+    cumulativeMap.forEach((count, binStart) => {
+      if (Number(binStart) <= localBinStart) {
+        cumulativeCount = Math.max(cumulativeCount, Number(count) || 0);
+      }
+    });
+    return cumulativeCount;
   }
 
   function reelFeetValue(reel, point) {
@@ -1648,7 +1675,7 @@ const DefectTrendsTab = (() => {
           xref: "x",
           yref: "paper",
           x: (xStart + xEnd) / 2,
-          y: 0.98,
+          y: BST_OFF_ANNOTATION_Y,
           text: `BST Off<br>${escapeHtml(reel && reel.reelCode ? reel.reelCode : "Unknown Reel")}`,
           showarrow: false,
           font: { size: 11, color: "rgba(153, 27, 27, 1)" },
@@ -1664,6 +1691,10 @@ const DefectTrendsTab = (() => {
   }
 
   function buildReelMarkerShapes(machine) {
+    return buildReelMarkerLayout(machine).shapes;
+  }
+
+  function buildReelMarkerLayout(machine) {
     const reels = Array.isArray(machine && machine.reels) ? [...machine.reels] : [];
     reels.sort((a, b) => {
       const at = a && a.timeStart ? new Date(a.timeStart).getTime() : 0;
@@ -1672,6 +1703,7 @@ const DefectTrendsTab = (() => {
     });
     let cumulativeFeet = 0;
     const shapes = [];
+    const annotations = [];
     reels.forEach((reel, index) => {
       if (index > 0) {
         shapes.push({
@@ -1688,10 +1720,28 @@ const DefectTrendsTab = (() => {
             dash: "2px,10px",
           },
         });
+        annotations.push({
+          xref: "x",
+          yref: "paper",
+          x: cumulativeFeet,
+          y: REEL_CHANGE_ANNOTATION_Y,
+          text: `New<br>Reel`,
+          showarrow: false,
+          font: { size: 10, color: "rgba(30, 64, 175, 1)" },
+          bgcolor: "rgba(255,255,255,0.9)",
+          bordercolor: "rgba(59, 130, 246, 0.32)",
+          borderwidth: 1,
+          borderpad: 2,
+          hovertext: [
+            `New reel: ${escapeHtml(reel && reel.reelCode ? reel.reelCode : "Unknown Reel")}`,
+            `Job: ${escapeHtml(formatJobLabel(reel && reel.jobName, reel && reel.orderNumber))}`,
+            `Start: ${escapeHtml(formatDateTimeLabel(reel && reel.timeStart))}`,
+          ].join("<br>"),
+        });
       }
       cumulativeFeet += Number(reel && reel.reelFeetTotal) || 0;
     });
-    return shapes;
+    return { shapes, annotations };
   }
 
   function buildReferenceImageChangeLayout(machine) {
@@ -1741,8 +1791,8 @@ const DefectTrendsTab = (() => {
         xref: "x",
         yref: "paper",
         x: xValue,
-        y: 1,
-        yanchor: "top",
+        y: REFERENCE_CHANGE_ANNOTATION_Y,
+        yanchor: "middle",
         text: "New<br>Ref",
         captureevents: true,
         showarrow: false,
@@ -1837,8 +1887,8 @@ const DefectTrendsTab = (() => {
         xref: "x",
         yref: "paper",
         x: xValue,
-        y: 1,
-        yanchor: "top",
+        y: MASK_CHANGE_ANNOTATION_Y,
+        yanchor: "middle",
         text: "Mask<br>Chg",
         captureevents: true,
         showarrow: false,
