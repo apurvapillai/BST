@@ -26,18 +26,37 @@ const DefectTrendsTab = (() => {
     selections: new Map(),
     rawData: null,
     data: null,
+    patternData: null,
     optionsStatus: "idle",
     dataStatus: "idle",
+    patternStatus: "idle",
     optionsError: "",
     dataError: "",
+    patternError: "",
     showImageDefects: true,
     showReferenceFlags: true,
     showMaskFlags: true,
+    rawDataCoverage: new Map(),
+    recurringGroupFilters: new Map(),
+    recurringPanelExpansions: new Map(),
+    recurringOccurrenceSorts: new Map(),
+    recurringClusterSelections: new Map(),
+    patternClassFilters: new Map(),
+    patternSelectedReels: new Map(),
+    patternSelectedLocationGroups: new Map(),
+    patternSelectedLocationExamples: new Map(),
+    reelNavigatorItems: [],
+    reelNavigatorIndex: -1,
+    referenceNavigatorItems: [],
+    referenceNavigatorIndex: -1,
+    maskNavigatorItems: [],
+    maskNavigatorIndex: -1,
   };
 
   const elements = {};
   let optionsAbortController = null;
   let dataAbortController = null;
+  let patternAbortController = null;
   let loadingOverlayCount = 0;
   let machineScrollSyncing = false;
   let maskViewerSerial = 0;
@@ -102,6 +121,15 @@ const DefectTrendsTab = (() => {
     elements.showImageDefects = document.getElementById("defectTrendsLegendShowImageDefects");
     elements.showReferenceFlags = document.getElementById("defectTrendsLegendShowReferenceFlags");
     elements.showMaskFlags = document.getElementById("defectTrendsLegendShowMaskFlags");
+    elements.reelPrev = document.getElementById("defectTrendsReelPrev");
+    elements.reelNext = document.getElementById("defectTrendsReelNext");
+    elements.reelStatus = document.getElementById("defectTrendsReelStatus");
+    elements.referencePrev = document.getElementById("defectTrendsReferencePrev");
+    elements.referenceNext = document.getElementById("defectTrendsReferenceNext");
+    elements.referenceStatus = document.getElementById("defectTrendsReferenceStatus");
+    elements.maskPrev = document.getElementById("defectTrendsMaskPrev");
+    elements.maskNext = document.getElementById("defectTrendsMaskNext");
+    elements.maskStatus = document.getElementById("defectTrendsMaskStatus");
     elements.combinedChart = document.getElementById("defectTrendsCombinedChart");
     elements.machinePanels = document.getElementById("defectTrendsMachinePanels");
     elements.loadingOverlay = document.getElementById("defectTrendsLoadingOverlay");
@@ -180,6 +208,12 @@ const DefectTrendsTab = (() => {
         renderMachinePanels();
       });
     }
+    if (elements.reelPrev) elements.reelPrev.addEventListener("click", () => moveToCategoryEvent("reel", -1));
+    if (elements.reelNext) elements.reelNext.addEventListener("click", () => moveToCategoryEvent("reel", 1));
+    if (elements.referencePrev) elements.referencePrev.addEventListener("click", () => moveToCategoryEvent("reference", -1));
+    if (elements.referenceNext) elements.referenceNext.addEventListener("click", () => moveToCategoryEvent("reference", 1));
+    if (elements.maskPrev) elements.maskPrev.addEventListener("click", () => moveToCategoryEvent("mask", -1));
+    if (elements.maskNext) elements.maskNext.addEventListener("click", () => moveToCategoryEvent("mask", 1));
     if (elements.selectAll) {
       elements.selectAll.addEventListener("click", () => {
         state.machineOptions.forEach((machine) => {
@@ -187,8 +221,7 @@ const DefectTrendsTab = (() => {
         });
         renderMachineSelector();
         renderSelectionSummary();
-        syncDataToCurrentSelections();
-        fetchData();
+        updateDataForCurrentSelections();
       });
     }
     if (elements.clearAll) {
@@ -198,14 +231,18 @@ const DefectTrendsTab = (() => {
         });
         renderMachineSelector();
         renderSelectionSummary();
-        syncDataToCurrentSelections();
-        fetchData();
+        updateDataForCurrentSelections();
       });
     }
     if (elements.machineSelector) {
       elements.machineSelector.addEventListener("click", handleSelectorClick);
       elements.machineSelector.addEventListener("change", handleSelectorChange);
     }
+    if (elements.machinePanels) {
+      elements.machinePanels.addEventListener("click", handleMachinePanelClick);
+      elements.machinePanels.addEventListener("change", handleMachinePanelChange);
+    }
+    document.addEventListener("keydown", handlePatternViewerKeydown);
     if (elements.globalFilterChips) {
       elements.globalFilterChips.addEventListener("click", handleChipClick);
     }
@@ -369,14 +406,69 @@ const DefectTrendsTab = (() => {
     });
   }
 
-  async function fetchData() {
-    if (!state.active || state.optionsStatus !== "ready") return;
+  function buildSelectionCoverage(selectionsPayload) {
+    const coverage = new Map();
+    (selectionsPayload || []).forEach((selection) => {
+      if (selection.enabled === false) return;
+      const jobKeys = Array.isArray(selection.jobKeys) ? selection.jobKeys.filter(Boolean) : [];
+      coverage.set(String(selection.machineId), {
+        allJobs: !jobKeys.length,
+        jobKeys: new Set(jobKeys),
+      });
+    });
+    return coverage;
+  }
+
+  function canSatisfySelectionsFromRawData(selectionsPayload) {
+    const rawMachines = Array.isArray(state.rawData && state.rawData.machines) ? state.rawData.machines : [];
+    if (!rawMachines.length) return false;
+    const rawByMachine = new Map(rawMachines.map((machine) => [String(machine.machineId), machine]));
+    return (selectionsPayload || [])
+      .filter((selection) => selection.enabled !== false)
+      .every((selection) => {
+        const machineId = String(selection.machineId);
+        if (!rawByMachine.has(machineId)) return false;
+        const coverage = state.rawDataCoverage.get(machineId);
+        if (!coverage) return false;
+        const requestedJobKeys = Array.isArray(selection.jobKeys) ? selection.jobKeys.filter(Boolean) : [];
+        if (!requestedJobKeys.length) return coverage.allJobs;
+        if (coverage.allJobs) return true;
+        return requestedJobKeys.every((jobKey) => coverage.jobKeys.has(jobKey));
+      });
+  }
+
+  function updateDataForCurrentSelections() {
     const selections = buildSelectionsPayload();
+    const enabledSelections = selections.filter((selection) => selection.enabled !== false);
+    if (!enabledSelections.length) {
+      state.data = { ...(state.rawData || {}), machines: [] };
+      state.patternData = { machines: [] };
+      state.dataStatus = "empty";
+      state.patternStatus = "empty";
+      state.dataError = "";
+      state.patternError = "";
+      renderCharts();
+      return;
+    }
+    if (canSatisfySelectionsFromRawData(selections)) {
+      syncDataToCurrentSelections(selections);
+      fetchPatternData(selections);
+      return;
+    }
+    fetchData(selections);
+  }
+
+  async function fetchData(selectionsPayload = null) {
+    if (!state.active || state.optionsStatus !== "ready") return;
+    const selections = selectionsPayload || buildSelectionsPayload();
     const enabledSelections = selections.filter((selection) => selection.enabled !== false);
     if (!enabledSelections.length) {
       state.rawData = { machines: [] };
       state.data = { machines: [] };
+      state.patternData = { machines: [] };
+      state.rawDataCoverage = new Map();
       state.dataStatus = "empty";
+      state.patternStatus = "empty";
       renderCharts();
       return;
     }
@@ -402,11 +494,13 @@ const DefectTrendsTab = (() => {
       });
       const payload = await readJsonResponse(response, "defect-trends data");
       state.rawData = payload || { machines: [] };
+      state.rawDataCoverage = buildSelectionCoverage(selections);
       state.data = {
         ...(state.rawData || {}),
         machines: applySelectionFiltersToMachines((state.rawData && state.rawData.machines) || [], selections),
       };
       state.dataStatus = ((state.data && state.data.machines) || []).length ? "ready" : "empty";
+      await fetchPatternData(selections);
       renderCharts();
     } catch (error) {
       if (error && error.name === "AbortError") return;
@@ -449,14 +543,62 @@ const DefectTrendsTab = (() => {
       .filter((machine) => (machine.points || []).length);
   }
 
-  function syncDataToCurrentSelections() {
+  function syncDataToCurrentSelections(selectionsPayload = null) {
     if (!state.rawData) return;
+    const selections = selectionsPayload || buildSelectionsPayload();
     state.data = {
       ...(state.rawData || {}),
-      machines: applySelectionFiltersToMachines((state.rawData && state.rawData.machines) || [], buildSelectionsPayload()),
+      machines: applySelectionFiltersToMachines((state.rawData && state.rawData.machines) || [], selections),
     };
     state.dataStatus = ((state.data && state.data.machines) || []).length ? "ready" : "empty";
+    state.dataError = "";
     renderCharts();
+  }
+
+  async function fetchPatternData(selectionsPayload = null) {
+    if (!state.active || state.optionsStatus !== "ready") return;
+    const selections = selectionsPayload || buildSelectionsPayload();
+    const enabledSelections = selections.filter((selection) => selection.enabled !== false);
+    if (!enabledSelections.length) {
+      state.patternData = { machines: [] };
+      state.patternStatus = "empty";
+      state.patternError = "";
+      renderMachinePanels();
+      return;
+    }
+    if (patternAbortController) patternAbortController.abort();
+    patternAbortController = new AbortController();
+    state.patternStatus = "loading";
+    state.patternError = "";
+    renderMachinePanels();
+    try {
+      const response = await fetch("/dashboard/api/defect-trends/pattern-analyzer", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        signal: patternAbortController.signal,
+        body: JSON.stringify({
+          start: state.start,
+          end: state.end,
+          min_feet: state.minFeet,
+          selections,
+        }),
+      });
+      const payload = await readJsonResponse(response, "defect pattern analyzer");
+      state.patternData = payload || { machines: [] };
+      state.patternStatus = ((state.patternData && state.patternData.machines) || []).length ? "ready" : "empty";
+      state.patternError = "";
+      renderMachinePanels();
+    } catch (error) {
+      if (error && error.name === "AbortError") return;
+      state.patternData = { machines: [] };
+      state.patternStatus = "error";
+      state.patternError = error && error.message ? error.message : "Unable to load defect pattern analyzer.";
+      renderMachinePanels();
+      throw error;
+    }
   }
 
   function renderMachineSelector() {
@@ -544,8 +686,7 @@ const DefectTrendsTab = (() => {
       selection.enabled = machineToggle.checked;
       renderMachineSelector();
       renderSelectionSummary();
-      syncDataToCurrentSelections();
-      fetchData();
+      updateDataForCurrentSelections();
       return;
     }
 
@@ -560,8 +701,7 @@ const DefectTrendsTab = (() => {
       }
       renderMachineSelector();
       renderSelectionSummary();
-      syncDataToCurrentSelections();
-      fetchData();
+      updateDataForCurrentSelections();
       return;
     }
 
@@ -577,9 +717,145 @@ const DefectTrendsTab = (() => {
       selection.jobKeys = Array.from(next);
       renderMachineSelector();
       renderSelectionSummary();
-      syncDataToCurrentSelections();
-      fetchData();
+      updateDataForCurrentSelections();
     }
+  }
+
+  function handleMachinePanelClick(event) {
+    const groupButton = event.target.closest("[data-recurring-group-filter]");
+    if (groupButton) {
+      event.preventDefault();
+      const machineId = String(groupButton.getAttribute("data-machine-id") || "");
+      const nextKey = groupButton.getAttribute("data-recurring-group-filter") || "all";
+      state.recurringGroupFilters.set(machineId, nextKey || "all");
+      const host = document.getElementById(`defectTrendsMachineGroupList-${machineId}`);
+      const machine = (((state.data && state.data.machines) || []).find((item) => String(item && item.machineId || "") === machineId)) || null;
+      renderMachineDefectGroupList(host, machine);
+      return;
+    }
+    const expandButton = event.target.closest("[data-recurring-panel-expand]");
+    if (expandButton) {
+      event.preventDefault();
+      const machineId = String(expandButton.getAttribute("data-machine-id") || "");
+      const isExpanded = state.recurringPanelExpansions.get(machineId) === true;
+      state.recurringPanelExpansions.set(machineId, !isExpanded);
+      const host = document.getElementById(`defectTrendsMachineGroupList-${machineId}`);
+      const machine = (((state.data && state.data.machines) || []).find((item) => String(item && item.machineId || "") === machineId)) || null;
+      renderMachineDefectGroupList(host, machine);
+      return;
+    }
+    const sortButton = event.target.closest("[data-recurring-sort]");
+    if (sortButton) {
+      event.preventDefault();
+      const machineId = String(sortButton.getAttribute("data-machine-id") || "");
+      const nextSort = sortButton.getAttribute("data-recurring-sort") || "asc";
+      state.recurringOccurrenceSorts.set(machineId, nextSort === "desc" ? "desc" : "asc");
+      const host = document.getElementById(`defectTrendsMachineGroupList-${machineId}`);
+      const machine = (((state.data && state.data.machines) || []).find((item) => String(item && item.machineId || "") === machineId)) || null;
+      renderMachineDefectGroupList(host, machine);
+      return;
+    }
+    const navButton = event.target.closest("[data-recurring-occurrence-nav]");
+    if (navButton) {
+      event.preventDefault();
+      const machineId = String(navButton.getAttribute("data-machine-id") || "");
+      const groupKey = String(navButton.getAttribute("data-group-key") || "");
+      const clusterKey = String(navButton.getAttribute("data-cluster-key") || "");
+      const direction = Number(navButton.getAttribute("data-direction")) || 0;
+      moveRecurringClusterSelection(machineId, groupKey, clusterKey, direction);
+      return;
+    }
+    const imageButton = event.target.closest("[data-defect-group-image]");
+    if (imageButton) {
+      event.preventDefault();
+      const imagePath = imageButton.getAttribute("data-defect-group-image") || "";
+      if (imagePath && typeof window.showImageModal === "function") {
+        window.showImageModal(urlForStatic(imagePath), null);
+      }
+      return;
+    }
+    const jumpButton = event.target.closest("[data-defect-group-jump]");
+    if (jumpButton) {
+      event.preventDefault();
+      jumpToAxisOffset(Number(jumpButton.getAttribute("data-defect-group-jump")));
+      return;
+    }
+    const locationGroupButton = event.target.closest("[data-pattern-location-view]");
+    if (locationGroupButton) {
+      event.preventDefault();
+      const machineId = String(locationGroupButton.getAttribute("data-machine-id") || "");
+      const groupKey = String(locationGroupButton.getAttribute("data-pattern-location-view") || "");
+      state.patternSelectedLocationGroups.set(machineId, groupKey);
+      state.patternSelectedLocationExamples.set(`${machineId}:${groupKey}`, 0);
+      const host = document.getElementById(`defectTrendsMachinePatternAnalyzer-${machineId}`);
+      const machine = (((state.data && state.data.machines) || []).find((item) => String(item && item.machineId || "") === machineId)) || null;
+      renderMachinePatternAnalyzer(host, machine);
+      return;
+    }
+    const locationNavButton = event.target.closest("[data-pattern-location-example-nav]");
+    if (locationNavButton) {
+      event.preventDefault();
+      const machineId = String(locationNavButton.getAttribute("data-machine-id") || "");
+      const groupKey = String(locationNavButton.getAttribute("data-group-key") || "");
+      const delta = Number(locationNavButton.getAttribute("data-direction")) || 0;
+      movePatternLocationExample(machineId, groupKey, delta);
+      return;
+    }
+    const locationThumbButton = event.target.closest("[data-pattern-location-thumb]");
+    if (locationThumbButton) {
+      event.preventDefault();
+      const machineId = String(locationThumbButton.getAttribute("data-machine-id") || "");
+      const groupKey = String(locationThumbButton.getAttribute("data-group-key") || "");
+      const exampleIndex = Number(locationThumbButton.getAttribute("data-pattern-location-thumb")) || 0;
+      state.patternSelectedLocationExamples.set(`${machineId}:${groupKey}`, Math.max(0, exampleIndex));
+      const host = document.getElementById(`defectTrendsMachinePatternAnalyzer-${machineId}`);
+      const machine = (((state.data && state.data.machines) || []).find((item) => String(item && item.machineId || "") === machineId)) || null;
+      renderMachinePatternAnalyzer(host, machine);
+      return;
+    }
+    const closeLocationButton = event.target.closest("[data-pattern-location-close]");
+    if (closeLocationButton) {
+      event.preventDefault();
+      const machineId = String(closeLocationButton.getAttribute("data-machine-id") || "");
+      state.patternSelectedLocationGroups.delete(machineId);
+      const host = document.getElementById(`defectTrendsMachinePatternAnalyzer-${machineId}`);
+      const machine = (((state.data && state.data.machines) || []).find((item) => String(item && item.machineId || "") === machineId)) || null;
+      renderMachinePatternAnalyzer(host, machine);
+      return;
+    }
+    const clearPatternSelectionButton = event.target.closest("[data-pattern-clear-selection]");
+    if (clearPatternSelectionButton) {
+      event.preventDefault();
+      const machineId = String(clearPatternSelectionButton.getAttribute("data-machine-id") || "");
+      state.patternSelectedReels.delete(machineId);
+      const host = document.getElementById(`defectTrendsMachinePatternAnalyzer-${machineId}`);
+      const machine = (((state.data && state.data.machines) || []).find((item) => String(item && item.machineId || "") === machineId)) || null;
+      renderMachinePatternAnalyzer(host, machine);
+    }
+  }
+
+  function handleMachinePanelChange(event) {
+    const classFilter = event.target.closest("[data-pattern-class-filter]");
+    if (!classFilter) return;
+    const machineId = String(classFilter.getAttribute("data-machine-id") || "");
+    const nextKey = String(classFilter.value || "all");
+    state.patternClassFilters.set(machineId, nextKey);
+    const host = document.getElementById(`defectTrendsMachinePatternAnalyzer-${machineId}`);
+    const machine = (((state.data && state.data.machines) || []).find((item) => String(item && item.machineId || "") === machineId)) || null;
+    renderMachinePatternAnalyzer(host, machine);
+  }
+
+  function handlePatternViewerKeydown(event) {
+    if (!state.active) return;
+    if (event.defaultPrevented) return;
+    const targetTag = String(event.target && event.target.tagName || "").toLowerCase();
+    if (targetTag === "input" || targetTag === "textarea" || targetTag === "select") return;
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    const activeEntry = Array.from(state.patternSelectedLocationGroups.entries()).find(([, groupKey]) => !!groupKey);
+    if (!activeEntry) return;
+    const [machineId, groupKey] = activeEntry;
+    event.preventDefault();
+    movePatternLocationExample(machineId, groupKey, event.key === "ArrowRight" ? 1 : -1);
   }
 
   function renderSelectionSummary() {
@@ -707,15 +983,18 @@ const DefectTrendsTab = (() => {
       if (elements.yMax) elements.yMax.value = "";
       renderLocalFilterChips();
       renderCharts();
+      return;
     }
   }
 
   function renderCharts() {
-    renderCombinedChart();
-    renderMachinePanels();
+    const machines = ((state.data && state.data.machines) || []).filter((machine) => (machine.points || []).length);
+    renderCombinedChart(machines);
+    renderMachinePanels(machines);
+    renderEventNavigator(machines);
   }
 
-  function renderCombinedChart() {
+  function renderCombinedChart(machinesInput = null) {
     if (!elements.combinedChart) return;
     if (state.dataStatus === "loading") {
       elements.combinedChart.innerHTML = '<div class="delta-trends-empty">Loading combined defect trend…</div>';
@@ -725,7 +1004,9 @@ const DefectTrendsTab = (() => {
       elements.combinedChart.innerHTML = `<div class="delta-trends-empty">${escapeHtml(state.dataError || "Unable to load defect trend data.")}</div>`;
       return;
     }
-    const machines = ((state.data && state.data.machines) || []).filter((machine) => (machine.points || []).length);
+    const machines = Array.isArray(machinesInput)
+      ? machinesInput
+      : ((state.data && state.data.machines) || []).filter((machine) => (machine.points || []).length);
     if (!machines.length) {
       elements.combinedChart.innerHTML = '<div class="delta-trends-empty">No defect points available for the current filter state.</div>';
       return;
@@ -798,7 +1079,7 @@ const DefectTrendsTab = (() => {
     });
   }
 
-  function renderMachinePanels() {
+  function renderMachinePanels(machinesInput = null) {
     if (!elements.machinePanels) return;
     if (state.dataStatus === "loading") {
       elements.machinePanels.innerHTML = '<div class="delta-trends-empty">Loading press defect trends…</div>';
@@ -808,12 +1089,15 @@ const DefectTrendsTab = (() => {
       elements.machinePanels.innerHTML = `<div class="delta-trends-empty">${escapeHtml(state.dataError || "Unable to load press defect trends.")}</div>`;
       return;
     }
-    const machines = ((state.data && state.data.machines) || []).filter((machine) => (machine.points || []).length);
+    const machines = Array.isArray(machinesInput)
+      ? machinesInput
+      : ((state.data && state.data.machines) || []).filter((machine) => (machine.points || []).length);
     if (!machines.length) {
       elements.machinePanels.innerHTML = '<div class="delta-trends-empty">No press defect trends available for the current filter state.</div>';
       return;
     }
     const sortedMachines = sortMachines(machines);
+    const patternByMachine = new Map((((state.patternData && state.patternData.machines) || []).map((item) => [String(item.machineId), item])));
     elements.machinePanels.innerHTML = sortedMachines
       .map((machine) => {
         const visibleStats = buildVisibleMachineStats(machine);
@@ -850,8 +1134,31 @@ const DefectTrendsTab = (() => {
               >
                 <div class="delta-machine-panel__chart-wrap" style="width:${escapeAttr(scrollWidthPercent)}%">
                   <div id="defectTrendsMachineChart-${machine.machineId}" class="delta-machine-panel__chart"></div>
+                  <div class="delta-machine-panel__subchart-header">
+                    <strong>Defect Position Map</strong>
+                    <span>Repeated positions show up as horizontal bands across reels.</span>
+                  </div>
+                  <div id="defectTrendsMachinePositionChart-${machine.machineId}" class="delta-machine-panel__chart delta-machine-panel__chart--secondary"></div>
                 </div>
               </div>
+            </div>
+            <div class="delta-trends-chart-card delta-machine-panel__summary-card">
+              <div class="delta-machine-panel__subchart-header delta-machine-panel__subchart-header--summary">
+                <strong>Recurring Defect Groups</strong>
+                <span>Grouped by defect category only, sorted from highest to lowest occurrence.</span>
+              </div>
+              <div id="defectTrendsMachineGroupList-${machine.machineId}" class="delta-machine-panel__group-list"></div>
+            </div>
+            <div class="delta-trends-chart-card delta-machine-panel__summary-card">
+              <div class="delta-machine-panel__subchart-header delta-machine-panel__subchart-header--summary">
+                <strong>Defect Pattern Analyzer</strong>
+                <span>Job-level pattern review across reels, defect shapes, and severity progression.</span>
+              </div>
+              <div
+                id="defectTrendsMachinePatternAnalyzer-${machine.machineId}"
+                class="delta-machine-panel__pattern-analyzer"
+                data-has-pattern="${patternByMachine.has(String(machine.machineId)) ? "true" : "false"}"
+              ></div>
             </div>
           </article>
         `;
@@ -861,7 +1168,13 @@ const DefectTrendsTab = (() => {
     sortedMachines.forEach((machine) => {
       renderMachineTimeline(machine);
       const host = document.getElementById(`defectTrendsMachineChart-${machine.machineId}`);
+      const positionHost = document.getElementById(`defectTrendsMachinePositionChart-${machine.machineId}`);
+      const groupListHost = document.getElementById(`defectTrendsMachineGroupList-${machine.machineId}`);
+      const patternHost = document.getElementById(`defectTrendsMachinePatternAnalyzer-${machine.machineId}`);
       renderMachineChart(host, machine);
+      renderMachinePositionChart(positionHost, machine);
+      renderMachineDefectGroupList(groupListHost, machine);
+      renderMachinePatternAnalyzer(patternHost, machine);
       syncMachineScroll(machine.machineId);
     });
     setInitialMachineScrollOffset(0);
@@ -878,6 +1191,154 @@ const DefectTrendsTab = (() => {
       }
       return leftName.localeCompare(rightName, undefined, { numeric: true, sensitivity: "base" });
     });
+  }
+
+  function renderEventNavigator(machines) {
+    const navigator = buildEventNavigatorState(machines);
+    state.reelNavigatorItems = navigator.reels;
+    state.referenceNavigatorItems = navigator.references;
+    state.maskNavigatorItems = navigator.masks;
+    state.reelNavigatorIndex = normalizeNavigatorIndex(state.reelNavigatorIndex, navigator.reels.length);
+    state.referenceNavigatorIndex = normalizeNavigatorIndex(state.referenceNavigatorIndex, navigator.references.length);
+    state.maskNavigatorIndex = normalizeNavigatorIndex(state.maskNavigatorIndex, navigator.masks.length);
+    updateCategoryNavigatorUi("reel", "reels", state.reelNavigatorItems, state.reelNavigatorIndex);
+    updateCategoryNavigatorUi("reference", "new refs", state.referenceNavigatorItems, state.referenceNavigatorIndex);
+    updateCategoryNavigatorUi("mask", "mask changes", state.maskNavigatorItems, state.maskNavigatorIndex);
+  }
+
+  function buildEventNavigatorState(machines) {
+    const sortedMachines = sortMachines(Array.isArray(machines) ? machines : []);
+    const reels = [];
+    const references = [];
+    const masks = [];
+    sortedMachines.forEach((machine) => {
+      collectMachineNavigatorEvents(machine).forEach((item) => {
+        if (item.type === "reel") reels.push(item);
+        if (item.type === "reference") references.push(item);
+        if (item.type === "mask") masks.push(item);
+      });
+    });
+    return {
+      reels,
+      references: state.showReferenceFlags ? references : [],
+      masks: state.showMaskFlags ? masks : [],
+    };
+  }
+
+  function collectMachineNavigatorEvents(machine) {
+    const items = [];
+    const reels = getSortedMachineReels(machine);
+    let cumulativeFeet = 0;
+    reels.forEach((reel, index) => {
+      const reelFeet = Math.max(Number(reel && reel.reelFeetTotal) || 0, 0);
+      if (index > 0) {
+        items.push({
+          id: `reel-${machine.machineId}-${reel.reelId}`,
+          type: "reel",
+          machineId: machine.machineId,
+          xValue: cumulativeFeet,
+          label: `${machine.machineName || `Press ${machine.machineId}`} · New Reel · ${reel && reel.reelCode ? reel.reelCode : "Unknown Reel"}`,
+        });
+      }
+      cumulativeFeet += reelFeet;
+    });
+    const { referenceBaseFeet, maskBaseFeet } = buildEventBaseFeetMap(reels);
+    const referenceEvents = Array.isArray(machine && machine.referenceImageEvents) ? machine.referenceImageEvents : [];
+    referenceEvents.forEach((event, index) => {
+      const reelKey = String(event && event.reelId || "");
+      const localFeet = Number(event && event.feetFromReelStart);
+      if (!reelKey || !referenceBaseFeet.has(reelKey) || !Number.isFinite(localFeet)) return;
+      items.push({
+        id: `reference-${machine.machineId}-${reelKey}-${index}`,
+        type: "reference",
+        machineId: machine.machineId,
+        xValue: referenceBaseFeet.get(reelKey) + localFeet,
+        label: `${machine.machineName || `Press ${machine.machineId}`} · New Ref · ${event && event.reelCode ? event.reelCode : "Unknown Reel"}`,
+      });
+    });
+    const maskEvents = Array.isArray(machine && machine.maskEvents) ? machine.maskEvents : [];
+    maskEvents.forEach((event, index) => {
+      const reelKey = String(event && event.reelId || "");
+      const localFeet = Number(event && event.feetFromReelStart);
+      if (!reelKey || !maskBaseFeet.has(reelKey) || !Number.isFinite(localFeet)) return;
+      items.push({
+        id: `mask-${machine.machineId}-${reelKey}-${index}`,
+        type: "mask",
+        machineId: machine.machineId,
+        xValue: maskBaseFeet.get(reelKey) + localFeet,
+        label: `${machine.machineName || `Press ${machine.machineId}`} · Mask Chg · ${event && event.reelCode ? event.reelCode : "Unknown Reel"}`,
+      });
+    });
+    const typeRank = { reel: 0, reference: 1, mask: 2 };
+    return items.sort((left, right) => {
+      const xDiff = Number(left.xValue || 0) - Number(right.xValue || 0);
+      if (xDiff !== 0) return xDiff;
+      return (typeRank[left.type] || 0) - (typeRank[right.type] || 0);
+    });
+  }
+
+  function buildEventBaseFeetMap(reels) {
+    const referenceBaseFeet = new Map();
+    const maskBaseFeet = new Map();
+    let cumulativeFeet = 0;
+    (Array.isArray(reels) ? reels : []).forEach((reel) => {
+      const reelKey = String(reel && reel.reelId || "");
+      if (reelKey) {
+        referenceBaseFeet.set(reelKey, cumulativeFeet);
+        maskBaseFeet.set(reelKey, cumulativeFeet);
+      }
+      cumulativeFeet += Math.max(Number(reel && reel.reelFeetTotal) || 0, 0);
+    });
+    return { referenceBaseFeet, maskBaseFeet };
+  }
+
+  function normalizeNavigatorIndex(currentIndex, itemCount) {
+    if (!itemCount) return -1;
+    if (currentIndex < 0 || currentIndex >= itemCount) return 0;
+    return currentIndex;
+  }
+
+  function updateCategoryNavigatorUi(category, emptyLabel, items, index) {
+    const statusElement = elements[`${category}Status`];
+    const prevElement = elements[`${category}Prev`];
+    const nextElement = elements[`${category}Next`];
+    if (statusElement) {
+      statusElement.textContent = items.length
+        ? `${index + 1}/${items.length} ${emptyLabel}`
+        : `0 ${emptyLabel}`;
+    }
+    if (prevElement) prevElement.disabled = !items.length;
+    if (nextElement) nextElement.disabled = !items.length;
+  }
+
+  function moveToCategoryEvent(category, direction) {
+    const items = Array.isArray(state[`${category}NavigatorItems`]) ? state[`${category}NavigatorItems`] : [];
+    if (!items.length) return;
+    const indexKey = `${category}NavigatorIndex`;
+    if (state[indexKey] < 0) {
+      state[indexKey] = 0;
+    } else {
+      const itemCount = items.length;
+      state[indexKey] = (state[indexKey] + direction + itemCount) % itemCount;
+    }
+    const activeItem = items[state[indexKey]];
+    if (activeItem) {
+      jumpToNavigatorEvent(activeItem);
+    }
+    renderEventNavigator(((state.data && state.data.machines) || []).filter((machine) => (machine.points || []).length));
+  }
+
+  function jumpToNavigatorEvent(item) {
+    if (!item) return;
+    jumpToAxisOffset(Number(item.xValue));
+  }
+
+  function jumpToAxisOffset(rawAxisOffset) {
+    const axisOffset = Math.max(Number(rawAxisOffset) || 0, 0);
+    const firstChartScroll = document.querySelector('.delta-machine-panel__chart-scroll[data-machine-scroll^="chart-"]');
+    const baselineSpan = Math.max(Number(firstChartScroll && firstChartScroll.dataset.baselineSpan) || 0, 1);
+    const centeredOffset = Math.max(axisOffset - (baselineSpan / 2), 0);
+    setInitialMachineScrollOffset(centeredOffset);
   }
 
   function renderMachineChart(host, machine) {
@@ -959,6 +1420,1792 @@ const DefectTrendsTab = (() => {
     });
   }
 
+  function renderMachinePositionChart(host, machine) {
+    if (!host) return;
+    const series = buildMachinePositionSeries(machine);
+    if (!series.x.length) {
+      host.innerHTML = '<div class="delta-trends-empty">No defect positions available.</div>';
+      return;
+    }
+    const bstOffLayout = buildBstOffLayout(machine);
+    const reelMarkerLayout = buildReelMarkerLayout(machine);
+    const referenceImageLayout = buildReferenceImageChangeLayout(machine);
+    const maskLayout = buildMaskChangeLayout(machine);
+    const maxReelFeet = Math.max(series.maxFeet, state.binSizeFeet, 1);
+    window.Plotly.react(host, [
+      {
+        x: series.x,
+        y: series.y,
+        text: series.hover,
+        mode: "markers",
+        name: "Defect Position",
+        marker: {
+          color: series.color,
+          size: series.size,
+          opacity: 0.8,
+          line: {
+            color: "rgba(15, 23, 42, 0.18)",
+            width: 0.8,
+          },
+        },
+        hovertemplate: "%{text}<extra></extra>",
+        showlegend: false,
+      },
+    ], buildChartLayout({
+      xTitle: "Feet",
+      yTitle: "Feet From Reel Start",
+      xRange: [0, Math.max(getMachineFeetSpan(machine), state.binSizeFeet)],
+      xDtick: 500,
+      yRange: [0, maxReelFeet],
+      showLegend: false,
+      shapes: [
+        ...bstOffLayout.shapes,
+        ...reelMarkerLayout.shapes,
+        ...(state.showReferenceFlags ? referenceImageLayout.shapes : []),
+        ...(state.showMaskFlags ? maskLayout.shapes : []),
+      ],
+      annotations: [
+        ...bstOffLayout.annotations,
+        ...reelMarkerLayout.annotations,
+        ...(state.showReferenceFlags ? referenceImageLayout.annotations : []),
+        ...(state.showMaskFlags ? maskLayout.annotations : []),
+      ],
+    }), getPlotConfig()).then(() => {
+      bindAnnotationClicks(host, referenceImageLayout.clickEvents, maskLayout.clickEvents);
+    });
+  }
+
+  function renderMachineCoordinateChart(host, machine) {
+    if (!host) return;
+    const series = buildMachineCoordinateSeries(machine);
+    if (!series.x.length) {
+      host.innerHTML = '<div class="delta-trends-empty">No defect coordinates available.</div>';
+      return;
+    }
+    const bstOffLayout = buildBstOffLayout(machine);
+    const reelMarkerLayout = buildReelMarkerLayout(machine);
+    const referenceImageLayout = buildReferenceImageChangeLayout(machine);
+    const maskLayout = buildMaskChangeLayout(machine);
+    window.Plotly.react(host, [
+      {
+        x: series.x,
+        y: series.xPct,
+        text: series.xHover,
+        mode: "markers",
+        name: "Centroid X",
+        marker: {
+          color: "#0ea5e9",
+          size: series.size,
+          opacity: 0.78,
+          line: { color: "rgba(14, 165, 233, 0.24)", width: 0.8 },
+          symbol: "circle",
+        },
+        hovertemplate: "%{text}<extra></extra>",
+        showlegend: true,
+      },
+      {
+        x: series.x,
+        y: series.yPct,
+        text: series.yHover,
+        mode: "markers",
+        name: "Centroid Y",
+        marker: {
+          color: "#f97316",
+          size: series.size,
+          opacity: 0.74,
+          line: { color: "rgba(249, 115, 22, 0.24)", width: 0.8 },
+          symbol: "diamond",
+        },
+        hovertemplate: "%{text}<extra></extra>",
+        showlegend: true,
+      },
+    ], buildChartLayout({
+      xTitle: "Feet",
+      yTitle: "Normalized Coordinate (%)",
+      xRange: [0, Math.max(getMachineFeetSpan(machine), state.binSizeFeet)],
+      xDtick: 500,
+      yRange: [0, 100],
+      showLegend: true,
+      shapes: [
+        ...bstOffLayout.shapes,
+        ...reelMarkerLayout.shapes,
+        ...(state.showReferenceFlags ? referenceImageLayout.shapes : []),
+        ...(state.showMaskFlags ? maskLayout.shapes : []),
+      ],
+      annotations: [
+        ...bstOffLayout.annotations,
+        ...reelMarkerLayout.annotations,
+        ...(state.showReferenceFlags ? referenceImageLayout.annotations : []),
+        ...(state.showMaskFlags ? maskLayout.annotations : []),
+      ],
+    }), getPlotConfig()).then(() => {
+      bindAnnotationClicks(host, referenceImageLayout.clickEvents, maskLayout.clickEvents);
+    });
+  }
+
+  function renderMachineDefectGroupList(host, machine) {
+    if (!host) return;
+    const summary = buildMachineDefectGroupSummary(machine);
+    if (!summary.totalCount) {
+      host.innerHTML = '<div class="delta-trends-empty">No grouped defects available for the current filter state.</div>';
+      return;
+    }
+    const machineId = String(machine && machine.machineId || "");
+    const requestedKey = state.recurringGroupFilters.get(machineId) || "all";
+    const activeKey = requestedKey === "all" || summary.groups.some((group) => group.key === requestedKey)
+      ? requestedKey
+      : "all";
+    if (activeKey !== requestedKey) {
+      state.recurringGroupFilters.set(machineId, activeKey);
+    }
+    const isExpanded = state.recurringPanelExpansions.get(machineId) === true;
+    const activeSort = state.recurringOccurrenceSorts.get(machineId) || "asc";
+    const groups = activeKey === "all"
+      ? summary.groups
+      : summary.groups.filter((group) => group.key === activeKey);
+    host.innerHTML = `
+      <div class="delta-machine-panel__group-list-shell${isExpanded ? " is-expanded" : ""}">
+        <div class="delta-machine-panel__group-list-header">
+          <button
+            type="button"
+            class="delta-machine-panel__group-list-toggle"
+            data-machine-id="${escapeAttr(machineId)}"
+            data-recurring-panel-expand="true"
+            aria-expanded="${isExpanded ? "true" : "false"}"
+          >
+            ${isExpanded ? "Hide recurring defects" : "Show recurring defects"}
+          </button>
+          <span class="delta-machine-panel__group-list-total">${escapeHtml(formatCount(summary.totalCount, "defect"))}</span>
+        </div>
+        <div class="delta-machine-panel__group-list-content">
+          <div class="delta-recurring-group-summary">
+            <button
+              type="button"
+              class="delta-recurring-group-summary__chip${activeKey === "all" ? " is-active" : ""}"
+              data-machine-id="${escapeAttr(machineId)}"
+              data-recurring-group-filter="all"
+            >
+              <strong>All</strong>
+              <span>${escapeHtml(formatCount(summary.totalCount, "defect"))}</span>
+            </button>
+            ${summary.groups.map((group) => `
+              <button
+                type="button"
+                class="delta-recurring-group-summary__chip${activeKey === group.key ? " is-active" : ""}"
+                data-machine-id="${escapeAttr(machineId)}"
+                data-recurring-group-filter="${escapeAttr(group.key)}"
+              >
+                <strong>${escapeHtml(group.label)}</strong>
+                <span>${escapeHtml(formatCount(group.count, "defect"))}</span>
+              </button>
+            `).join("")}
+          </div>
+          <div class="delta-recurring-group-toolbar">
+            <span class="delta-recurring-group-toolbar__label">Sort by Job Feet</span>
+            <div class="delta-recurring-group-toolbar__actions">
+              <button
+                type="button"
+                class="delta-recurring-group-toolbar__button${activeSort === "asc" ? " is-active" : ""}"
+                data-machine-id="${escapeAttr(machineId)}"
+                data-recurring-sort="asc"
+              >
+                Asc
+              </button>
+              <button
+                type="button"
+                class="delta-recurring-group-toolbar__button${activeSort === "desc" ? " is-active" : ""}"
+                data-machine-id="${escapeAttr(machineId)}"
+                data-recurring-sort="desc"
+              >
+                Desc
+              </button>
+            </div>
+          </div>
+          <div class="delta-machine-panel__group-list-body">
+        ${groups.map((group, index) => {
+      const previewSrc = group.previewImageSrc ? urlForStatic(group.previewImageSrc) : "";
+      const jobs = group.jobs.slice(0, 3);
+      const remainingJobs = Math.max(group.jobs.length - jobs.length, 0);
+      return `
+        <article class="delta-defect-group-row">
+          <div class="delta-defect-group-row__rank">${index + 1}</div>
+          <button
+            type="button"
+            class="delta-defect-group-row__thumb${previewSrc ? "" : " is-empty"}"
+            ${group.previewImageSrc ? `data-defect-group-image="${escapeAttr(group.previewImageSrc)}"` : "disabled"}
+            aria-label="Open representative defect image"
+          >
+            ${previewSrc
+              ? `<img src="${escapeAttr(previewSrc)}" alt="${escapeAttr(group.label)}" loading="lazy" decoding="async">`
+              : `<span>No image</span>`}
+          </button>
+          <div class="delta-defect-group-row__main">
+            <div class="delta-defect-group-row__header">
+              <div>
+                <strong>${escapeHtml(group.label)}</strong>
+                <span>${escapeHtml(formatCount(group.jobs.length, "job"))} · ${escapeHtml(formatCount(group.coordinateGroups.length, "position cluster"))}</span>
+              </div>
+              <div class="delta-defect-group-row__count">${escapeHtml(formatCount(group.count, "hit"))}</div>
+            </div>
+            <div class="delta-defect-group-row__stats">
+              ${renderRecurringStatPill("Job Range", formatFeetRange(group.stats.jobFeetMin, group.stats.jobFeetMax))}
+              ${renderRecurringStatPill("Reel Range", formatFeetRange(group.stats.reelFeetMin, group.stats.reelFeetMax))}
+              ${renderRecurringStatPill("Repeat Spread", formatFeetSpan(group.stats.jobFeetMin, group.stats.jobFeetMax))}
+            </div>
+            <div class="delta-defect-group-row__jobs">
+              ${jobs.map((job) => `<span class="delta-defect-group-row__job">${escapeHtml(job)}</span>`).join("")}
+              ${remainingJobs ? `<span class="delta-defect-group-row__job delta-defect-group-row__job--more">+${remainingJobs} more job${remainingJobs === 1 ? "" : "s"}</span>` : ""}
+            </div>
+            <div class="delta-defect-group-row__coordinate-groups">
+              ${group.coordinateGroups.map((coordinateGroup) => {
+      const coordinateOccurrences = sortRecurringOccurrences(coordinateGroup.occurrences, activeSort);
+      const occurrencesByReel = groupRecurringOccurrencesByReel(coordinateOccurrences);
+      const selectionKey = buildRecurringClusterSelectionKey(machineId, group.key, coordinateGroup.key);
+      const activeOccurrenceIndex = normalizeRecurringClusterIndex(
+        state.recurringClusterSelections.get(selectionKey),
+        coordinateOccurrences.length,
+      );
+      return `
+                <section class="delta-defect-coordinate-group">
+                  <div class="delta-defect-coordinate-group__header">
+                    <div>
+                      <strong>${escapeHtml(coordinateGroup.label)}</strong>
+                      <span>${escapeHtml(formatCount(coordinateGroup.count, "defect"))}</span>
+                    </div>
+                    <div class="delta-defect-coordinate-group__stats">
+                      ${renderRecurringStatPill("Job", formatFeetRange(coordinateGroup.stats.jobFeetMin, coordinateGroup.stats.jobFeetMax))}
+                      ${renderRecurringStatPill("Reel", formatFeetRange(coordinateGroup.stats.reelFeetMin, coordinateGroup.stats.reelFeetMax))}
+                      ${renderRecurringStatPill("Spread", formatFeetSpan(coordinateGroup.stats.jobFeetMin, coordinateGroup.stats.jobFeetMax))}
+                    </div>
+                  </div>
+                  <div class="delta-defect-coordinate-group__toolbar">
+                    <span class="delta-defect-coordinate-group__status">${escapeHtml(`${activeOccurrenceIndex + 1}/${coordinateOccurrences.length}`)}</span>
+                    <div class="delta-defect-coordinate-group__nav">
+                      <button
+                        type="button"
+                        class="delta-defect-coordinate-group__nav-btn"
+                        data-recurring-occurrence-nav="true"
+                        data-machine-id="${escapeAttr(machineId)}"
+                        data-group-key="${escapeAttr(group.key)}"
+                        data-cluster-key="${escapeAttr(coordinateGroup.key)}"
+                        data-direction="-1"
+                      >
+                        Prev
+                      </button>
+                      <button
+                        type="button"
+                        class="delta-defect-coordinate-group__nav-btn"
+                        data-recurring-occurrence-nav="true"
+                        data-machine-id="${escapeAttr(machineId)}"
+                        data-group-key="${escapeAttr(group.key)}"
+                        data-cluster-key="${escapeAttr(coordinateGroup.key)}"
+                        data-direction="1"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
+                  <div class="delta-defect-coordinate-group__occurrences">
+                    ${occurrencesByReel.map((reelGroup) => `
+                      <section class="delta-defect-reel-group">
+                        <div class="delta-defect-reel-group__header">
+                          <strong>${escapeHtml(formatRecurringReelGroupLabel(reelGroup))}</strong>
+                          <span>${escapeHtml(formatCount(reelGroup.occurrences.length, "defect"))}</span>
+                        </div>
+                        <div class="delta-defect-reel-group__cards">
+                    ${reelGroup.occurrences.map((occurrence) => {
+      const occurrenceIndex = coordinateOccurrences.indexOf(occurrence);
+      const imageSrc = occurrence.imageSrc ? urlForStatic(occurrence.imageSrc) : "";
+      return `
+                      <article class="delta-defect-occurrence-card${occurrenceIndex === activeOccurrenceIndex ? " is-active" : ""}" data-recurring-occurrence-card="${escapeAttr(selectionKey)}">
+                        <button
+                          type="button"
+                          class="delta-defect-occurrence-card__image${imageSrc ? "" : " is-empty"}"
+                          ${occurrence.imageSrc ? `data-defect-group-image="${escapeAttr(occurrence.imageSrc)}"` : "disabled"}
+                          aria-label="Open defect image"
+                        >
+                          ${imageSrc
+                            ? `<img src="${escapeAttr(imageSrc)}" alt="${escapeAttr(`${group.label} ${coordinateGroup.label}`)}" loading="lazy" decoding="async">`
+                            : `<span>No image</span>`}
+                        </button>
+                        <button
+                          type="button"
+                          class="delta-defect-occurrence-card__jump"
+                          data-defect-group-jump="${escapeAttr(occurrence.xValue)}"
+                          title="${escapeAttr(`${occurrence.reelCode} · Reel ${formatNumber(occurrence.feetFromReelStart, 1)} ft · Job ${formatNumber(occurrence.jobFeetFromStart, 1)} ft · ${occurrence.jobLabel}`)}"
+                        >
+                          <strong>${escapeHtml(occurrence.reelCode)}</strong>
+                          <span>Reel ${escapeHtml(formatNumber(occurrence.feetFromReelStart, 1))} ft</span>
+                          <span>Job ${escapeHtml(formatNumber(occurrence.jobFeetFromStart, 1))} ft</span>
+                        </button>
+                      </article>
+                    `;
+    }).join("")}
+                        </div>
+                      </section>
+                    `).join("")}
+                  </div>
+                </section>
+              `;
+    }).join("")}
+            </div>
+          </div>
+        </article>
+      `;
+    }).join("")}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function getMachinePatternData(machineId) {
+    const machines = (state.patternData && state.patternData.machines) || [];
+    return machines.find((item) => String(item && item.machineId || "") === String(machineId || "")) || null;
+  }
+
+  function resolvePatternClassKey(machineId, analyzer) {
+    const options = Array.isArray(analyzer && analyzer.classOptions) ? analyzer.classOptions : [];
+    const requested = state.patternClassFilters.get(String(machineId || "")) || "all";
+    const valid = options.some((option) => String(option && option.key || "") === requested);
+    const nextKey = valid ? requested : (options[0] && options[0].key) || "all";
+    if (nextKey !== requested) {
+      state.patternClassFilters.set(String(machineId || ""), nextKey);
+    }
+    return String(nextKey || "all");
+  }
+
+  function resolveSelectedPatternLocationGroup(machineId, locationGroups) {
+    const groups = Array.isArray(locationGroups) ? locationGroups : [];
+    const requested = state.patternSelectedLocationGroups.get(String(machineId || "")) || "";
+    const selected = groups.find((group) => String(group && group.key || "") === requested) || null;
+    if (!selected && requested) {
+      state.patternSelectedLocationGroups.delete(String(machineId || ""));
+    }
+    return selected;
+  }
+
+  function movePatternLocationExample(machineId, groupKey, delta) {
+    const analyzer = getMachinePatternData(machineId);
+    if (!analyzer) return;
+    const activeClassKey = resolvePatternClassKey(machineId, analyzer);
+    const locationGroups = (analyzer.locationGroupsByClass && (analyzer.locationGroupsByClass[activeClassKey] || analyzer.locationGroupsByClass.all)) || [];
+    const group = (Array.isArray(locationGroups) ? locationGroups : []).find((item) => String(item && item.key || "") === String(groupKey || ""));
+    if (!group) return;
+    const examples = Array.isArray(group.examples) ? group.examples : [];
+    if (!examples.length) return;
+    const selectionKey = `${machineId}:${groupKey}`;
+    const currentIndex = Number(state.patternSelectedLocationExamples.get(selectionKey)) || 0;
+    const nextIndex = (currentIndex + delta + examples.length) % examples.length;
+    state.patternSelectedLocationExamples.set(selectionKey, nextIndex);
+    const host = document.getElementById(`defectTrendsMachinePatternAnalyzer-${machineId}`);
+    const machine = (((state.data && state.data.machines) || []).find((item) => String(item && item.machineId || "") === String(machineId || ""))) || null;
+    renderMachinePatternAnalyzer(host, machine);
+  }
+
+  function renderMachinePatternAnalyzer(host, machine) {
+    if (!host || !machine) return;
+    const machineId = String(machine && machine.machineId || "");
+    const analyzer = getMachinePatternData(machineId);
+    if (state.patternStatus === "loading" && !analyzer) {
+      host.innerHTML = '<div class="delta-trends-empty">Loading defect pattern analyzer…</div>';
+      return;
+    }
+    if (state.patternStatus === "error") {
+      host.innerHTML = `<div class="delta-trends-empty">${escapeHtml(state.patternError || "Unable to load defect pattern analyzer.")}</div>`;
+      return;
+    }
+    if (!analyzer) {
+      host.innerHTML = '<div class="delta-trends-empty">No pattern-analysis data available for the current filter state.</div>';
+      return;
+    }
+    const activeClassKey = resolvePatternClassKey(machineId, analyzer);
+    const classOptions = Array.isArray(analyzer.classOptions) ? analyzer.classOptions : [];
+    const heatmapData = (analyzer.heatmapByClass && (analyzer.heatmapByClass[activeClassKey] || analyzer.heatmapByClass.all)) || null;
+    const trendSeries = (analyzer.trendByClass && (analyzer.trendByClass[activeClassKey] || analyzer.trendByClass.all)) || [];
+    const locationMap = (analyzer.locationMapByClass && (analyzer.locationMapByClass[activeClassKey] || analyzer.locationMapByClass.all)) || null;
+    const locationGroups = (((analyzer.locationGroupsByClass && (analyzer.locationGroupsByClass[activeClassKey] || analyzer.locationGroupsByClass.all)) || [])
+      .slice()
+      .sort((left, right) => (
+        (Number(right && right.uniqueReelCount) || 0) - (Number(left && left.uniqueReelCount) || 0)
+        || (Number(right && right.count) || 0) - (Number(left && left.count) || 0)
+        || (Number(right && right.avgMagnitude) || Number(right && right.avgSeverity) || 0) - (Number(left && left.avgMagnitude) || Number(left && left.avgSeverity) || 0)
+      )));
+    const selectedLocationGroup = resolveSelectedPatternLocationGroup(machineId, locationGroups);
+    const baseSummaryCards = (analyzer.summaryCardsByClass && (analyzer.summaryCardsByClass[activeClassKey] || analyzer.summaryCardsByClass.all)) || [];
+    const patternHeatmapData = heatmapData ? buildPatternHeatmapData(heatmapData) : null;
+    const eventData = patternHeatmapData ? buildPatternEventData(machine, patternHeatmapData) : null;
+    const eventInsights = patternHeatmapData ? buildPatternEventInsights(patternHeatmapData, eventData) : [];
+    if (eventData) {
+      eventData.insights = eventInsights;
+    }
+    const summaryCards = patternHeatmapData
+      ? [...baseSummaryCards, ...eventInsights]
+      : baseSummaryCards;
+    const selectedReelIndex = Number(state.patternSelectedReels.get(machineId));
+    host.innerHTML = `
+      <div class="delta-pattern-analyzer">
+        <div class="delta-pattern-analyzer__toolbar">
+          <div>
+            <p class="delta-pattern-analyzer__eyebrow">Pattern Focus</p>
+            <h4>Defect Pattern Analyzer</h4>
+          </div>
+          <label class="delta-pattern-analyzer__filter">
+            <span>Class Filter</span>
+            <select data-pattern-class-filter="true" data-machine-id="${escapeAttr(machineId)}">
+              ${classOptions.map((option) => `
+                <option value="${escapeAttr(option.key)}"${String(option.key) === activeClassKey ? " selected" : ""}>
+                  ${escapeHtml(option.label)} (${escapeHtml(formatNumber(option.count, 0))})
+                </option>
+              `).join("")}
+            </select>
+          </label>
+        </div>
+        <div class="delta-pattern-summary-grid">
+          ${summaryCards.map((card) => `
+            <article class="delta-pattern-summary-card delta-pattern-summary-card--${escapeAttr(card.tone || "neutral")}">
+              <span>${escapeHtml(card.title || "Insight")}</span>
+              <strong>${escapeHtml(card.body || "--")}</strong>
+            </article>
+          `).join("")}
+        </div>
+        <section class="delta-pattern-card delta-pattern-card--full">
+          <div class="delta-pattern-card__header">
+            <div>
+              <strong>Reel Position Pattern Heatmap</strong>
+              <span>Color intensity shows defect count by reel order and reel region, with severity kept in hover details.</span>
+            </div>
+          </div>
+          <div id="defectPatternHeatmap-${machineId}" class="delta-pattern-card__chart delta-pattern-card__chart--heatmap"></div>
+          <div id="defectPatternHeatmapDetail-${machineId}" class="delta-pattern-heatmap-detail"></div>
+        </section>
+        <section class="delta-pattern-card delta-pattern-card--full">
+          <div class="delta-pattern-card__header">
+            <div>
+              <strong>Magnitude Trend by Reel Position</strong>
+              <span>Smoothed region trends show whether defect magnitude is improving, worsening, or staying stable across reels.</span>
+            </div>
+          </div>
+          <div id="defectPatternTrendSummary-${machineId}" class="delta-pattern-trend-summary"></div>
+          <div id="defectPatternTrend-${machineId}" class="delta-pattern-card__chart delta-pattern-card__chart--trend"></div>
+          <p class="delta-pattern-trend-caption">Lines show smoothed magnitude trends by reel region; shaded bands show process events aligned to reel order.</p>
+        </section>
+        <section class="delta-pattern-card">
+          <div class="delta-pattern-card__header">
+            <div>
+              <strong>Defect Location Explorer</strong>
+              <span>Grouped by where defects land on the normalized format, with real-image evidence behind each zone.</span>
+            </div>
+          </div>
+          ${renderPatternLocationHighlights(locationGroups)}
+          <div class="delta-pattern-location-layout">
+            <div class="delta-pattern-location-group-grid">
+              ${locationGroups.length
+              ? locationGroups.map((group) => `
+                <article
+                  class="delta-pattern-location-card${selectedLocationGroup && selectedLocationGroup.key === group.key ? " is-selected" : ""}"
+                  data-machine-id="${escapeAttr(machineId)}"
+                  data-pattern-location-view="${escapeAttr(group.key)}"
+                  tabindex="0"
+                  role="button"
+                  aria-pressed="${selectedLocationGroup && selectedLocationGroup.key === group.key ? "true" : "false"}"
+                >
+                  <div class="delta-pattern-location-card__header">
+                    <div>
+                      <strong>${escapeHtml(group.label || "Location Group")}</strong>
+                      <span>${escapeHtml(formatNumber(group.sharePct, 1))}% of defects</span>
+                    </div>
+                    ${group.thumbnailSrc ? `<img src="${escapeAttr(urlForStatic(group.thumbnailSrc))}" alt="${escapeAttr(group.label || "Location group")}" loading="lazy" decoding="async" onerror="this.remove()">` : ""}
+                  </div>
+                  <div class="delta-pattern-location-card__metrics">
+                    <article><span>Reels Affected</span><strong>${escapeHtml(formatNumber(group.uniqueReelCount, 0))}</strong></article>
+                    <article><span>Defects</span><strong>${escapeHtml(formatNumber(group.count, 0))}</strong></article>
+                    <article><span>Avg Severity</span><strong>${escapeHtml(formatMetric(group.avgSeverity))}</strong></article>
+                    <article><span>Avg Magnitude</span><strong>${escapeHtml(formatMetric(group.avgMagnitude))}</strong></article>
+                  </div>
+                  <div class="delta-pattern-location-card__chips">
+                    ${renderPatternBadge("Dominant Class", group.dominantClassName || "--")}
+                  </div>
+                </article>
+              `).join("")
+              : '<div class="delta-trends-empty">No location groups available for the current class filter.</div>'}
+            </div>
+          </div>
+          ${selectedLocationGroup ? renderPatternLocationViewer(machineId, selectedLocationGroup) : ""}
+        </section>
+      </div>
+    `;
+    renderPatternHeatmap(
+      document.getElementById(`defectPatternHeatmap-${machineId}`),
+      heatmapData,
+      machine,
+      patternHeatmapData,
+      eventData,
+      selectedReelIndex,
+      document.getElementById(`defectPatternHeatmapDetail-${machineId}`)
+    );
+    renderPatternTrend(
+      document.getElementById(`defectPatternTrend-${machineId}`),
+      trendSeries,
+      document.getElementById(`defectPatternTrendSummary-${machineId}`),
+      eventData
+    );
+  }
+
+  function renderPatternBadge(label, value) {
+    return `
+      <span class="delta-pattern-badge">
+        <strong>${escapeHtml(label)}</strong>
+        <span>${escapeHtml(value)}</span>
+      </span>
+    `;
+  }
+
+  function describePatternLocationWhy(group) {
+    const parts = [];
+    if (group && group.label) parts.push(`Defects land in the ${group.label} zone of the normalized format`);
+    if (group && group.dominantClassName) parts.push(`the dominant class is ${group.dominantClassName}`);
+    if (Number.isFinite(Number(group && group.uniqueReelCount))) parts.push(`this zone repeats across ${formatNumber(group.uniqueReelCount, 0)} reels`);
+    return parts.join(", ");
+  }
+
+  function renderPatternLocationHighlights(locationGroups) {
+    const groups = Array.isArray(locationGroups) ? locationGroups : [];
+    if (!groups.length) return "";
+    const mostDefects = groups[0] || null;
+    const mostReels = groups.slice().sort((left, right) => (
+      (Number(right && right.uniqueReelCount) || 0) - (Number(left && left.uniqueReelCount) || 0)
+      || (Number(right && right.count) || 0) - (Number(left && left.count) || 0)
+    ))[0] || null;
+    const highestSeverity = groups.slice().sort((left, right) => (
+      (Number(right && right.avgSeverity) || 0) - (Number(left && left.avgSeverity) || 0)
+      || (Number(right && right.count) || 0) - (Number(left && left.count) || 0)
+    ))[0] || null;
+    const items = [
+      mostDefects ? `Most defects cluster in ${mostDefects.label}.` : "",
+      mostReels ? `${mostReels.label} affects the most reels.` : "",
+      highestSeverity ? `${highestSeverity.label} has the highest average severity.` : "",
+    ].filter(Boolean);
+    return `
+      <div class="delta-pattern-location-highlights">
+        ${items.map((item) => `<article>${escapeHtml(item)}</article>`).join("")}
+      </div>
+    `;
+  }
+
+  function inferExampleOverlayBounds(coords, formatWidth, formatLength) {
+    const shapes = Array.isArray(coords) ? coords : [];
+    const xs = [];
+    const ys = [];
+    shapes.forEach((shape) => {
+      const shapeXs = Array.isArray(shape && shape.x) ? shape.x : [];
+      const shapeYs = Array.isArray(shape && shape.y) ? shape.y : [];
+      const count = Math.min(shapeXs.length, shapeYs.length);
+      for (let index = 0; index < count; index += 1) {
+        const x = Number(shapeXs[index]);
+        const y = Number(shapeYs[index]);
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+          xs.push(x);
+          ys.push(y);
+        }
+      }
+    });
+    if (!xs.length || !ys.length) {
+      const width = Math.max(1, Number(formatWidth) || 100);
+      const height = Math.max(1, Number(formatLength) || 100);
+      return { viewBox: `0 0 ${width} ${height}`, strokeWidth: Math.max(width, height) * 0.01 };
+    }
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const width = Math.max(maxX - minX, 1);
+    const height = Math.max(maxY - minY, 1);
+    const padX = width * 0.08;
+    const padY = height * 0.08;
+    return {
+      viewBox: `${minX - padX} ${minY - padY} ${width + (padX * 2)} ${height + (padY * 2)}`,
+      strokeWidth: Math.max(width, height) * 0.018,
+    };
+  }
+
+  function renderPatternExampleOverlay(example) {
+    const coords = Array.isArray(example && example.coords) ? example.coords : [];
+    if (!coords.length) return "";
+    const bounds = inferExampleOverlayBounds(coords, example && example.formatWidth, example && example.formatLength);
+    const polygons = coords.map((shape, index) => {
+      const xs = Array.isArray(shape && shape.x) ? shape.x : [];
+      const ys = Array.isArray(shape && shape.y) ? shape.y : [];
+      const count = Math.min(xs.length, ys.length);
+      if (count < 3) return "";
+      const points = Array.from({ length: count }, (_, pointIndex) => `${xs[pointIndex]},${ys[pointIndex]}`).join(" ");
+      const fill = index === 0 ? "rgba(239, 68, 68, 0.16)" : "rgba(249, 115, 22, 0.13)";
+      const stroke = index === 0 ? "rgba(220, 38, 38, 0.96)" : "rgba(234, 88, 12, 0.9)";
+      return `<polygon points="${escapeAttr(points)}" fill="${fill}" stroke="${stroke}" stroke-width="${escapeAttr(bounds.strokeWidth)}"></polygon>`;
+    }).join("");
+    return `
+      <svg class="delta-pattern-family-viewer__overlay" viewBox="${escapeAttr(bounds.viewBox)}" preserveAspectRatio="xMidYMid meet" aria-label="Defect polygon overlay">
+        ${polygons}
+      </svg>
+    `;
+  }
+
+  function describePatternLocationZone(colIndex, rowIndex, cols, rows) {
+    const horizontal = describePatternLocationAxis(colIndex, cols, "x");
+    const vertical = describePatternLocationAxis(rowIndex, rows, "y");
+    if (horizontal === "Center" && vertical === "Center") return "Center";
+    if (horizontal === "Center") return `${vertical} Center`;
+    if (vertical === "Center") return `${horizontal} Center`;
+    return `${horizontal} / ${vertical}`;
+  }
+
+  function describePatternLocationAxis(index, total, axis) {
+    if (total <= 1) return "Center";
+    const ratio = index / Math.max(total - 1, 1);
+    if (axis === "x") {
+      if (ratio <= 0.15) return "Left Edge";
+      if (ratio <= 0.35) return "Left";
+      if (ratio < 0.65) return "Center";
+      if (ratio < 0.85) return "Right";
+      return "Right Edge";
+    }
+    if (ratio <= 0.15) return "Top Edge";
+    if (ratio <= 0.35) return "Upper";
+    if (ratio < 0.65) return "Center";
+    if (ratio < 0.85) return "Lower";
+    return "Bottom Edge";
+  }
+
+  function renderPatternLocationViewer(machineId, group) {
+    const examples = Array.isArray(group && group.examples) ? group.examples : [];
+    if (!examples.length) {
+      return '<div class="delta-trends-empty">No real-image examples are available for this location group.</div>';
+    }
+    const selectionKey = `${machineId}:${group.key}`;
+    const selectedIndex = Math.max(0, Math.min(Number(state.patternSelectedLocationExamples.get(selectionKey)) || 0, examples.length - 1));
+    const example = examples[selectedIndex] || examples[0];
+    const imageSrc = example && example.imageSrc ? urlForStatic(example.imageSrc) : "";
+    return `
+      <section class="delta-pattern-family-viewer">
+        <div class="delta-pattern-family-viewer__header">
+          <div>
+            <p class="delta-pattern-analyzer__eyebrow">Evidence Viewer</p>
+            <h5>${escapeHtml(group.label || "Location Group")}</h5>
+            <p>${escapeHtml(describePatternLocationWhy(group))}</p>
+          </div>
+          <button type="button" class="delta-machine-panel__group-list-toggle" data-pattern-location-close="true" data-machine-id="${escapeAttr(machineId)}">Close viewer</button>
+        </div>
+        <div class="delta-pattern-family-viewer__summary">
+          ${renderPatternBadge("Zone", group.label || "--")}
+          ${renderPatternBadge("Dominant Class", group.dominantClassName || "--")}
+          ${renderPatternBadge("Reels Affected", formatNumber(group.uniqueReelCount, 0))}
+          ${renderPatternBadge("Defect Count", formatNumber(group.count, 0))}
+          ${renderPatternBadge("Avg Severity", formatMetric(group.avgSeverity))}
+          ${renderPatternBadge("Avg Magnitude", formatMetric(group.avgMagnitude))}
+        </div>
+        <div class="delta-pattern-family-viewer__body">
+          <div class="delta-pattern-family-viewer__main">
+            <div class="delta-pattern-family-viewer__toolbar">
+              <button type="button" class="delta-machine-panel__group-list-toggle" data-machine-id="${escapeAttr(machineId)}" data-group-key="${escapeAttr(group.key)}" data-pattern-location-example-nav="true" data-direction="-1">Prev</button>
+              <span>Example ${escapeHtml(formatNumber(selectedIndex + 1, 0))} of ${escapeHtml(formatNumber(examples.length, 0))}</span>
+              <button type="button" class="delta-machine-panel__group-list-toggle" data-machine-id="${escapeAttr(machineId)}" data-group-key="${escapeAttr(group.key)}" data-pattern-location-example-nav="true" data-direction="1">Next</button>
+            </div>
+            <div class="delta-pattern-family-viewer__image-shell${imageSrc ? "" : " is-empty"}">
+              ${imageSrc
+                ? `
+                  <img
+                    src="${escapeAttr(imageSrc)}"
+                    alt="${escapeAttr(`${group.label || "Location Group"} example ${selectedIndex + 1}`)}"
+                    loading="lazy"
+                    decoding="async"
+                    onerror="this.closest('.delta-pattern-family-viewer__image-shell').classList.add('is-broken'); this.remove();"
+                  >
+                  ${renderPatternExampleOverlay(example)}
+                `
+                : '<div class="delta-pattern-family-viewer__fallback">No image available for this example</div>'}
+              <div class="delta-pattern-family-viewer__fallback">Image unavailable</div>
+            </div>
+            <div class="delta-pattern-family-viewer__thumbs">
+              ${examples.slice(0, 10).map((item, index) => {
+      const thumbSrc = item && item.imageSrc ? urlForStatic(item.imageSrc) : "";
+      const isActive = index === selectedIndex;
+      return `
+                <button
+                  type="button"
+                  class="delta-pattern-family-viewer__thumb${isActive ? " is-active" : ""}"
+                  data-machine-id="${escapeAttr(machineId)}"
+                  data-group-key="${escapeAttr(group.key)}"
+                  data-pattern-location-thumb="${escapeAttr(index)}"
+                  title="${escapeAttr((item.selectionTags || []).join(", ") || `Example ${index + 1}`)}"
+                >
+                  ${thumbSrc
+                    ? `<img src="${escapeAttr(thumbSrc)}" alt="${escapeAttr(`Example ${index + 1}`)}" loading="lazy" decoding="async" onerror="this.remove()">`
+                    : `<span>${escapeHtml(formatNumber(index + 1, 0))}</span>`}
+                </button>
+              `;
+    }).join("")}
+            </div>
+          </div>
+          <aside class="delta-pattern-family-viewer__meta">
+            <article class="delta-pattern-family-viewer__meta-card">
+              <span>Grouping Basis</span>
+              <strong>${escapeHtml(group.label || "Location Group")}</strong>
+              <p>${escapeHtml("Grouped by normalized defect centroid on the format map using a coarse 5 x 5 location grid.")}</p>
+            </article>
+            <article class="delta-pattern-family-viewer__meta-card">
+              <span>Example Tags</span>
+              <strong>${escapeHtml((example.selectionTags || []).join(" · ") || (example.isOutlier ? "Outlier" : "Representative example"))}</strong>
+              <p>${escapeHtml(example.isOutlier ? "This example sits farther from the family center than the most typical members." : "This example is representative of the family grouping.")}</p>
+            </article>
+            <article class="delta-pattern-family-viewer__meta-card">
+              <span>Defect Context</span>
+              <strong>${escapeHtml(example.className || "--")}</strong>
+              <p>
+                ${escapeHtml(`Magnitude ${formatMetric(example.magnitudeValue)} · Severity ${formatMetric(example.severityValue)}`)}<br>
+                ${escapeHtml(`Format zone ${example.locationLabel || group.label || "--"} · Reel region ${example.bucketLabel || "--"} · Format position ${formatNumber(example.formatPosition, 2)}`)}<br>
+                ${escapeHtml(`Reel ${example.reelCode || "--"} (#${formatNumber(example.reelIndex, 0)}) · ${example.jobLabel || "--"}`)}<br>
+                ${escapeHtml(`Format ${formatNumber(example.formatWidth, 2)} x ${formatNumber(example.formatLength, 2)}`)}<br>
+                ${escapeHtml(`Time ${example.defectTime || "--"}`)}
+              </p>
+            </article>
+          </aside>
+        </div>
+      </section>
+    `;
+  }
+
+  function buildPatternChartLayout({ xTitle, yTitle, showLegend = false }) {
+    const isDark = document.body.classList.contains("dark-mode");
+    const textColor = readThemeColor("--text-primary", isDark ? "#e2e8f0" : "#0f172a");
+    const gridColor = isDark ? "rgba(148, 163, 184, 0.16)" : "rgba(148, 163, 184, 0.18)";
+    const hoverBg = readThemeColor("--surface", isDark ? "#0f172a" : "#ffffff");
+    const hoverBorder = readThemeColor("--border", isDark ? "#334155" : "#cbd5e1");
+    return {
+      autosize: true,
+      paper_bgcolor: "transparent",
+      plot_bgcolor: "transparent",
+      margin: { t: 24, r: 18, b: 62, l: 58 },
+      showlegend: !!showLegend,
+      legend: {
+        orientation: "h",
+        x: 0,
+        y: 1.18,
+        font: { color: textColor },
+      },
+      hoverlabel: {
+        bgcolor: hoverBg,
+        bordercolor: hoverBorder,
+        font: { color: textColor },
+      },
+      xaxis: {
+        title: xTitle,
+        automargin: true,
+        color: textColor,
+        gridcolor: gridColor,
+        type: "category",
+        tickangle: -35,
+      },
+      yaxis: {
+        title: yTitle,
+        automargin: true,
+        color: textColor,
+        gridcolor: gridColor,
+      },
+    };
+  }
+
+  function renderPatternHeatmap(host, heatmapData, machine = null, patternDataInput = null, eventDataInput = null, selectedReelIndexInput = null, detailHost = null) {
+    if (!host) return;
+    if (!heatmapData || !Array.isArray(heatmapData.z) || !heatmapData.z.length) {
+      host.innerHTML = '<div class="delta-trends-empty">No position pattern data available.</div>';
+      return;
+    }
+    const reelLabels = Array.isArray(heatmapData.reelLabels) ? heatmapData.reelLabels : [];
+    const bucketLabels = Array.isArray(heatmapData.bucketLabels) ? heatmapData.bucketLabels : [];
+    const maxCount = Math.max(0, ...heatmapData.z.flat().map((value) => Number(value) || 0));
+    if (!maxCount) {
+      host.innerHTML = '<div class="delta-trends-empty">No defect counts available for the current pattern view.</div>';
+      return;
+    }
+    const patternData = patternDataInput || buildPatternHeatmapData(heatmapData);
+    const eventData = eventDataInput || buildPatternEventData(machine, patternData);
+    const machineId = String(machine && machine.machineId || "");
+    const selectedReelIndex = Number.isInteger(Number(selectedReelIndexInput))
+      ? Number(selectedReelIndexInput)
+      : (eventData && eventData.highlightedReels && eventData.highlightedReels[0] ? eventData.highlightedReels[0].reelIndex : 0);
+    host.innerHTML = `
+      <div class="delta-pattern-heatmap-shell">
+        ${renderPatternDistributionBar(patternData)}
+        ${renderPatternDominantRegionStrip(patternData)}
+        ${renderPatternEventImpactPanel(eventData)}
+        <div class="delta-pattern-heatmap-chart" data-pattern-heatmap-chart="true"></div>
+      </div>
+    `;
+    const chartHost = host.querySelector('[data-pattern-heatmap-chart="true"]');
+    const xPositions = reelLabels.map((_, index) => index + 1);
+    const tickConfig = buildSparseNumericCategoryTicks(xPositions, reelLabels, 14);
+    const hoverMatrix = buildPatternHeatmapHoverMatrix(patternData, eventData);
+    const textMatrix = patternData.pctMatrix.map((row) => (
+      Array.isArray(row)
+        ? row.map((value) => (Number.isFinite(Number(value)) && reelLabels.length <= 14 ? `${formatNumber(value, 0)}%` : ""))
+        : []
+    ));
+    const maxDeviation = Math.max(5, ...patternData.deviationMatrix.flat().map((value) => Math.abs(Number(value) || 0)));
+    const traces = [
+      {
+        type: "heatmap",
+        x: xPositions,
+        y: bucketLabels,
+        z: patternData.deviationMatrix,
+        text: textMatrix,
+        texttemplate: "%{text}",
+        textfont: { size: 10 },
+        colorscale: [
+          [0, "#b91c1c"],
+          [0.25, "#fca5a5"],
+          [0.5, "#f8fafc"],
+          [0.75, "#93c5fd"],
+          [1, "#1d4ed8"],
+        ],
+        zmid: 0,
+        zmin: -maxDeviation,
+        zmax: maxDeviation,
+        hovertemplate: "%{customdata}<extra></extra>",
+        customdata: hoverMatrix,
+        colorbar: { title: "Deviation vs Avg %", thickness: 12, ticksuffix: " pts" },
+      },
+      ...buildPatternEventMarkerTraces(patternData, eventData),
+    ];
+    window.Plotly.react(chartHost, traces, {
+      ...buildPatternChartLayout({ xTitle: "Reel Order", yTitle: "Reel Region" }),
+      xaxis: {
+        ...buildPatternChartLayout({ xTitle: "Reel Order", yTitle: "Reel Region" }).xaxis,
+        tickmode: "array",
+        tickvals: tickConfig.tickvals,
+        ticktext: tickConfig.ticktext,
+        tickangle: reelLabels.length > 16 ? 0 : -25,
+        type: "linear",
+        range: [0.5, xPositions.length + 0.5],
+      },
+      yaxis: {
+        ...buildPatternChartLayout({ xTitle: "Reel Order", yTitle: "Reel Region" }).yaxis,
+        autorange: "reversed",
+      },
+      shapes: buildPatternEventShapes(selectedReelIndex),
+    }, getPlotConfig());
+    if (detailHost) {
+      renderPatternSelectedReelDetail(detailHost, patternData, eventData, selectedReelIndex, machineId);
+    }
+    if (chartHost && typeof chartHost.on === "function") {
+      chartHost.removeAllListeners?.("plotly_click");
+      chartHost.on("plotly_click", (plotEvent) => {
+        const point = plotEvent && plotEvent.points && plotEvent.points[0];
+        if (!point) return;
+        const xValue = Number(point.x);
+        if (!Number.isFinite(xValue)) return;
+        state.patternSelectedReels.set(machineId, Math.max(0, Math.round(xValue) - 1));
+        const analyzerHost = document.getElementById(`defectTrendsMachinePatternAnalyzer-${machineId}`);
+        renderMachinePatternAnalyzer(analyzerHost, machine);
+      });
+    }
+  }
+
+  function buildPatternHeatmapData(heatmapData) {
+    const reels = Array.isArray(heatmapData && heatmapData.reels) ? heatmapData.reels : [];
+    const bucketLabels = Array.isArray(heatmapData && heatmapData.bucketLabels) ? heatmapData.bucketLabels : [];
+    const countsMatrix = Array.isArray(heatmapData && heatmapData.z) ? heatmapData.z : [];
+    const avgSeverityMatrix = Array.isArray(heatmapData && heatmapData.avgSeverity) ? heatmapData.avgSeverity : [];
+    const rawHoverMatrix = Array.isArray(heatmapData && heatmapData.hover) ? heatmapData.hover : [];
+    const reelTotals = reels.map((_, reelIndex) => countsMatrix.reduce((sum, row) => sum + (Number(row && row[reelIndex]) || 0), 0));
+    const bucketTotals = bucketLabels.map((_, bucketIndex) => countsMatrix[bucketIndex].reduce((sum, value) => sum + (Number(value) || 0), 0));
+    const overallTotal = bucketTotals.reduce((sum, value) => sum + value, 0);
+    const globalPctByBucket = bucketTotals.map((count) => overallTotal > 0 ? (count / overallTotal) * 100 : 0);
+    const pctMatrix = countsMatrix.map((row, bucketIndex) => row.map((value, reelIndex) => {
+      const reelTotal = reelTotals[reelIndex];
+      if (!reelTotal) return null;
+      return ((Number(value) || 0) / reelTotal) * 100;
+    }));
+    const deviationMatrix = pctMatrix.map((row, bucketIndex) => row.map((value) => (
+      Number.isFinite(Number(value)) ? Number((Number(value) - globalPctByBucket[bucketIndex]).toFixed(2)) : null
+    )));
+    const reelSummaries = reels.map((reel, reelIndex) => {
+      const percentages = bucketLabels.map((label, bucketIndex) => ({
+        label,
+        count: Number(countsMatrix[bucketIndex] && countsMatrix[bucketIndex][reelIndex]) || 0,
+        pct: Number.isFinite(Number(pctMatrix[bucketIndex] && pctMatrix[bucketIndex][reelIndex]))
+          ? Number(pctMatrix[bucketIndex][reelIndex])
+          : 0,
+        avgSeverity: Number(avgSeverityMatrix[bucketIndex] && avgSeverityMatrix[bucketIndex][reelIndex]),
+        dominantClass: extractHoverField(rawHoverMatrix[bucketIndex] && rawHoverMatrix[bucketIndex][reelIndex], "Dominant class"),
+      }));
+      const sortedPercentages = percentages.slice().sort((left, right) => right.pct - left.pct);
+      const dominant = sortedPercentages[0] || { label: "Unknown", pct: 0 };
+      const bucketBaseline = bucketLabels.length ? 100 / bucketLabels.length : 0;
+      const strength = bucketBaseline < 100
+        ? Math.max(0, Math.min(1, (dominant.pct - bucketBaseline) / (100 - bucketBaseline)))
+        : 0;
+      return {
+        reel,
+        reelIndex,
+        totalDefects: reelTotals[reelIndex],
+        percentages,
+        dominantLabel: dominant.label,
+        dominantPct: dominant.pct,
+        dominantClass: dominant.dominantClass || "",
+        patternStrength: strength,
+      };
+    });
+    return {
+      reels,
+      bucketLabels,
+      countsMatrix,
+      avgSeverityMatrix,
+      pctMatrix,
+      deviationMatrix,
+      globalPctByBucket,
+      reelSummaries,
+      rawHoverMatrix,
+    };
+  }
+
+  function buildPatternHeatmapHoverMatrix(patternData, eventData) {
+    const bucketLabels = Array.isArray(patternData && patternData.bucketLabels) ? patternData.bucketLabels : [];
+    const reels = Array.isArray(patternData && patternData.reels) ? patternData.reels : [];
+    const summaries = Array.isArray(patternData && patternData.reelSummaries) ? patternData.reelSummaries : [];
+    return bucketLabels.map((bucketLabel, bucketIndex) => reels.map((reel, reelIndex) => {
+      const summary = summaries[reelIndex];
+      const pct = patternData.pctMatrix[bucketIndex] && patternData.pctMatrix[bucketIndex][reelIndex];
+      const deviation = patternData.deviationMatrix[bucketIndex] && patternData.deviationMatrix[bucketIndex][reelIndex];
+      const avgSeverity = patternData.avgSeverityMatrix[bucketIndex] && patternData.avgSeverityMatrix[bucketIndex][reelIndex];
+      const dominantClass = summary && summary.dominantClass ? summary.dominantClass : extractHoverField(patternData.rawHoverMatrix[bucketIndex] && patternData.rawHoverMatrix[bucketIndex][reelIndex], "Dominant class") || "--";
+      const cellEvents = ((eventData && eventData.cellEventMap && eventData.cellEventMap.get(`${reelIndex}:${bucketIndex}`)) || []);
+      const eventText = cellEvents.length
+        ? cellEvents.map((event) => event.detail).join(" | ")
+        : "None";
+      return [
+        `<b>${escapeHtml((reel && reel.reelCode) || `#${reelIndex + 1}`)}</b>`,
+        `Region: ${escapeHtml(bucketLabel)}`,
+        `Deviation vs avg: ${escapeHtml(formatNumber(deviation, 1))} pts`,
+        `Defect count: ${escapeHtml(formatNumber(summary && summary.totalDefects, 0))}`,
+        `Avg severity: ${escapeHtml(formatNumber(avgSeverity, 2))}`,
+        `Dominant class: ${escapeHtml(dominantClass)}`,
+        `Events: ${escapeHtml(eventText)}`,
+      ].join("<br>");
+    }));
+  }
+
+  function buildPatternEventData(machine, patternData) {
+    const reels = Array.isArray(patternData && patternData.reels) ? patternData.reels : [];
+    const referenceEvents = Array.isArray(machine && machine.referenceImageEvents) ? machine.referenceImageEvents : [];
+    const speedPoints = Array.isArray(machine && machine.speedPoints) ? machine.speedPoints : [];
+    const machineReels = Array.isArray(machine && machine.reels) ? machine.reels : [];
+    const machineReelMap = new Map(machineReels.map((reel) => [String(reel && reel.reelId || ""), reel]));
+    const reelEventMap = new Map(reels.map((reel, index) => [String(reel && reel.reelId || ""), {
+      reel,
+      reelIndex: index,
+      events: [],
+      eventLabels: [],
+    }]));
+    const cellEventMap = new Map();
+
+    referenceEvents.forEach((event) => {
+      const reelId = String(event && event.reelId || "");
+      const target = reelEventMap.get(reelId);
+      if (!target) return;
+      const reelRow = machineReelMap.get(reelId);
+      const bucketIndex = resolvePatternEventBucketIndex(event, target.reel, reelRow, patternData.bucketLabels);
+      const nextLabel = `Reference image change${event && event.filename ? `: ${event.filename}` : ""}`;
+      const eventPayload = {
+        type: "reference",
+        shortLabel: "Ref",
+        detail: nextLabel,
+        bucketIndex,
+      };
+      target.events.push(eventPayload);
+      target.eventLabels.push(nextLabel);
+      appendPatternCellEvent(cellEventMap, target.reelIndex, bucketIndex, eventPayload);
+    });
+
+    const speedPointsByReel = new Map();
+    speedPoints.forEach((point) => {
+      const reelId = String(point && point.reelId || "");
+      if (!reelId || !reelEventMap.has(reelId)) return;
+      if (!speedPointsByReel.has(reelId)) speedPointsByReel.set(reelId, []);
+      speedPointsByReel.get(reelId).push(point);
+    });
+    const allAbsDeltas = [];
+    const reelSpeedStats = new Map();
+    speedPointsByReel.forEach((points, reelId) => {
+      const orderedPoints = points.slice().sort((a, b) => {
+        const af = Number(a && a.feetFromReelStart);
+        const bf = Number(b && b.feetFromReelStart);
+        if (Number.isFinite(af) && Number.isFinite(bf) && af !== bf) return af - bf;
+        const at = a && a.time ? new Date(a.time).getTime() : 0;
+        const bt = b && b.time ? new Date(b.time).getTime() : 0;
+        return at - bt;
+      });
+      let previousSpeed = null;
+      let spikeCount = 0;
+      let peakAbsDelta = 0;
+      orderedPoints.forEach((point) => {
+        const speed = Number(point && point.webspeed);
+        if (!Number.isFinite(speed)) return;
+        if (Number.isFinite(previousSpeed)) {
+          const absDelta = Math.abs(speed - previousSpeed);
+          allAbsDeltas.push(absDelta);
+          peakAbsDelta = Math.max(peakAbsDelta, absDelta);
+        }
+        previousSpeed = speed;
+      });
+      reelSpeedStats.set(reelId, { orderedPoints, spikeCount, peakAbsDelta });
+    });
+    const speedThreshold = Math.max(5, percentile(allAbsDeltas, 0.85));
+    reelSpeedStats.forEach((stats, reelId) => {
+      let previousSpeed = null;
+      let spikeCount = 0;
+      let peakAbsDelta = 0;
+      const spikes = [];
+      stats.orderedPoints.forEach((point) => {
+        const speed = Number(point && point.webspeed);
+        if (!Number.isFinite(speed)) return;
+        if (Number.isFinite(previousSpeed)) {
+          const absDelta = Math.abs(speed - previousSpeed);
+          peakAbsDelta = Math.max(peakAbsDelta, absDelta);
+          if (absDelta >= speedThreshold) {
+            spikeCount += 1;
+            spikes.push({ point, absDelta });
+          }
+        }
+        previousSpeed = speed;
+      });
+      const target = reelEventMap.get(reelId);
+      if (!target || spikeCount <= 0) return;
+      const label = `Speed deviation: ${spikeCount} spike${spikeCount === 1 ? "" : "s"} · peak ${formatNumber(peakAbsDelta, 1)}`;
+      target.events.push({
+        type: "speed",
+        shortLabel: spikeCount > 1 ? `Spd ${spikeCount}` : "Spd",
+        detail: label,
+      });
+      target.eventLabels.push(label);
+      const reelRow = machineReelMap.get(reelId);
+      spikes.forEach((spike) => {
+        const bucketIndex = resolvePatternEventBucketIndex(spike.point, target.reel, reelRow, patternData.bucketLabels);
+        appendPatternCellEvent(cellEventMap, target.reelIndex, bucketIndex, {
+          type: "speed",
+          shortLabel: "Spd",
+          detail: `Speed deviation ${formatNumber(spike.absDelta, 1)}`,
+          bucketIndex,
+        });
+      });
+    });
+
+    const reelSummaries = reels.map((reel, index) => {
+      const entry = reelEventMap.get(String(reel && reel.reelId || "")) || { events: [], eventLabels: [] };
+      const patternSummary = (patternData && patternData.reelSummaries && patternData.reelSummaries[index]) || null;
+      const maxDeviation = patternSummary
+        ? Math.max(...(patternSummary.percentages || []).map((item, bucketIndex) => Math.abs(Number(patternData.deviationMatrix[bucketIndex] && patternData.deviationMatrix[bucketIndex][index]) || 0)), 0)
+        : 0;
+      const isMeaningful = !!entry.events.length && (
+        (patternSummary && patternSummary.patternStrength >= 0.32)
+        || maxDeviation >= 8
+      );
+      return {
+        reel,
+        reelIndex: index,
+        events: entry.events,
+        eventLabels: entry.eventLabels,
+        hasEvents: !!entry.events.length,
+        isMeaningful,
+        maxDeviation,
+        patternStrength: patternSummary ? Number(patternSummary.patternStrength) || 0 : 0,
+      };
+    });
+    let highlightedReels = reelSummaries.filter((item) => item.isMeaningful);
+    if (!highlightedReels.length) {
+      highlightedReels = reelSummaries.filter((item) => item.hasEvents);
+    }
+    highlightedReels.sort((left, right) => (
+      (Number(right.patternStrength) || 0) - (Number(left.patternStrength) || 0)
+      || (Number(right.maxDeviation) || 0) - (Number(left.maxDeviation) || 0)
+      || (right.events.length - left.events.length)
+    ));
+    if (highlightedReels.length > Math.max(12, Math.ceil(reelSummaries.length * 0.35))) {
+      highlightedReels = highlightedReels.slice(0, Math.max(8, Math.ceil(reelSummaries.length * 0.2)));
+    }
+    const highlightedReelIndexSet = new Set(highlightedReels.map((item) => item.reelIndex));
+    const filteredCellEventMap = new Map();
+    cellEventMap.forEach((events, key) => {
+      const [reelIndexText] = String(key || "").split(":");
+      const reelIndex = Number(reelIndexText);
+      if (!highlightedReelIndexSet.has(reelIndex)) return;
+      filteredCellEventMap.set(key, events);
+    });
+    return {
+      speedThreshold,
+      reelSummaries,
+      highlightedReels,
+      cellEventMap: filteredCellEventMap,
+      eventReelIndices: highlightedReels.map((item) => item.reelIndex),
+    };
+  }
+
+  function appendPatternCellEvent(cellEventMap, reelIndex, bucketIndex, eventPayload) {
+    if (!(cellEventMap instanceof Map) || !Number.isInteger(reelIndex) || !Number.isInteger(bucketIndex)) return;
+    const key = `${reelIndex}:${bucketIndex}`;
+    if (!cellEventMap.has(key)) cellEventMap.set(key, []);
+    cellEventMap.get(key).push(eventPayload);
+  }
+
+  function resolvePatternEventBucketIndex(event, analyzerReel, machineReel, bucketLabels) {
+    const bucketCount = Math.max(Array.isArray(bucketLabels) ? bucketLabels.length : 0, 1);
+    const localFeet = Number(event && event.feetFromReelStart);
+    const reelFeetTotal = Number((analyzerReel && analyzerReel.reelFeetTotal) || (machineReel && machineReel.reelFeetTotal));
+    let ratio = null;
+    if (Number.isFinite(localFeet) && Number.isFinite(reelFeetTotal) && reelFeetTotal > 0) {
+      ratio = localFeet / reelFeetTotal;
+    } else {
+      const eventTime = event && event.time ? new Date(event.time).getTime() : NaN;
+      const startTime = machineReel && machineReel.timeStart ? new Date(machineReel.timeStart).getTime() : NaN;
+      const endTime = machineReel && machineReel.timeEnd ? new Date(machineReel.timeEnd).getTime() : NaN;
+      if (Number.isFinite(eventTime) && Number.isFinite(startTime) && Number.isFinite(endTime) && endTime > startTime) {
+        ratio = (eventTime - startTime) / (endTime - startTime);
+      }
+    }
+    const normalizedRatio = Math.max(0, Math.min(0.999999, Number.isFinite(ratio) ? ratio : 0.5));
+    return Math.min(bucketCount - 1, Math.floor(normalizedRatio * bucketCount));
+  }
+
+  function percentile(valuesInput, ratio = 0.5) {
+    const values = (Array.isArray(valuesInput) ? valuesInput : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value))
+      .sort((a, b) => a - b);
+    if (!values.length) return 0;
+    const clampedRatio = Math.max(0, Math.min(1, Number(ratio) || 0));
+    const index = Math.min(values.length - 1, Math.max(0, Math.floor(clampedRatio * (values.length - 1))));
+    return values[index];
+  }
+
+  function buildPatternEventInsights(patternData, eventData) {
+    if (!patternData || !eventData) return [];
+    const withEvents = eventData.reelSummaries.filter((item) => item.hasEvents);
+    const withoutEvents = eventData.reelSummaries.filter((item) => !item.hasEvents);
+    if (!withEvents.length || !withoutEvents.length) return [];
+    const withIndices = withEvents.map((item) => item.reelIndex);
+    const withoutIndices = withoutEvents.map((item) => item.reelIndex);
+    const withBucketAverages = averageBucketsForReels(patternData, withIndices);
+    const withoutBucketAverages = averageBucketsForReels(patternData, withoutIndices);
+    const bucketDiffs = patternData.bucketLabels.map((label, index) => ({
+      label,
+      diff: (withBucketAverages[index] || 0) - (withoutBucketAverages[index] || 0),
+    })).sort((left, right) => Math.abs(right.diff) - Math.abs(left.diff));
+    const topBucketShift = bucketDiffs[0];
+    const withSeverity = weightedSeverityForReels(patternData, withIndices);
+    const withoutSeverity = weightedSeverityForReels(patternData, withoutIndices);
+    const withSpikeRate = withEvents.filter((item) => {
+      const summary = patternData.reelSummaries[item.reelIndex];
+      return summary && summary.patternStrength >= 0.35;
+    }).length / Math.max(withEvents.length, 1);
+    const withoutSpikeRate = withoutEvents.filter((item) => {
+      const summary = patternData.reelSummaries[item.reelIndex];
+      return summary && summary.patternStrength >= 0.35;
+    }).length / Math.max(withoutEvents.length, 1);
+    const cards = [];
+    if (topBucketShift && Math.abs(topBucketShift.diff) >= 6) {
+      cards.push({
+        title: "Event Shift",
+        body: `Reels with events lean ${topBucketShift.diff > 0 ? "more" : "less"} toward ${topBucketShift.label} by ${formatNumber(Math.abs(topBucketShift.diff), 1)} pts.`,
+        tone: "info",
+      });
+    }
+    if (Number.isFinite(withSeverity) && Number.isFinite(withoutSeverity) && Math.abs(withSeverity - withoutSeverity) >= 0.2) {
+      cards.push({
+        title: "Event Severity",
+        body: `Reels with events average ${formatNumber(Math.abs(withSeverity - withoutSeverity), 2)} ${withSeverity > withoutSeverity ? "higher" : "lower"} severity than reels without events.`,
+        tone: withSeverity > withoutSeverity ? "warn" : "info",
+      });
+    }
+    if (Math.abs(withSpikeRate - withoutSpikeRate) >= 0.12) {
+      cards.push({
+        title: "Pattern Strength",
+        body: `Strong region spikes appear on ${formatNumber(withSpikeRate * 100, 0)}% of event reels vs ${formatNumber(withoutSpikeRate * 100, 0)}% without events.`,
+        tone: withSpikeRate > withoutSpikeRate ? "strong" : "neutral",
+      });
+    }
+    return cards.slice(0, 3);
+  }
+
+  function averageBucketsForReels(patternData, reelIndices) {
+    const indices = Array.isArray(reelIndices) ? reelIndices : [];
+    return (Array.isArray(patternData && patternData.bucketLabels) ? patternData.bucketLabels : []).map((_, bucketIndex) => {
+      const values = indices
+        .map((reelIndex) => Number(patternData.pctMatrix[bucketIndex] && patternData.pctMatrix[bucketIndex][reelIndex]))
+        .filter((value) => Number.isFinite(value));
+      if (!values.length) return 0;
+      return values.reduce((sum, value) => sum + value, 0) / values.length;
+    });
+  }
+
+  function weightedSeverityForReels(patternData, reelIndices) {
+    const indices = new Set(Array.isArray(reelIndices) ? reelIndices : []);
+    let severityTotal = 0;
+    let countTotal = 0;
+    (patternData.avgSeverityMatrix || []).forEach((row, bucketIndex) => {
+      (row || []).forEach((severity, reelIndex) => {
+        if (!indices.has(reelIndex)) return;
+        const count = Number(patternData.countsMatrix[bucketIndex] && patternData.countsMatrix[bucketIndex][reelIndex]) || 0;
+        const value = Number(severity);
+        if (!count || !Number.isFinite(value)) return;
+        severityTotal += value * count;
+        countTotal += count;
+      });
+    });
+    return countTotal ? severityTotal / countTotal : NaN;
+  }
+
+  function renderPatternEventImpactPanel(eventData) {
+    const insightCards = Array.isArray(eventData && eventData.insights) ? eventData.insights : [];
+    if (!insightCards.length) return "";
+    return `
+      <div class="delta-pattern-impact-panel">
+        <div class="delta-pattern-impact-panel__header">
+          <strong>Event Impact Summary</strong>
+          <span>Event reels are compared against reels without events.</span>
+        </div>
+        <div class="delta-pattern-impact-panel__grid">
+          ${insightCards.map((card) => `
+            <article class="delta-pattern-impact-panel__card delta-pattern-summary-card--${escapeAttr(card.tone || "neutral")}">
+              <span>${escapeHtml(card.title || "Insight")}</span>
+              <strong>${escapeHtml(card.body || "--")}</strong>
+            </article>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function buildPatternEventMarkerTraces(patternData, eventData) {
+    const cellEventMap = eventData && eventData.cellEventMap instanceof Map ? eventData.cellEventMap : new Map();
+    if (!cellEventMap.size) return [];
+    const bucketLabels = Array.isArray(patternData && patternData.bucketLabels) ? patternData.bucketLabels : [];
+    const pointsByType = {
+      reference: { x: [], y: [], text: [], size: [], textValues: [] },
+      speed: { x: [], y: [], text: [], size: [], textValues: [] },
+    };
+    cellEventMap.forEach((events, key) => {
+      const [reelIndexText, bucketIndexText] = String(key || "").split(":");
+      const reelIndex = Number(reelIndexText);
+      const bucketIndex = Number(bucketIndexText);
+      const bucketLabel = bucketLabels[bucketIndex];
+      if (!Number.isFinite(reelIndex) || !bucketLabel) return;
+      const grouped = new Map();
+      events.forEach((event) => {
+        const type = String(event && event.type || "reference");
+        if (!grouped.has(type)) grouped.set(type, []);
+        grouped.get(type).push(event);
+      });
+      Array.from(grouped.entries()).forEach(([type, groupedEvents], groupIndex) => {
+        const target = pointsByType[type];
+        if (!target) return;
+        target.x.push(reelIndex + 1 + (groupIndex === 0 ? -0.09 : 0.09));
+        target.y.push(bucketLabel);
+        target.text.push(groupedEvents.map((event) => event.detail).join(" | "));
+        target.size.push(groupedEvents.length > 1 ? 13 : 8);
+        target.textValues.push(groupedEvents.length > 1 ? String(groupedEvents.length) : "");
+      });
+    });
+    return [
+      {
+        type: "scatter",
+        mode: "markers+text",
+        x: pointsByType.reference.x,
+        y: pointsByType.reference.y,
+        text: pointsByType.reference.textValues,
+        textposition: "middle center",
+        textfont: { size: 8, color: "#ffffff" },
+        hoverinfo: "skip",
+        showlegend: false,
+        marker: {
+          size: pointsByType.reference.size,
+          color: "rgba(8, 145, 178, 0.72)",
+          symbol: "circle",
+          line: { width: 0.8, color: "rgba(255,255,255,0.7)" },
+        },
+      },
+      {
+        type: "scatter",
+        mode: "markers+text",
+        x: pointsByType.speed.x,
+        y: pointsByType.speed.y,
+        text: pointsByType.speed.textValues,
+        textposition: "middle center",
+        textfont: { size: 8, color: "#ffffff" },
+        hoverinfo: "skip",
+        showlegend: false,
+        marker: {
+          size: pointsByType.speed.size,
+          color: "rgba(220, 38, 38, 0.68)",
+          symbol: "diamond",
+          line: { width: 0.8, color: "rgba(255,255,255,0.7)" },
+        },
+      },
+    ].filter((trace) => Array.isArray(trace.x) && trace.x.length);
+  }
+
+  function buildPatternEventShapes(selectedReelIndex = null) {
+    const shapes = [];
+    if (Number.isInteger(Number(selectedReelIndex))) {
+      const xSelected = Number(selectedReelIndex) + 1;
+      shapes.push({
+        type: "rect",
+        xref: "x",
+        yref: "paper",
+        x0: xSelected - 0.5,
+        x1: xSelected + 0.5,
+        y0: 0,
+        y1: 1,
+        fillcolor: "rgba(15, 23, 42, 0.06)",
+        line: { width: 0 },
+        layer: "below",
+      });
+    }
+    return shapes;
+  }
+
+  function renderPatternSelectedReelDetail(host, patternData, eventData, selectedReelIndex, machineId) {
+    if (!host) return;
+    const summary = Array.isArray(patternData && patternData.reelSummaries) ? patternData.reelSummaries[selectedReelIndex] : null;
+    if (!summary) {
+      host.innerHTML = "";
+      return;
+    }
+    const eventSummary = ((eventData && eventData.reelSummaries) || []).find((item) => item.reelIndex === selectedReelIndex) || { events: [] };
+    const previous = Array.isArray(patternData && patternData.reelSummaries) ? patternData.reelSummaries[selectedReelIndex - 1] : null;
+    const next = Array.isArray(patternData && patternData.reelSummaries) ? patternData.reelSummaries[selectedReelIndex + 1] : null;
+    const compareRegion = summary.dominantLabel || "--";
+    const previousPct = findBucketPct(previous, compareRegion);
+    const currentPct = findBucketPct(summary, compareRegion);
+    const nextPct = findBucketPct(next, compareRegion);
+    host.innerHTML = `
+      <div class="delta-pattern-selected-reel">
+        <div class="delta-pattern-selected-reel__header">
+          <div>
+            <strong>${escapeHtml(summary.reel && summary.reel.reelCode || `Reel ${selectedReelIndex + 1}`)}</strong>
+            <span>Selected reel detail and neighboring comparison.</span>
+          </div>
+          <button type="button" class="delta-machine-panel__group-list-toggle" data-pattern-clear-selection="true" data-machine-id="${escapeAttr(machineId)}">Clear highlight</button>
+        </div>
+        <div class="delta-pattern-selected-reel__grid">
+          <article class="delta-pattern-selected-reel__card">
+            <span>Events</span>
+            <strong>${eventSummary.events.length ? escapeHtml(eventSummary.events.map((event) => event.detail).join(" | ")) : "No major events selected"}</strong>
+          </article>
+          <article class="delta-pattern-selected-reel__card">
+            <span>Pattern Strength</span>
+            <strong>${escapeHtml(formatNumber((summary.patternStrength || 0) * 100, 0))}% concentration</strong>
+          </article>
+          <article class="delta-pattern-selected-reel__card">
+            <span>Before / Current / After</span>
+            <strong>${escapeHtml(compareRegion)} ${escapeHtml(formatNumber(previousPct, 1))}% / ${escapeHtml(formatNumber(currentPct, 1))}% / ${escapeHtml(formatNumber(nextPct, 1))}%</strong>
+          </article>
+        </div>
+      </div>
+    `;
+  }
+
+  function findBucketPct(summary, label) {
+    if (!summary || !Array.isArray(summary.percentages)) return 0;
+    const match = summary.percentages.find((item) => String(item && item.label || "") === String(label || ""));
+    return match ? Number(match.pct) || 0 : 0;
+  }
+
+  function buildSparseNumericCategoryTicks(valuesInput, labelsInput, maxVisible = 12) {
+    const values = Array.isArray(valuesInput) ? valuesInput : [];
+    const labels = Array.isArray(labelsInput) ? labelsInput : [];
+    if (!values.length || !labels.length) return { tickvals: [], ticktext: [] };
+    const step = Math.max(1, Math.ceil(values.length / Math.max(maxVisible, 1)));
+    const tickvals = [];
+    const ticktext = [];
+    values.forEach((value, index) => {
+      if (index % step === 0 || index === values.length - 1) {
+        tickvals.push(value);
+        ticktext.push(labels[index] || String(value));
+      }
+    });
+    return { tickvals, ticktext };
+  }
+
+  function extractHoverField(hoverText, label) {
+    const text = String(hoverText || "");
+    if (!text || !label) return "";
+    const match = text.match(new RegExp(`${label}:\\s*([^<]+)`));
+    return match ? String(match[1] || "").trim() : "";
+  }
+
+  function renderPatternDistributionBar(patternData) {
+    const buckets = Array.isArray(patternData && patternData.bucketLabels) ? patternData.bucketLabels : [];
+    const percentages = Array.isArray(patternData && patternData.globalPctByBucket) ? patternData.globalPctByBucket : [];
+    if (!buckets.length || !percentages.length) return "";
+    return `
+      <div class="delta-pattern-distribution">
+        <div class="delta-pattern-distribution__header">
+          <strong>Overall Reel Region Mix</strong>
+          <span>Global defect share by reel region.</span>
+        </div>
+        <div class="delta-pattern-distribution__bar">
+          ${buckets.map((label, index) => `
+            <div
+              class="delta-pattern-distribution__segment"
+              style="width:${escapeAttr(`${Math.max(percentages[index] || 0, 0)}%`)}; background:${escapeAttr(patternRegionColor(label))};"
+              title="${escapeAttr(`${label}: ${formatNumber(percentages[index], 1)}% of all defects`)}"
+            >
+              <span>${escapeHtml(label)}</span>
+              <strong>${escapeHtml(formatNumber(percentages[index], 1))}%</strong>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderPatternDominantRegionStrip(patternData) {
+    const summaries = Array.isArray(patternData && patternData.reelSummaries) ? patternData.reelSummaries : [];
+    if (!summaries.length) return "";
+    return `
+      <div class="delta-pattern-dominant-strip">
+        <div class="delta-pattern-dominant-strip__header">
+          <strong>Dominant Region Per Reel</strong>
+          <span>Higher-opacity blocks indicate stronger concentration in that reel.</span>
+        </div>
+        <div class="delta-pattern-dominant-strip__grid">
+          ${summaries.map((summary) => {
+            const label = summary.dominantLabel || "Unknown";
+            const opacity = (0.26 + (summary.patternStrength * 0.74)).toFixed(3);
+            return `
+              <div
+                class="delta-pattern-dominant-strip__cell"
+                style="background:${escapeAttr(patternRegionColor(label))}; opacity:${escapeAttr(opacity)};"
+                title="${escapeAttr(`${(summary.reel && summary.reel.reelCode) || `Reel ${summary.reelIndex + 1}`}: ${label} ${formatNumber(summary.dominantPct, 1)}% (${formatNumber(summary.totalDefects, 0)} defects)`)}"
+              >
+                <span>${escapeHtml(summary.reel && summary.reel.reelCode || `#${summary.reelIndex + 1}`)}</span>
+              </div>
+            `;
+          }).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function patternRegionColor(label) {
+    const value = String(label || "").toLowerCase();
+    if (value.includes("begin")) return "#2563eb";
+    if (value.includes("mid")) return "#f97316";
+    if (value.includes("end")) return "#dc2626";
+    return "#64748b";
+  }
+
+  function buildSparseCategoryTicks(labelsInput, maxVisible = 12) {
+    const labels = Array.isArray(labelsInput) ? labelsInput : [];
+    if (!labels.length) return { tickvals: [], ticktext: [] };
+    const step = Math.max(1, Math.ceil(labels.length / Math.max(maxVisible, 1)));
+    const tickvals = [];
+    const ticktext = [];
+    labels.forEach((label, index) => {
+      if (index % step === 0 || index === labels.length - 1) {
+        tickvals.push(label);
+        ticktext.push(label);
+      }
+    });
+    return { tickvals, ticktext };
+  }
+
+  function choosePatternTrendWindow(pointCount) {
+    const count = Math.max(0, Number(pointCount) || 0);
+    if (count >= 30) return 9;
+    if (count >= 18) return 7;
+    if (count >= 8) return 5;
+    return 3;
+  }
+
+  function percentileOfNumeric(valuesInput, ratio = 0.5) {
+    const values = (Array.isArray(valuesInput) ? valuesInput : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value))
+      .sort((left, right) => left - right);
+    if (!values.length) return null;
+    const clamped = Math.max(0, Math.min(1, Number(ratio) || 0));
+    const index = Math.min(values.length - 1, Math.max(0, Math.floor(clamped * (values.length - 1))));
+    return values[index];
+  }
+
+  function buildWeightedWinsorizedRollingAverage(valuesInput, weightsInput, windowSize = 5) {
+    const values = Array.isArray(valuesInput) ? valuesInput : [];
+    const weights = Array.isArray(weightsInput) ? weightsInput : [];
+    if (!values.length) return [];
+    const halfWindow = Math.floor(windowSize / 2);
+    return values.map((value, index) => {
+      if (!Number.isFinite(Number(value))) return null;
+      const windowValues = [];
+      const windowWeights = [];
+      for (let offset = -halfWindow; offset <= halfWindow; offset += 1) {
+        const neighborIndex = index + offset;
+        const neighbor = Number(values[neighborIndex]);
+        if (!Number.isFinite(neighbor)) continue;
+        windowValues.push(neighbor);
+        windowWeights.push(Math.max(1, Number(weights[neighborIndex]) || 1));
+      }
+      if (!windowValues.length) return null;
+      const lower = percentileOfNumeric(windowValues, 0.15);
+      const upper = percentileOfNumeric(windowValues, 0.85);
+      let weightedTotal = 0;
+      let totalWeight = 0;
+      windowValues.forEach((entry, entryIndex) => {
+        const clamped = Math.max(lower ?? entry, Math.min(upper ?? entry, entry));
+        const weight = windowWeights[entryIndex];
+        weightedTotal += clamped * weight;
+        totalWeight += weight;
+      });
+      return totalWeight ? Number((weightedTotal / totalWeight).toFixed(3)) : null;
+    });
+  }
+
+  function summarizePatternTrendDirection(valuesInput) {
+    const values = (Array.isArray(valuesInput) ? valuesInput : []).filter((value) => Number.isFinite(Number(value))).map(Number);
+    if (values.length < 3) return "stable";
+    const first = values[0];
+    const last = values[values.length - 1];
+    const delta = last - first;
+    const span = Math.max(...values) - Math.min(...values);
+    const threshold = Math.max(0.18, span * 0.2);
+    if (delta >= threshold) return "increasing";
+    if (delta <= -threshold) return "decreasing";
+    return "stable";
+  }
+
+  function buildPatternTrendAnomalies(rawValuesInput, smoothValuesInput, xValuesInput) {
+    const rawValues = Array.isArray(rawValuesInput) ? rawValuesInput : [];
+    const smoothValues = Array.isArray(smoothValuesInput) ? smoothValuesInput : [];
+    const xValues = Array.isArray(xValuesInput) ? xValuesInput : [];
+    const residuals = rawValues.map((value, index) => {
+      const raw = Number(value);
+      const smooth = Number(smoothValues[index]);
+      if (!Number.isFinite(raw) || !Number.isFinite(smooth)) return null;
+      return raw - smooth;
+    });
+    const absResiduals = residuals.map((value) => Number.isFinite(value) ? Math.abs(value) : null).filter((value) => Number.isFinite(value));
+    const medianAbsResidual = percentileOfNumeric(absResiduals, 0.5) || 0;
+    const threshold = Math.max(0.35, medianAbsResidual * 2.2);
+    return residuals
+      .map((residual, index) => {
+        if (!Number.isFinite(residual) || Math.abs(residual) < threshold) return null;
+        return Number(xValues[index]);
+      })
+      .filter((value) => Number.isFinite(value));
+  }
+
+  function resolvePatternTrendYRange(seriesInput) {
+    const values = [];
+    (Array.isArray(seriesInput) ? seriesInput : []).forEach((series) => {
+      (Array.isArray(series && series.smoothedValues) ? series.smoothedValues : []).forEach((value) => {
+        const numeric = Number(value);
+        if (Number.isFinite(numeric)) values.push(numeric);
+      });
+      (Array.isArray(series && series.rawValues) ? series.rawValues : []).forEach((value) => {
+        const numeric = Number(value);
+        if (Number.isFinite(numeric)) values.push(numeric);
+      });
+    });
+    if (!values.length) return null;
+    let min = values[0];
+    let max = values[0];
+    values.forEach((value) => {
+      if (value < min) min = value;
+      if (value > max) max = value;
+    });
+    const span = Math.max(max - min, 0.4);
+    const bottomPadding = span * 0.08;
+    const topPadding = span * 0.14;
+    const resolvedMin = Math.max(0, min - bottomPadding);
+    const resolvedMax = max + topPadding;
+    return [resolvedMin, resolvedMax];
+  }
+
+  function classifyPatternTrendEventState(summary) {
+    const events = Array.isArray(summary && summary.events) ? summary.events : [];
+    const hasReference = events.some((event) => String(event && event.type || "") === "reference");
+    const hasSpeed = events.some((event) => String(event && event.type || "") === "speed");
+    if (hasReference && hasSpeed) return "combined";
+    if (hasReference) return "reference";
+    if (hasSpeed) return "speed";
+    return null;
+  }
+
+  function buildPatternTrendEventBandTraces(eventData, yRange) {
+    const summaries = Array.isArray(eventData && eventData.highlightedReels) ? eventData.highlightedReels : [];
+    const yMin = Array.isArray(yRange) ? Number(yRange[0]) : 0;
+    const yMax = Array.isArray(yRange) ? Number(yRange[1]) : 1;
+    const height = Math.max(0.0001, yMax - yMin);
+    const styles = {
+      reference: {
+        fillcolor: "rgba(8, 145, 178, 0.10)",
+        line: { color: "rgba(8, 145, 178, 0.34)", width: 1 },
+        name: "Reference image change",
+        legendrank: 100,
+      },
+      speed: {
+        fillcolor: "rgba(220, 38, 38, 0.09)",
+        line: { color: "rgba(220, 38, 38, 0.30)", width: 1 },
+        name: "Speed deviation",
+        legendrank: 110,
+      },
+      combined: {
+        fillcolor: "rgba(124, 58, 237, 0.12)",
+        line: { color: "rgba(124, 58, 237, 0.36)", width: 1.2 },
+        name: "Combined reference change and speed deviation",
+        legendrank: 120,
+      },
+    };
+    const buckets = { reference: [], speed: [], combined: [] };
+    summaries.forEach((summary) => {
+      const eventState = classifyPatternTrendEventState(summary);
+      if (!eventState || !styles[eventState]) return;
+      buckets[eventState].push(Number(summary.reelIndex) + 1);
+    });
+    return Object.entries(buckets)
+      .filter(([, xValues]) => xValues.length)
+      .map(([eventState, xValues]) => ({
+        type: "bar",
+        x: xValues,
+        y: xValues.map(() => height),
+        base: xValues.map(() => yMin),
+        width: xValues.map(() => 0.16),
+        name: styles[eventState].name,
+        legendrank: styles[eventState].legendrank,
+        hoverinfo: "skip",
+        marker: {
+          color: styles[eventState].fillcolor,
+          line: styles[eventState].line,
+        },
+        opacity: 1,
+        showlegend: true,
+      }));
+  }
+
+  function renderPatternTrend(host, trendSeries, summaryHost = null, eventData = null) {
+    if (!host) return;
+    const palette = {
+      beginning: "#2563eb",
+      middle: "#f97316",
+      end: "#dc2626",
+    };
+    const normalizedSeries = (Array.isArray(trendSeries) ? trendSeries : [])
+      .map((series) => {
+        const points = Array.isArray(series && series.points) ? series.points : [];
+        if (!points.length) return null;
+        const windowSize = choosePatternTrendWindow(points.length);
+        const xValues = points.map((point) => Number(point.reelIndex));
+        const rawValues = points.map((point) => Number(point.avgMagnitude));
+        const counts = points.map((point) => Math.max(1, Number(point.count) || 1));
+        const smoothedValues = buildWeightedWinsorizedRollingAverage(rawValues, counts, windowSize);
+        return {
+          key: series.key || "bucket",
+          label: series.label || "Bucket",
+          color: palette[series.key] || colorForJob(series.label),
+          windowSize,
+          points,
+          xValues,
+          rawValues,
+          counts,
+          smoothedValues,
+          direction: summarizePatternTrendDirection(smoothedValues),
+          anomalyXs: buildPatternTrendAnomalies(rawValues, smoothedValues, xValues),
+        };
+      })
+      .filter(Boolean);
+    const traces = normalizedSeries.map((series) => ({
+      x: series.xValues,
+      y: series.smoothedValues,
+      mode: "lines",
+      name: `${series.label} magnitude trend`,
+      legendgroup: series.key,
+      legendrank: series.key === "beginning" ? 10 : (series.key === "middle" ? 20 : 30),
+      text: series.points.map((point, index) => [
+        `<b>${escapeHtml(point.reelCode || `#${point.reelIndex}`)}</b>`,
+        `Job: ${escapeHtml(point.jobLabel || "--")}`,
+        `Region: ${escapeHtml(series.label)}`,
+        `Raw magnitude: ${escapeHtml(formatNumber(series.rawValues[index], 3))}`,
+        `Smoothed magnitude: ${escapeHtml(formatNumber(series.smoothedValues[index], 3))}`,
+        `Defect count: ${escapeHtml(formatNumber(series.counts[index], 0))}`,
+      ].join("<br>")),
+      hovertemplate: "%{text}<extra></extra>",
+      line: { color: series.color, width: 4.8, shape: "spline", smoothing: 0.55 },
+      connectgaps: true,
+      opacity: 1,
+    }));
+    if (!traces.length) {
+      host.innerHTML = '<div class="delta-trends-empty">Not enough magnitude trend data for the current filter state.</div>';
+      if (summaryHost) summaryHost.innerHTML = "";
+      return;
+    }
+    if (summaryHost) {
+      const latestRegion = normalizedSeries
+        .map((series) => ({ label: series.label, value: findLastFinite(series.smoothedValues) }))
+        .filter((entry) => Number.isFinite(entry.value))
+        .sort((left, right) => right.value - left.value)[0];
+      summaryHost.innerHTML = `
+        <div class="delta-pattern-trend-summary__grid">
+          ${normalizedSeries.map((series) => `
+            <article class="delta-pattern-trend-summary__card">
+              <span>${escapeHtml(series.label)} Magnitude Trend</span>
+              <strong>${escapeHtml(series.direction)}</strong>
+            </article>
+          `).join("")}
+          <article class="delta-pattern-trend-summary__card delta-pattern-trend-summary__card--highlight">
+            <span>Highest Current Magnitude</span>
+            <strong>${escapeHtml(latestRegion ? latestRegion.label : "--")}</strong>
+          </article>
+        </div>
+      `;
+    }
+    const yRange = resolvePatternTrendYRange(normalizedSeries);
+    const allXValues = Array.from(new Set(traces.flatMap((trace) => Array.isArray(trace.x) ? trace.x : []))).sort((left, right) => left - right);
+    const tickConfig = buildSparseNumericCategoryTicks(allXValues, allXValues.map((value) => `#${value}`), 14);
+    const eventBandTraces = buildPatternTrendEventBandTraces(eventData, yRange);
+    window.Plotly.react(host, [...eventBandTraces, ...traces], {
+      ...buildPatternChartLayout({ xTitle: "Reel Order", yTitle: "Average Magnitude", showLegend: true }),
+      legend: {
+        orientation: "h",
+        x: 0,
+        y: 1.2,
+        font: { color: readThemeColor("--text-primary", document.body.classList.contains("dark-mode") ? "#e2e8f0" : "#0f172a") },
+        traceorder: "normal",
+      },
+      barmode: "overlay",
+      xaxis: {
+        ...buildPatternChartLayout({ xTitle: "Reel Order", yTitle: "Average Magnitude", showLegend: true }).xaxis,
+        tickmode: "array",
+        tickvals: tickConfig.tickvals,
+        ticktext: tickConfig.ticktext,
+        tickangle: allXValues.length > 16 ? 0 : -25,
+        type: "linear",
+        range: [0.5, Math.max(...allXValues, 1) + 0.5],
+      },
+      yaxis: {
+        ...buildPatternChartLayout({ xTitle: "Reel Order", yTitle: "Average Magnitude", showLegend: true }).yaxis,
+        range: yRange,
+      },
+    }, getPlotConfig());
+  }
+
+  function findLastFinite(valuesInput) {
+    const values = Array.isArray(valuesInput) ? valuesInput : [];
+    for (let index = values.length - 1; index >= 0; index -= 1) {
+      const value = Number(values[index]);
+      if (Number.isFinite(value)) return value;
+    }
+    return null;
+  }
+
   function buildVisibleMachineStats(machine) {
     const reels = Array.isArray(machine && machine.reels) ? machine.reels : [];
     const points = Array.isArray(machine && machine.points) ? machine.points : [];
@@ -974,6 +3221,588 @@ const DefectTrendsTab = (() => {
       defectCount: visibleDefects.length,
       jobCount: visibleJobs.size || new Set(reels.map((reel) => formatJobLabel(reel && reel.jobName, reel && reel.orderNumber))).size,
     };
+  }
+
+  function buildMachinePositionSeries(machine) {
+    const reels = getSortedMachineReels(machine);
+    const points = Array.isArray(machine && machine.points) ? machine.points : [];
+    const pointsByReel = new Map();
+    points.forEach((point) => {
+      const reelId = String(point && point.reelId || "");
+      if (!reelId) return;
+      if (!pointsByReel.has(reelId)) pointsByReel.set(reelId, []);
+      pointsByReel.get(reelId).push(point);
+    });
+    let cumulativeFeet = 0;
+    const x = [];
+    const y = [];
+    const hover = [];
+    const color = [];
+    const size = [];
+    let maxFeet = 0;
+    reels.forEach((reel) => {
+      const reelId = String(reel && reel.reelId || "");
+      const reelPoints = (pointsByReel.get(reelId) || [])
+        .filter((point) => pointIsVisible(point))
+        .slice()
+        .sort((a, b) => {
+          const af = Number(a && a.feetFromReelStart);
+          const bf = Number(b && b.feetFromReelStart);
+          if (Number.isFinite(af) && Number.isFinite(bf) && af !== bf) return af - bf;
+          const at = a && a.time ? new Date(a.time).getTime() : 0;
+          const bt = b && b.time ? new Date(b.time).getTime() : 0;
+          return at - bt || Number(a && a.defectId || 0) - Number(b && b.defectId || 0);
+        });
+      reelPoints.forEach((point) => {
+        const localFeet = Number(point && point.feetFromReelStart);
+        if (!Number.isFinite(localFeet)) return;
+        x.push(cumulativeFeet + localFeet);
+        y.push(localFeet);
+        hover.push(buildPositionHoverText(point));
+        color.push(colorForJob(formatJobLabel(point && point.jobName, point && point.orderNumber)));
+        size.push(scalePositionMarkerSize(point && point.severityValue));
+        if (localFeet > maxFeet) maxFeet = localFeet;
+      });
+      cumulativeFeet += Math.max(Number(reel && reel.reelFeetTotal) || 0, 0);
+    });
+    return { x, y, hover, color, size, maxFeet };
+  }
+
+  function buildMachineCoordinateSeries(machine) {
+    const reels = getSortedMachineReels(machine);
+    const points = Array.isArray(machine && machine.points) ? machine.points : [];
+    const pointsByReel = new Map();
+    points.forEach((point) => {
+      const reelId = String(point && point.reelId || "");
+      if (!reelId) return;
+      if (!pointsByReel.has(reelId)) pointsByReel.set(reelId, []);
+      pointsByReel.get(reelId).push(point);
+    });
+    let cumulativeFeet = 0;
+    const x = [];
+    const xPct = [];
+    const yPct = [];
+    const xHover = [];
+    const yHover = [];
+    const size = [];
+    reels.forEach((reel) => {
+      const reelId = String(reel && reel.reelId || "");
+      const reelPoints = (pointsByReel.get(reelId) || [])
+        .filter((point) => pointIsVisible(point))
+        .slice()
+        .sort((a, b) => {
+          const af = Number(a && a.feetFromReelStart);
+          const bf = Number(b && b.feetFromReelStart);
+          if (Number.isFinite(af) && Number.isFinite(bf) && af !== bf) return af - bf;
+          const at = a && a.time ? new Date(a.time).getTime() : 0;
+          const bt = b && b.time ? new Date(b.time).getTime() : 0;
+          return at - bt || Number(a && a.defectId || 0) - Number(b && b.defectId || 0);
+        });
+      reelPoints.forEach((point) => {
+        const localFeet = Number(point && point.feetFromReelStart);
+        const centroidX = Number(point && point.coordCentroidX);
+        const centroidY = Number(point && point.coordCentroidY);
+        const formatWidth = Number(point && point.formatWidth);
+        const formatLength = Number(point && point.formatLength);
+        if (!Number.isFinite(localFeet)) return;
+        const xValue = cumulativeFeet + localFeet;
+        const normalizedX = Number.isFinite(centroidX) && Number.isFinite(formatWidth) && formatWidth > 0
+          ? (centroidX / formatWidth) * 100
+          : null;
+        const normalizedY = Number.isFinite(centroidY) && Number.isFinite(formatLength) && formatLength > 0
+          ? (centroidY / formatLength) * 100
+          : null;
+        if (normalizedX === null && normalizedY === null) return;
+        x.push(xValue);
+        xPct.push(normalizedX);
+        yPct.push(normalizedY);
+        xHover.push(buildCoordinateHoverText(point, "Centroid X", normalizedX, centroidX, formatWidth));
+        yHover.push(buildCoordinateHoverText(point, "Centroid Y", normalizedY, centroidY, formatLength));
+        size.push(scalePositionMarkerSize(point && point.severityValue));
+      });
+      cumulativeFeet += Math.max(Number(reel && reel.reelFeetTotal) || 0, 0);
+    });
+    return { x, xPct, yPct, xHover, yHover, size };
+  }
+
+  function buildMachineDefectGroupSummary(machine) {
+    const reels = getSortedMachineReels(machine);
+    const points = Array.isArray(machine && machine.points) ? machine.points : [];
+    const pointsByReel = new Map();
+    let cumulativeFeet = 0;
+    let previousJobRunKey = "";
+    let previousJobRunFeet = 0;
+    points.forEach((point) => {
+      const reelId = String(point && point.reelId || "");
+      if (!reelId) return;
+      if (!pointsByReel.has(reelId)) pointsByReel.set(reelId, []);
+      pointsByReel.get(reelId).push(point);
+    });
+    const groups = new Map();
+    reels.forEach((reel) => {
+      const reelId = String(reel && reel.reelId || "");
+      const reelPoints = (pointsByReel.get(reelId) || [])
+        .filter((point) => pointIsVisible(point))
+        .slice()
+        .sort((a, b) => {
+          const af = Number(a && a.feetFromReelStart);
+          const bf = Number(b && b.feetFromReelStart);
+          if (Number.isFinite(af) && Number.isFinite(bf) && af !== bf) return af - bf;
+          const at = a && a.time ? new Date(a.time).getTime() : 0;
+          const bt = b && b.time ? new Date(b.time).getTime() : 0;
+          return at - bt || Number(a && a.defectId || 0) - Number(b && b.defectId || 0);
+        });
+      const reelFeet = Math.max(Number(reel && reel.reelFeetTotal) || 0, 0);
+      const jobLabel = formatJobLabel(reel && reel.jobName, reel && reel.orderNumber);
+      const jobRunKey = normalizeRecurringGroupKey(jobLabel);
+      const baseJobFeet = jobRunKey && jobRunKey === previousJobRunKey ? previousJobRunFeet : 0;
+      reelPoints.forEach((point) => {
+        const centroidX = Number(point && point.coordCentroidX);
+        const centroidY = Number(point && point.coordCentroidY);
+        const formatWidth = Number(point && point.formatWidth);
+        const formatLength = Number(point && point.formatLength);
+        const descriptor = buildPointGroupDescriptor({
+          className: point && point.className,
+          coordCentroidX: centroidX,
+          coordCentroidY: centroidY,
+          formatWidth,
+          formatLength,
+        });
+        const key = descriptor.key;
+        if (!groups.has(key)) {
+          groups.set(key, {
+            key,
+            label: descriptor.label,
+            count: 0,
+            jobs: new Set(),
+            previewImageSrc: "",
+            occurrences: [],
+            coordinateGroups: [],
+            sortTime: 0,
+          });
+        }
+        const group = groups.get(key);
+        group.count += 1;
+        group.jobs.add(formatJobLabel(point && point.jobName, point && point.orderNumber));
+        if (!group.previewImageSrc && point && point.imageSrc) {
+          group.previewImageSrc = point.imageSrc;
+        }
+        const localFeet = Number(point && point.feetFromReelStart);
+        const jobFeetFromStart = baseJobFeet + (Number.isFinite(localFeet) ? localFeet : 0);
+        group.occurrences.push({
+          defectId: Number(point && point.defectId) || 0,
+          reelId: String(point && point.reelId || ""),
+          reelCode: point && point.reelCode ? point.reelCode : "Unknown Reel",
+          reelFeetTotal: Number(point && point.reelFeetTotal),
+          feetFromReelStart: Number.isFinite(localFeet) ? localFeet : 0,
+          jobFeetFromStart,
+          jobLabel: formatJobLabel(point && point.jobName, point && point.orderNumber),
+          xValue: cumulativeFeet + (Number.isFinite(localFeet) ? localFeet : 0),
+          imageSrc: point && point.imageSrc ? point.imageSrc : "",
+          timeValue: point && point.time ? new Date(point.time).getTime() : 0,
+        });
+        const coordinateDescriptor = buildPointCoordinateDescriptor({
+          coordCentroidX: centroidX,
+          coordCentroidY: centroidY,
+          coordMinX: point && point.coordMinX,
+          coordMaxX: point && point.coordMaxX,
+          coordMinY: point && point.coordMinY,
+          coordMaxY: point && point.coordMaxY,
+          formatWidth,
+          formatLength,
+        });
+        const coordinateGroup = resolveCoordinateCluster(group.coordinateGroups, coordinateDescriptor);
+        coordinateGroup.count += 1;
+        coordinateGroup.occurrences.push({
+          defectId: Number(point && point.defectId) || 0,
+          reelId: String(point && point.reelId || ""),
+          reelCode: point && point.reelCode ? point.reelCode : "Unknown Reel",
+          reelFeetTotal: Number(point && point.reelFeetTotal),
+          feetFromReelStart: Number.isFinite(localFeet) ? localFeet : 0,
+          jobFeetFromStart,
+          jobLabel: formatJobLabel(point && point.jobName, point && point.orderNumber),
+          xValue: cumulativeFeet + (Number.isFinite(localFeet) ? localFeet : 0),
+          imageSrc: point && point.imageSrc ? point.imageSrc : "",
+          timeValue: point && point.time ? new Date(point.time).getTime() : 0,
+        });
+        group.sortTime = Math.max(group.sortTime, point && point.time ? new Date(point.time).getTime() : 0);
+      });
+      previousJobRunKey = jobRunKey;
+      previousJobRunFeet = baseJobFeet + reelFeet;
+      cumulativeFeet += reelFeet;
+    });
+    const normalizedGroups = Array.from(groups.values())
+      .map((group) => ({
+        ...group,
+        jobs: Array.from(group.jobs).sort((left, right) => left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" })),
+        occurrences: group.occurrences
+          .sort((left, right) => left.xValue - right.xValue || left.timeValue - right.timeValue),
+        stats: summarizeOccurrenceStats(group.occurrences),
+        coordinateGroups: group.coordinateGroups
+          .filter((coordinateGroup) => Number(coordinateGroup && coordinateGroup.count) > 1)
+          .map((coordinateGroup) => ({
+            ...coordinateGroup,
+            label: formatCoordinateClusterLabel(coordinateGroup),
+            stats: summarizeOccurrenceStats(coordinateGroup.occurrences),
+            occurrences: coordinateGroup.occurrences
+              .sort((left, right) => left.xValue - right.xValue || left.timeValue - right.timeValue),
+          }))
+          .sort((left, right) => right.count - left.count || left.clusterIndex - right.clusterIndex),
+      }))
+      .filter((group) => Number(group && group.count) > 1)
+      .sort((left, right) => right.count - left.count || right.sortTime - left.sortTime || left.label.localeCompare(right.label));
+    return {
+      totalCount: normalizedGroups.reduce((sum, group) => sum + group.count, 0),
+      groups: normalizedGroups,
+    };
+  }
+
+  function buildPointGroupDescriptor(point) {
+    const classLabel = String(point && point.className || "").trim() || "Unclassified";
+    return {
+      key: normalizeRecurringGroupKey(classLabel),
+      label: classLabel,
+    };
+  }
+
+  function normalizeRecurringGroupKey(value) {
+    return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+  }
+
+  function buildPointCoordinateDescriptor(point) {
+    const centroidX = Number(point && point.coordCentroidX);
+    const centroidY = Number(point && point.coordCentroidY);
+    const minX = Number(point && point.coordMinX);
+    const maxX = Number(point && point.coordMaxX);
+    const minY = Number(point && point.coordMinY);
+    const maxY = Number(point && point.coordMaxY);
+    const formatWidth = Number(point && point.formatWidth);
+    const formatLength = Number(point && point.formatLength);
+    const normalizedX = Number.isFinite(centroidX) && Number.isFinite(formatWidth) && formatWidth > 0
+      ? (centroidX / formatWidth) * 100
+      : null;
+    const normalizedY = Number.isFinite(centroidY) && Number.isFinite(formatLength) && formatLength > 0
+      ? (centroidY / formatLength) * 100
+      : null;
+    return {
+      centroidXPct: normalizedX,
+      centroidYPct: normalizedY,
+      widthPct: Number.isFinite(minX) && Number.isFinite(maxX) && Number.isFinite(formatWidth) && formatWidth > 0
+        ? ((maxX - minX) / formatWidth) * 100
+        : null,
+      heightPct: Number.isFinite(minY) && Number.isFinite(maxY) && Number.isFinite(formatLength) && formatLength > 0
+        ? ((maxY - minY) / formatLength) * 100
+        : null,
+    };
+  }
+
+  function resolveCoordinateCluster(clusters, descriptor) {
+    if (!Array.isArray(clusters)) return createCoordinateCluster([], descriptor);
+    if (!descriptorHasCoordinateMetrics(descriptor)) {
+      const fallbackCluster = clusters.find((cluster) => cluster && cluster.key === "cluster-unlocated");
+      if (fallbackCluster) return fallbackCluster;
+      return createCoordinateCluster(clusters, descriptor, { key: "cluster-unlocated", label: "Unlocated" });
+    }
+    let bestCluster = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+    clusters.forEach((cluster) => {
+      const score = computeCoordinateClusterScore(cluster, descriptor);
+      if (!Number.isFinite(score)) return;
+      if (score < bestScore) {
+        bestScore = score;
+        bestCluster = cluster;
+      }
+    });
+    if (!bestCluster || bestScore > 8) {
+      return createCoordinateCluster(clusters, descriptor);
+    }
+    updateCoordinateCluster(bestCluster, descriptor);
+    return bestCluster;
+  }
+
+  function createCoordinateCluster(clusters, descriptor, overrides = null) {
+    const cluster = {
+      key: overrides && overrides.key ? overrides.key : `cluster-${clusters.length + 1}`,
+      clusterIndex: clusters.length + 1,
+      customLabel: overrides && overrides.label ? overrides.label : "",
+      count: 0,
+      occurrences: [],
+      centroidXPct: valueOrNull(descriptor && descriptor.centroidXPct),
+      centroidYPct: valueOrNull(descriptor && descriptor.centroidYPct),
+      widthPct: valueOrNull(descriptor && descriptor.widthPct),
+      heightPct: valueOrNull(descriptor && descriptor.heightPct),
+    };
+    clusters.push(cluster);
+    return cluster;
+  }
+
+  function descriptorHasCoordinateMetrics(descriptor) {
+    return [
+      descriptor && descriptor.centroidXPct,
+      descriptor && descriptor.centroidYPct,
+      descriptor && descriptor.widthPct,
+      descriptor && descriptor.heightPct,
+    ].some((value) => Number.isFinite(Number(value)));
+  }
+
+  function updateCoordinateCluster(cluster, descriptor) {
+    const nextCount = Number(cluster.count || 0) + 1;
+    cluster.centroidXPct = blendClusterMetric(cluster.centroidXPct, descriptor && descriptor.centroidXPct, nextCount);
+    cluster.centroidYPct = blendClusterMetric(cluster.centroidYPct, descriptor && descriptor.centroidYPct, nextCount);
+    cluster.widthPct = blendClusterMetric(cluster.widthPct, descriptor && descriptor.widthPct, nextCount);
+    cluster.heightPct = blendClusterMetric(cluster.heightPct, descriptor && descriptor.heightPct, nextCount);
+  }
+
+  function blendClusterMetric(currentValue, nextValue, nextCount) {
+    const current = Number(currentValue);
+    const incoming = Number(nextValue);
+    if (!Number.isFinite(incoming)) return Number.isFinite(current) ? current : null;
+    if (!Number.isFinite(current) || nextCount <= 1) return incoming;
+    return ((current * (nextCount - 1)) + incoming) / nextCount;
+  }
+
+  function computeCoordinateClusterScore(cluster, descriptor) {
+    const centerDistance = distance2d(
+      cluster && cluster.centroidXPct,
+      cluster && cluster.centroidYPct,
+      descriptor && descriptor.centroidXPct,
+      descriptor && descriptor.centroidYPct,
+    );
+    const sizeDistance = distance2d(
+      cluster && cluster.widthPct,
+      cluster && cluster.heightPct,
+      descriptor && descriptor.widthPct,
+      descriptor && descriptor.heightPct,
+    );
+    if (!Number.isFinite(centerDistance)) return Number.POSITIVE_INFINITY;
+    if (!Number.isFinite(sizeDistance)) return centerDistance;
+    return centerDistance + (sizeDistance * 0.45);
+  }
+
+  function distance2d(ax, ay, bx, by) {
+    const leftX = Number(ax);
+    const leftY = Number(ay);
+    const rightX = Number(bx);
+    const rightY = Number(by);
+    if (!Number.isFinite(leftX) || !Number.isFinite(leftY) || !Number.isFinite(rightX) || !Number.isFinite(rightY)) {
+      return Number.NaN;
+    }
+    return Math.hypot(leftX - rightX, leftY - rightY);
+  }
+
+  function formatCoordinateClusterLabel(cluster) {
+    if (cluster && cluster.customLabel) return cluster.customLabel;
+    const centerX = Number(cluster && cluster.centroidXPct);
+    const centerY = Number(cluster && cluster.centroidYPct);
+    const width = Number(cluster && cluster.widthPct);
+    const height = Number(cluster && cluster.heightPct);
+    const parts = [`Cluster ${cluster && cluster.clusterIndex ? cluster.clusterIndex : "?"}`];
+    if (Number.isFinite(centerX) && Number.isFinite(centerY)) {
+      parts.push(`center ${formatNumber(centerX, 1)}%, ${formatNumber(centerY, 1)}%`);
+    }
+    if (Number.isFinite(width) && Number.isFinite(height)) {
+      parts.push(`size ${formatNumber(width, 1)}% x ${formatNumber(height, 1)}%`);
+    }
+    return parts.join(" · ");
+  }
+
+  function sortRecurringOccurrences(occurrences, direction) {
+    const items = Array.isArray(occurrences) ? [...occurrences] : [];
+    const multiplier = direction === "desc" ? -1 : 1;
+    return items.sort((left, right) => {
+      const leftFeet = Number(left && left.jobFeetFromStart);
+      const rightFeet = Number(right && right.jobFeetFromStart);
+      if (Number.isFinite(leftFeet) && Number.isFinite(rightFeet) && leftFeet !== rightFeet) {
+        return (leftFeet - rightFeet) * multiplier;
+      }
+      const leftX = Number(left && left.xValue);
+      const rightX = Number(right && right.xValue);
+      if (Number.isFinite(leftX) && Number.isFinite(rightX) && leftX !== rightX) {
+        return (leftX - rightX) * multiplier;
+      }
+      return (Number(left && left.timeValue) || 0) - (Number(right && right.timeValue) || 0);
+    });
+  }
+
+  function groupRecurringOccurrencesByReel(occurrences) {
+    const groups = [];
+    let current = null;
+    (Array.isArray(occurrences) ? occurrences : []).forEach((occurrence) => {
+      const reelKey = String(occurrence && occurrence.reelId || occurrence && occurrence.reelCode || "Unknown Reel");
+      const reelCode = String(occurrence && occurrence.reelCode || "Unknown Reel");
+      if (!current || current.reelKey !== reelKey) {
+        current = { reelKey, reelCode, reelFeetTotal: null, occurrences: [] };
+        groups.push(current);
+      }
+      const reelFeetTotal = Number(occurrence && occurrence.reelFeetTotal);
+      if (Number.isFinite(reelFeetTotal)) {
+        current.reelFeetTotal = reelFeetTotal;
+      }
+      current.occurrences.push(occurrence);
+    });
+    return groups;
+  }
+
+  function formatRecurringReelGroupLabel(reelGroup) {
+    const reelCode = String(reelGroup && reelGroup.reelCode || "Unknown Reel");
+    const reelFeetTotal = Number(reelGroup && reelGroup.reelFeetTotal);
+    if (!Number.isFinite(reelFeetTotal)) return reelCode;
+    return `${reelCode} - ${formatNumber(reelFeetTotal, 0)} ft`;
+  }
+
+  function moveRecurringClusterSelection(machineId, groupKey, clusterKey, direction) {
+    const machine = (((state.data && state.data.machines) || []).find((item) => String(item && item.machineId || "") === String(machineId || ""))) || null;
+    if (!machine) return;
+    const summary = buildMachineDefectGroupSummary(machine);
+    const group = (summary.groups || []).find((item) => item.key === groupKey);
+    if (!group) return;
+    const coordinateGroup = (group.coordinateGroups || []).find((item) => item.key === clusterKey);
+    if (!coordinateGroup) return;
+    const activeSort = state.recurringOccurrenceSorts.get(String(machineId || "")) || "asc";
+    const occurrences = sortRecurringOccurrences(coordinateGroup.occurrences, activeSort);
+    if (!occurrences.length) return;
+    const selectionKey = buildRecurringClusterSelectionKey(machineId, groupKey, clusterKey);
+    const currentIndex = normalizeRecurringClusterIndex(state.recurringClusterSelections.get(selectionKey), occurrences.length);
+    const nextIndex = (currentIndex + direction + occurrences.length) % occurrences.length;
+    state.recurringClusterSelections.set(selectionKey, nextIndex);
+    const host = document.getElementById(`defectTrendsMachineGroupList-${machineId}`);
+    renderMachineDefectGroupList(host, machine);
+    const nextOccurrence = occurrences[nextIndex];
+    if (nextOccurrence) {
+      jumpToAxisOffset(Number(nextOccurrence.xValue));
+    }
+    requestAnimationFrame(() => {
+      const activeCard = document.querySelector(`[data-recurring-occurrence-card="${escapeCssSelectorValue(selectionKey)}"].is-active`);
+      if (activeCard && typeof activeCard.scrollIntoView === "function") {
+        activeCard.scrollIntoView({ block: "nearest", inline: "nearest" });
+      }
+    });
+  }
+
+  function buildRecurringClusterSelectionKey(machineId, groupKey, clusterKey) {
+    return `${String(machineId || "")}__${String(groupKey || "")}__${String(clusterKey || "")}`;
+  }
+
+  function normalizeRecurringClusterIndex(value, itemCount) {
+    if (!itemCount) return 0;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric < 0 || numeric >= itemCount) return 0;
+    return numeric;
+  }
+
+  function escapeCssSelectorValue(value) {
+    const text = String(value || "");
+    if (typeof CSS !== "undefined" && CSS && typeof CSS.escape === "function") {
+      return CSS.escape(text);
+    }
+    return text.replace(/["\\]/g, "\\$&");
+  }
+
+  function summarizeOccurrenceStats(occurrences) {
+    const items = Array.isArray(occurrences) ? occurrences : [];
+    let reelFeetMin = null;
+    let reelFeetMax = null;
+    let jobFeetMin = null;
+    let jobFeetMax = null;
+    items.forEach((occurrence) => {
+      const reelFeet = Number(occurrence && occurrence.feetFromReelStart);
+      const jobFeet = Number(occurrence && occurrence.jobFeetFromStart);
+      if (Number.isFinite(reelFeet)) {
+        reelFeetMin = reelFeetMin === null ? reelFeet : Math.min(reelFeetMin, reelFeet);
+        reelFeetMax = reelFeetMax === null ? reelFeet : Math.max(reelFeetMax, reelFeet);
+      }
+      if (Number.isFinite(jobFeet)) {
+        jobFeetMin = jobFeetMin === null ? jobFeet : Math.min(jobFeetMin, jobFeet);
+        jobFeetMax = jobFeetMax === null ? jobFeet : Math.max(jobFeetMax, jobFeet);
+      }
+    });
+    return {
+      reelFeetMin,
+      reelFeetMax,
+      jobFeetMin,
+      jobFeetMax,
+    };
+  }
+
+  function formatFeetRange(minValue, maxValue) {
+    const min = Number(minValue);
+    const max = Number(maxValue);
+    if (!Number.isFinite(min) && !Number.isFinite(max)) return "--";
+    if (Number.isFinite(min) && Number.isFinite(max) && Math.abs(max - min) < 0.05) {
+      return `${formatNumber(min, 1)} ft`;
+    }
+    if (Number.isFinite(min) && Number.isFinite(max)) {
+      return `${formatNumber(min, 1)}-${formatNumber(max, 1)} ft`;
+    }
+    if (Number.isFinite(min)) return `${formatNumber(min, 1)} ft`;
+    return `${formatNumber(max, 1)} ft`;
+  }
+
+  function formatFeetSpan(minValue, maxValue) {
+    const min = Number(minValue);
+    const max = Number(maxValue);
+    if (!Number.isFinite(min) || !Number.isFinite(max)) return "--";
+    return `${formatNumber(Math.max(max - min, 0), 1)} ft`;
+  }
+
+  function renderRecurringStatPill(label, value) {
+    return `
+      <span class="delta-recurring-stat-pill">
+        <strong>${escapeHtml(label)}</strong>
+        <span>${escapeHtml(value)}</span>
+      </span>
+    `;
+  }
+
+  function buildPositionHoverText(point) {
+    const parts = [
+      `<b>${escapeHtml(point && point.machineName || "")}</b>`,
+      `Job: ${escapeHtml(formatJobLabel(point && point.jobName, point && point.orderNumber))}`,
+      `Reel: ${escapeHtml(point && point.reelCode || "Unknown Reel")}`,
+      `Time: ${escapeHtml(formatDateTimeLabel(point && point.time))}`,
+      `Reel position: ${escapeHtml(formatNumber(point && point.feetFromReelStart, 2))} ft`,
+      `Severity: ${escapeHtml(formatMetric(point && point.severityValue))}`,
+      `Magnitude: ${escapeHtml(formatMetric(point && point.magnitudeValue))}`,
+      `Class: ${escapeHtml(point && point.className || "--")}`,
+    ];
+    return parts.join("<br>");
+  }
+
+  function buildCoordinateHoverText(point, label, normalizedValue, rawValue, axisExtent) {
+    const parts = [
+      `<b>${escapeHtml(point && point.machineName || "")}</b>`,
+      `Job: ${escapeHtml(formatJobLabel(point && point.jobName, point && point.orderNumber))}`,
+      `Reel: ${escapeHtml(point && point.reelCode || "Unknown Reel")}`,
+      `Time: ${escapeHtml(formatDateTimeLabel(point && point.time))}`,
+      `Reel position: ${escapeHtml(formatNumber(point && point.feetFromReelStart, 2))} ft`,
+      `${escapeHtml(label)}: ${Number.isFinite(Number(normalizedValue)) ? escapeHtml(formatNumber(normalizedValue, 2)) : "--"}%`,
+      `Raw ${escapeHtml(label)}: ${Number.isFinite(Number(rawValue)) ? escapeHtml(formatNumber(rawValue, 2)) : "--"}`,
+      `Axis extent: ${Number.isFinite(Number(axisExtent)) ? escapeHtml(formatNumber(axisExtent, 2)) : "--"}`,
+      `Severity: ${escapeHtml(formatMetric(point && point.severityValue))}`,
+      `Class: ${escapeHtml(point && point.className || "--")}`,
+    ];
+    return parts.join("<br>");
+  }
+
+  function buildCoordinateBucket(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return { key: "na", label: "--" };
+    }
+    const bucketSize = 5;
+    const clamped = Math.max(0, Math.min(100, numeric));
+    const start = Math.floor(clamped / bucketSize) * bucketSize;
+    const end = Math.min(start + bucketSize, 100);
+    return {
+      key: `${start}-${end}`,
+      label: `${formatNumber(start, 0)}-${formatNumber(end, 0)}%`,
+    };
+  }
+
+  function scalePositionMarkerSize(value) {
+    const severity = Number(value);
+    if (!Number.isFinite(severity)) return 8;
+    return Math.max(7, Math.min(16, 7 + (severity * 0.8)));
   }
 
   function renderMachineTimeline(machine) {
@@ -1067,6 +3896,10 @@ const DefectTrendsTab = (() => {
     const timelineScroll = document.querySelector(`[data-machine-scroll="timeline-${machineId}"]`);
     const chartScroll = document.querySelector(`[data-machine-scroll="chart-${machineId}"]`);
     if (!timelineScroll || !chartScroll) return;
+    if (chartScroll.dataset.scrollBound === "true") {
+      return;
+    }
+    chartScroll.dataset.scrollBound = "true";
     let syncing = false;
     const mirror = (source, target) => {
       source.addEventListener("scroll", () => {
@@ -1143,8 +3976,23 @@ const DefectTrendsTab = (() => {
     return Math.max(100, Math.round(ratio * 100));
   }
 
+  function getSortedMachineReels(machine) {
+    if (!machine) return [];
+    if (Array.isArray(machine.__sortedReelsCache)) {
+      return machine.__sortedReelsCache;
+    }
+    const sortedReels = Array.isArray(machine.reels) ? [...machine.reels] : [];
+    sortedReels.sort((a, b) => {
+      const at = a && a.timeStart ? new Date(a.timeStart).getTime() : 0;
+      const bt = b && b.timeStart ? new Date(b.timeStart).getTime() : 0;
+      return at - bt || Number(a.reelId || 0) - Number(b.reelId || 0);
+    });
+    machine.__sortedReelsCache = sortedReels;
+    return sortedReels;
+  }
+
   function buildMachineSeries(machine) {
-    const reels = Array.isArray(machine.reels) ? [...machine.reels] : [];
+    const reels = getSortedMachineReels(machine);
     const points = Array.isArray(machine.points) ? machine.points : [];
     const pointsByReel = new Map();
     points.forEach((point) => {
@@ -1152,11 +4000,6 @@ const DefectTrendsTab = (() => {
       if (!reelId) return;
       if (!pointsByReel.has(reelId)) pointsByReel.set(reelId, []);
       pointsByReel.get(reelId).push(point);
-    });
-    reels.sort((a, b) => {
-      const at = a && a.timeStart ? new Date(a.timeStart).getTime() : 0;
-      const bt = b && b.timeStart ? new Date(b.timeStart).getTime() : 0;
-      return at - bt || Number(a.reelId || 0) - Number(b.reelId || 0);
     });
     let cumulativeFeet = 0;
     const x = [];
@@ -1217,7 +4060,7 @@ const DefectTrendsTab = (() => {
   }
 
   function buildBinnedMachineSeries(machine) {
-    const reels = Array.isArray(machine && machine.reels) ? [...machine.reels] : [];
+    const reels = getSortedMachineReels(machine);
     const points = Array.isArray(machine && machine.points) ? machine.points : [];
     const pointsByReel = new Map();
     points.forEach((point) => {
@@ -1225,11 +4068,6 @@ const DefectTrendsTab = (() => {
       if (!reelId) return;
       if (!pointsByReel.has(reelId)) pointsByReel.set(reelId, []);
       pointsByReel.get(reelId).push(point);
-    });
-    reels.sort((a, b) => {
-      const at = a && a.timeStart ? new Date(a.timeStart).getTime() : 0;
-      const bt = b && b.timeStart ? new Date(b.timeStart).getTime() : 0;
-      return at - bt || Number(a.reelId || 0) - Number(b.reelId || 0);
     });
     const totalSpan = Math.max(getMachineFeetSpan(machine), 0);
     const binSize = Math.max(Number(state.binSizeFeet) || 25, 1);
@@ -1314,7 +4152,7 @@ const DefectTrendsTab = (() => {
   }
 
   function buildMachineSpeedSeries(machine) {
-    const reels = Array.isArray(machine && machine.reels) ? [...machine.reels] : [];
+    const reels = getSortedMachineReels(machine);
     const speedPoints = Array.isArray(machine && machine.speedPoints) ? machine.speedPoints : [];
     const speedPointsByReel = new Map();
     speedPoints.forEach((point) => {
@@ -1322,11 +4160,6 @@ const DefectTrendsTab = (() => {
       if (!reelId) return;
       if (!speedPointsByReel.has(reelId)) speedPointsByReel.set(reelId, []);
       speedPointsByReel.get(reelId).push(point);
-    });
-    reels.sort((a, b) => {
-      const at = a && a.timeStart ? new Date(a.timeStart).getTime() : 0;
-      const bt = b && b.timeStart ? new Date(b.timeStart).getTime() : 0;
-      return at - bt || Number(a.reelId || 0) - Number(b.reelId || 0);
     });
     let cumulativeFeet = 0;
     const solidX = [];
@@ -1633,9 +4466,13 @@ const DefectTrendsTab = (() => {
     });
   }
 
-  function pointIsVisible(point) {
+  function pointIsBaseVisible(point) {
     if (state.showImageDefects) return !!(point && point.imageSrc);
     return true;
+  }
+
+  function pointIsVisible(point) {
+    return pointIsBaseVisible(point);
   }
 
   function buildBstOffLayout(machine) {
@@ -1822,9 +4659,14 @@ const DefectTrendsTab = (() => {
     host.on("plotly_clickannotation", (payload) => {
       const annotation = payload && payload.annotation ? payload.annotation : null;
       if (!annotation) return;
+      if (annotation.text === "New<br>Reel") {
+        jumpToAxisOffset(Number(annotation.x));
+        return;
+      }
       if (annotation.text === "New<br>Ref") {
         const match = findAnnotationClickEvent(annotation, referenceClickEvents);
         if (match && match.detail) {
+          jumpToAnnotationEvent(match);
           openReferenceViewer(match.detail);
           return;
         }
@@ -1832,10 +4674,15 @@ const DefectTrendsTab = (() => {
       if (annotation.text === "Mask<br>Chg") {
         const match = findAnnotationClickEvent(annotation, maskClickEvents);
         if (match && match.detail) {
+          jumpToAnnotationEvent(match);
           openMaskViewer(match.detail);
         }
       }
     });
+  }
+
+  function jumpToAnnotationEvent(match) {
+    jumpToAxisOffset(Number(match && match.xValue));
   }
 
   function buildMaskChangeLayout(machine) {

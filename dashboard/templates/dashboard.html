@@ -781,9 +781,9 @@
           <div class="delta-trends-panel__header">
             <div>
               <p class="delta-trends-panel__eyebrow">Press Detail</p>
-              <h2>Per-Press Defect Count Trends</h2>
+              <h2>Per-Press Defect Trends</h2>
             </div>
-            <p class="delta-trends-panel__subtitle" id="defectTrendsDetailSubtitle">Each selected press rendered as grouped defect count by feet bin.</p>
+            <p class="delta-trends-panel__subtitle" id="defectTrendsDetailSubtitle">Each selected press includes defect count, reel position, recurring-defect groups, and a pattern analyzer across reels.</p>
           </div>
           <div class="delta-trends-detail-legend" aria-label="Per-press defect trend controls">
             <label class="delta-trends-detail-legend__item">
@@ -803,6 +803,35 @@
               <input type="checkbox" id="defectTrendsLegendShowMaskFlags" checked>
               <span>Show Mask Chg</span>
             </label>
+            <div class="defect-trends-event-nav-group" aria-label="Defect trend event navigators">
+              <div class="defect-trends-event-nav defect-trends-event-nav--compact">
+                <span class="defect-trends-event-nav__label">Reels</span>
+                <div class="defect-trends-event-nav__controls">
+                  <button type="button" class="filters-clear-btn filters-clear-btn--ghost defect-trends-event-nav__button" id="defectTrendsReelPrev" aria-label="Previous reel event">&larr;</button>
+                  <span class="defect-trends-event-nav__status" id="defectTrendsReelStatus">0 reels</span>
+                  <button type="button" class="filters-clear-btn filters-clear-btn--ghost defect-trends-event-nav__button" id="defectTrendsReelNext" aria-label="Next reel event">&rarr;</button>
+                </div>
+              </div>
+              <div class="defect-trends-event-nav defect-trends-event-nav--compact">
+                <span class="defect-trends-event-nav__label">New Ref</span>
+                <div class="defect-trends-event-nav__controls">
+                  <button type="button" class="filters-clear-btn filters-clear-btn--ghost defect-trends-event-nav__button" id="defectTrendsReferencePrev" aria-label="Previous reference event">&larr;</button>
+                  <span class="defect-trends-event-nav__status" id="defectTrendsReferenceStatus">0 new refs</span>
+                  <button type="button" class="filters-clear-btn filters-clear-btn--ghost defect-trends-event-nav__button" id="defectTrendsReferenceNext" aria-label="Next reference event">&rarr;</button>
+                </div>
+              </div>
+              <div class="defect-trends-event-nav defect-trends-event-nav--compact">
+                <span class="defect-trends-event-nav__label">Mask Chg</span>
+                <div class="defect-trends-event-nav__controls">
+                  <button type="button" class="filters-clear-btn filters-clear-btn--ghost defect-trends-event-nav__button" id="defectTrendsMaskPrev" aria-label="Previous mask event">&larr;</button>
+                  <span class="defect-trends-event-nav__status" id="defectTrendsMaskStatus">0 mask changes</span>
+                  <button type="button" class="filters-clear-btn filters-clear-btn--ghost defect-trends-event-nav__button" id="defectTrendsMaskNext" aria-label="Next mask event">&rarr;</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="delta-trends-detail-note">
+            Each press panel shows two stacked timeline charts, recurring-defect groups, and a visual pattern analyzer focused on reel regions, shape repeatability, and severity trends.
           </div>
           <div id="defectTrendsMachinePanels" class="delta-trends-machine-panels"></div>
         </section>

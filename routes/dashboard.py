@@ -106,24 +106,31 @@ def _iso(dt: Optional[datetime]) -> Optional[str]:
 
 
 def _serialize_coords(coords_data) -> List[Dict[str, List[float]]]:
+    return _parse_coords_shapes(coords_data).get("shapes") or []
+
+
+def _parse_coords_shapes(coords_data) -> Dict[str, object]:
     if not coords_data:
-        return []
+        return {"shapes": [], "total_entries": 0, "malformed_entries": 0}
     if isinstance(coords_data, str):
         try:
             coords = json.loads(coords_data)
         except (TypeError, ValueError):
-            return []
+            return {"shapes": [], "total_entries": 0, "malformed_entries": 1}
     else:
         coords = coords_data
     if not isinstance(coords, (list, tuple)):
-        return []
+        return {"shapes": [], "total_entries": 0, "malformed_entries": 1}
     normalized: List[Dict[str, List[float]]] = []
+    malformed_entries = 0
     for shape in coords:
         if not isinstance(shape, dict):
+            malformed_entries += 1
             continue
         xs_raw = shape.get("x")
         ys_raw = shape.get("y")
         if not isinstance(xs_raw, (list, tuple)) or not isinstance(ys_raw, (list, tuple)):
+            malformed_entries += 1
             continue
         xs: List[float] = []
         ys: List[float] = []
@@ -139,9 +146,14 @@ def _serialize_coords(coords_data) -> List[Dict[str, List[float]]]:
                 continue
         count = min(len(xs), len(ys))
         if count < 3:
+            malformed_entries += 1
             continue
         normalized.append({"x": xs[:count], "y": ys[:count]})
-    return normalized
+    return {
+        "shapes": normalized,
+        "total_entries": len(coords),
+        "malformed_entries": malformed_entries,
+    }
 
 
 def _normalize_classification(value: Optional[str]) -> Optional[str]:
@@ -298,6 +310,44 @@ def _defect_polygon_areas(coords_data) -> List[float]:
             continue
         areas.append(_polygon_area(xs[:count], ys[:count]))
     return areas
+
+
+def _defect_coordinate_summary(coords_data) -> Dict[str, Optional[float]]:
+    serialized = _serialize_coords(coords_data)
+    if not serialized:
+        return {
+            "centroid_x": None,
+            "centroid_y": None,
+            "min_x": None,
+            "max_x": None,
+            "min_y": None,
+            "max_y": None,
+        }
+    xs: List[float] = []
+    ys: List[float] = []
+    for shape in serialized:
+        xs.extend(shape.get("x") or [])
+        ys.extend(shape.get("y") or [])
+    if not xs or not ys:
+        return {
+            "centroid_x": None,
+            "centroid_y": None,
+            "min_x": None,
+            "max_x": None,
+            "min_y": None,
+            "max_y": None,
+        }
+    count = min(len(xs), len(ys))
+    xs = xs[:count]
+    ys = ys[:count]
+    return {
+        "centroid_x": round(sum(xs) / count, 3) if count else None,
+        "centroid_y": round(sum(ys) / count, 3) if count else None,
+        "min_x": round(min(xs), 3) if xs else None,
+        "max_x": round(max(xs), 3) if xs else None,
+        "min_y": round(min(ys), 3) if ys else None,
+        "max_y": round(max(ys), 3) if ys else None,
+    }
 
 
 def _resolve_size_ranges(
@@ -8206,6 +8256,1144 @@ def _nearest_monitoring_sample(
     return after
 
 
+DEFECT_PATTERN_HEATMAP_BUCKETS: List[Dict[str, object]] = [
+    {"key": "beginning", "label": "Beginning", "min": 0.0, "max": 0.2},
+    {"key": "early_mid", "label": "Early Mid", "min": 0.2, "max": 0.4},
+    {"key": "middle", "label": "Middle", "min": 0.4, "max": 0.6},
+    {"key": "late_mid", "label": "Late Mid", "min": 0.6, "max": 0.8},
+    {"key": "end", "label": "End", "min": 0.8, "max": 1.000001},
+]
+
+DEFECT_PATTERN_TREND_BUCKETS: List[Dict[str, object]] = [
+    {"key": "beginning", "label": "Beginning", "min": 0.0, "max": 1.0 / 3.0},
+    {"key": "middle", "label": "Middle", "min": 1.0 / 3.0, "max": 2.0 / 3.0},
+    {"key": "end", "label": "End", "min": 2.0 / 3.0, "max": 1.000001},
+]
+
+DEFECT_PATTERN_LOCATION_GRID = {"cols": 5, "rows": 5}
+
+
+def _defect_pattern_class_key(value: Optional[str]) -> str:
+    cleaned = " ".join(str(value or "").strip().lower().split())
+    return cleaned or "unclassified"
+
+
+def _defect_pattern_bucket_for_ratio(
+    ratio: Optional[float], bucket_defs: List[Dict[str, object]]
+) -> Optional[Dict[str, object]]:
+    numeric = _to_float(ratio)
+    if numeric is None:
+        return None
+    numeric = max(0.0, min(1.0, numeric))
+    for entry in bucket_defs:
+        lower = _to_float(entry.get("min"))
+        upper = _to_float(entry.get("max"))
+        if lower is None or upper is None:
+            continue
+        if numeric >= lower and numeric < upper:
+            return entry
+    return bucket_defs[-1] if bucket_defs else None
+
+
+def _defect_pattern_position_ratio(reel: Reel, defect: Defect) -> Optional[float]:
+    reel_start = _to_float(reel.reel_start)
+    reel_end = _to_float(reel.reel_end)
+    format_position = _to_float(defect.format_position)
+    if (
+        reel_start is not None
+        and reel_end is not None
+        and format_position is not None
+        and reel_end > reel_start
+    ):
+        return max(0.0, min(1.0, (format_position - reel_start) / (reel_end - reel_start)))
+    return None
+
+
+def _polygon_area(xs: List[float], ys: List[float]) -> Optional[float]:
+    count = min(len(xs), len(ys))
+    if count < 3:
+        return None
+    total = 0.0
+    for index in range(count):
+        next_index = (index + 1) % count
+        total += (xs[index] * ys[next_index]) - (xs[next_index] * ys[index])
+    return abs(total) / 2.0
+
+
+def _defect_pattern_preview_shapes(
+    shapes: List[Dict[str, List[float]]],
+    min_x: float,
+    max_x: float,
+    min_y: float,
+    max_y: float,
+    format_width: Optional[float],
+    format_length: Optional[float],
+) -> List[Dict[str, List[float]]]:
+    width = max(max_x - min_x, 1e-6)
+    height = max(max_y - min_y, 1e-6)
+    usable_size = 76.0
+    has_format_dims = (
+        format_width is not None
+        and format_length is not None
+        and format_width > 0
+        and format_length > 0
+    )
+    if has_format_dims:
+        format_aspect = max(format_width, 1e-6) / max(format_length, 1e-6)
+        if format_aspect >= 1.0:
+            frame_width = usable_size
+            frame_height = usable_size / format_aspect
+        else:
+            frame_height = usable_size
+            frame_width = usable_size * format_aspect
+        frame_x = (100.0 - frame_width) / 2.0
+        frame_y = (100.0 - frame_height) / 2.0
+        target_width = frame_width * max(0.0, min(1.0, width / max(format_width, 1e-6)))
+        target_height = frame_height * max(0.0, min(1.0, height / max(format_length, 1e-6)))
+        scale = min(target_width / width if width > 0 else 1.0, target_height / height if height > 0 else 1.0)
+        scale = max(scale, 1e-6)
+        offset_x = frame_x + ((frame_width - (width * scale)) / 2.0)
+        offset_y = frame_y + ((frame_height - (height * scale)) / 2.0)
+    else:
+        frame_width = usable_size
+        frame_height = usable_size
+        frame_x = (100.0 - frame_width) / 2.0
+        frame_y = (100.0 - frame_height) / 2.0
+        scale = min(frame_width / width, frame_height / height)
+        offset_x = frame_x + ((frame_width - (width * scale)) / 2.0)
+        offset_y = frame_y + ((frame_height - (height * scale)) / 2.0)
+    preview: List[Dict[str, List[float]]] = []
+    for shape in shapes:
+        xs = shape.get("x") or []
+        ys = shape.get("y") or []
+        count = min(len(xs), len(ys))
+        if count < 3:
+            continue
+        normalized_x = [round(offset_x + ((xs[idx] - min_x) * scale), 2) for idx in range(count)]
+        normalized_y = [round(100.0 - (offset_y + ((ys[idx] - min_y) * scale)), 2) for idx in range(count)]
+        preview.append({"x": normalized_x, "y": normalized_y})
+    return {
+        "shapes": preview,
+        "frame": {
+            "x": round(frame_x, 2),
+            "y": round(frame_y, 2),
+            "width": round(frame_width, 2),
+            "height": round(frame_height, 2),
+        },
+        "mode": "format_relative_size" if has_format_dims else "bbox_fallback",
+    }
+
+
+def _defect_pattern_geometry(
+    coords_data,
+    format_width: Optional[float],
+    format_length: Optional[float],
+) -> Dict[str, object]:
+    parsed = _parse_coords_shapes(coords_data)
+    shapes = parsed.get("shapes") or []
+    malformed_entries = int(parsed.get("malformed_entries") or 0)
+    if not shapes:
+        return {
+            "valid": False,
+            "min_x": None,
+            "max_x": None,
+            "min_y": None,
+            "max_y": None,
+            "width": None,
+            "height": None,
+            "aspect_ratio": None,
+            "polygon_area": None,
+            "width_pct": None,
+            "height_pct": None,
+            "area_pct": None,
+            "fill_ratio": None,
+            "point_count": 0,
+            "polygon_count": 0,
+            "dominant_polygon_area": None,
+            "dominant_polygon_ratio": None,
+            "avg_polygon_width": None,
+            "avg_polygon_height": None,
+            "max_polygon_width": None,
+            "max_polygon_height": None,
+            "malformed_polygon_count": malformed_entries,
+            "preview_shapes": [],
+            "preview_frame": None,
+            "preview_mode": "unavailable",
+        }
+    xs: List[float] = []
+    ys: List[float] = []
+    point_count = 0
+    area_total = 0.0
+    polygon_count = 0
+    polygon_areas: List[float] = []
+    polygon_widths: List[float] = []
+    polygon_heights: List[float] = []
+    for shape in shapes:
+        shape_x = shape.get("x") or []
+        shape_y = shape.get("y") or []
+        count = min(len(shape_x), len(shape_y))
+        if count < 3:
+            continue
+        xs.extend(shape_x[:count])
+        ys.extend(shape_y[:count])
+        point_count += count
+        polygon_count += 1
+        shape_min_x = min(shape_x[:count])
+        shape_max_x = max(shape_x[:count])
+        shape_min_y = min(shape_y[:count])
+        shape_max_y = max(shape_y[:count])
+        polygon_widths.append(shape_max_x - shape_min_x)
+        polygon_heights.append(shape_max_y - shape_min_y)
+        polygon_area = _polygon_area(shape_x[:count], shape_y[:count])
+        if polygon_area is not None:
+            area_total += polygon_area
+            polygon_areas.append(polygon_area)
+    if not xs or not ys:
+        return {
+            "valid": False,
+            "min_x": None,
+            "max_x": None,
+            "min_y": None,
+            "max_y": None,
+            "width": None,
+            "height": None,
+            "aspect_ratio": None,
+            "polygon_area": None,
+            "width_pct": None,
+            "height_pct": None,
+            "area_pct": None,
+            "fill_ratio": None,
+            "point_count": 0,
+            "polygon_count": 0,
+            "dominant_polygon_area": None,
+            "dominant_polygon_ratio": None,
+            "avg_polygon_width": None,
+            "avg_polygon_height": None,
+            "max_polygon_width": None,
+            "max_polygon_height": None,
+            "malformed_polygon_count": malformed_entries,
+            "preview_shapes": [],
+            "preview_frame": None,
+            "preview_mode": "unavailable",
+        }
+    min_x = min(xs)
+    max_x = max(xs)
+    min_y = min(ys)
+    max_y = max(ys)
+    width = max_x - min_x
+    height = max_y - min_y
+    aspect_ratio = (width / height) if height > 0 else None
+    width_pct = (width / format_width * 100.0) if format_width and format_width > 0 else None
+    height_pct = (height / format_length * 100.0) if format_length and format_length > 0 else None
+    area_pct = None
+    fill_ratio = None
+    if (
+        area_total > 0
+        and format_width is not None
+        and format_length is not None
+        and format_width > 0
+        and format_length > 0
+    ):
+        area_pct = (area_total / (format_width * format_length)) * 100.0
+    bbox_area = width * height
+    if bbox_area > 0 and area_total > 0:
+        fill_ratio = area_total / bbox_area
+    dominant_polygon_area = max(polygon_areas) if polygon_areas else None
+    dominant_polygon_ratio = (
+        (dominant_polygon_area / area_total)
+        if dominant_polygon_area is not None and area_total > 0
+        else None
+    )
+    preview_payload = _defect_pattern_preview_shapes(shapes, min_x, max_x, min_y, max_y, format_width, format_length)
+    return {
+        "valid": True,
+        "min_x": round(min_x, 3),
+        "max_x": round(max_x, 3),
+        "min_y": round(min_y, 3),
+        "max_y": round(max_y, 3),
+        "width": round(width, 3),
+        "height": round(height, 3),
+        "aspect_ratio": round(aspect_ratio, 3) if aspect_ratio is not None else None,
+        "polygon_area": round(area_total, 3) if area_total > 0 else None,
+        "width_pct": round(width_pct, 3) if width_pct is not None else None,
+        "height_pct": round(height_pct, 3) if height_pct is not None else None,
+        "area_pct": round(area_pct, 4) if area_pct is not None else None,
+        "fill_ratio": round(fill_ratio, 4) if fill_ratio is not None else None,
+        "point_count": point_count,
+        "polygon_count": polygon_count,
+        "dominant_polygon_area": round(dominant_polygon_area, 3) if dominant_polygon_area is not None else None,
+        "dominant_polygon_ratio": round(dominant_polygon_ratio, 4) if dominant_polygon_ratio is not None else None,
+        "avg_polygon_width": round(sum(polygon_widths) / len(polygon_widths), 3) if polygon_widths else None,
+        "avg_polygon_height": round(sum(polygon_heights) / len(polygon_heights), 3) if polygon_heights else None,
+        "max_polygon_width": round(max(polygon_widths), 3) if polygon_widths else None,
+        "max_polygon_height": round(max(polygon_heights), 3) if polygon_heights else None,
+        "malformed_polygon_count": malformed_entries,
+        "preview_shapes": preview_payload.get("shapes") or [],
+        "preview_frame": preview_payload.get("frame"),
+        "preview_mode": preview_payload.get("mode") or "unavailable",
+    }
+
+
+def _defect_pattern_quantize(value: Optional[float], step: float) -> str:
+    numeric = _to_float(value)
+    if numeric is None or step <= 0:
+        return "na"
+    bucket = round(numeric / step) * step
+    if abs(bucket - round(bucket)) < 1e-9:
+        return str(int(round(bucket)))
+    return f"{bucket:.2f}".rstrip("0").rstrip(".")
+
+
+def _defect_pattern_shape_key(geometry: Dict[str, object]) -> Optional[str]:
+    if not geometry.get("valid"):
+        return None
+    width_basis = geometry.get("width_pct") if geometry.get("width_pct") is not None else geometry.get("width")
+    height_basis = geometry.get("height_pct") if geometry.get("height_pct") is not None else geometry.get("height")
+    area_basis = geometry.get("area_pct") if geometry.get("area_pct") is not None else geometry.get("polygon_area")
+    aspect_basis = geometry.get("aspect_ratio")
+    fill_basis = geometry.get("fill_ratio")
+    polygon_count_basis = min(int(geometry.get("polygon_count") or 0), 6)
+    dominant_ratio_basis = geometry.get("dominant_polygon_ratio")
+    point_basis = min(int(geometry.get("point_count") or 0), 24)
+    return "|".join(
+        [
+            f"c:{polygon_count_basis}",
+            f"w:{_defect_pattern_quantize(_to_float(width_basis), 2.0)}",
+            f"h:{_defect_pattern_quantize(_to_float(height_basis), 2.0)}",
+            f"a:{_defect_pattern_quantize(_to_float(aspect_basis), 0.35)}",
+            f"p:{_defect_pattern_quantize(_to_float(area_basis), 0.5)}",
+            f"f:{_defect_pattern_quantize(_to_float(fill_basis), 0.1)}",
+            f"d:{_defect_pattern_quantize(_to_float(dominant_ratio_basis), 0.1)}",
+            f"v:{point_basis}",
+        ]
+    )
+
+
+def _defect_pattern_location_axis_label(index: int, total: int, axis: str) -> str:
+    if total <= 1:
+        return "Center"
+    ratio = index / max(total - 1, 1)
+    if axis == "x":
+        if ratio <= 0.15:
+            return "Left Edge"
+        if ratio <= 0.35:
+            return "Left"
+        if ratio < 0.65:
+            return "Center"
+        if ratio < 0.85:
+            return "Right"
+        return "Right Edge"
+    if ratio <= 0.15:
+        return "Top Edge"
+    if ratio <= 0.35:
+        return "Upper"
+    if ratio < 0.65:
+        return "Center"
+    if ratio < 0.85:
+        return "Lower"
+    return "Bottom Edge"
+
+
+def _defect_pattern_location_label(col_index: int, row_index: int, cols: int, rows: int) -> str:
+    horizontal = _defect_pattern_location_axis_label(col_index, cols, "x")
+    vertical = _defect_pattern_location_axis_label(row_index, rows, "y")
+    if horizontal == "Center" and vertical == "Center":
+        return "Center"
+    if horizontal == "Center":
+        return f"{vertical} Center"
+    if vertical == "Center":
+        return f"{horizontal} Center"
+    return f"{horizontal} / {vertical}"
+
+
+def _defect_pattern_location_bucket(
+    geometry: Dict[str, object],
+    format_width: Optional[float],
+    format_length: Optional[float],
+    cols: int,
+    rows: int,
+) -> Optional[Dict[str, object]]:
+    if not geometry.get("valid"):
+        return None
+    width = _to_float(format_width)
+    length = _to_float(format_length)
+    min_x = _to_float(geometry.get("min_x"))
+    max_x = _to_float(geometry.get("max_x"))
+    min_y = _to_float(geometry.get("min_y"))
+    max_y = _to_float(geometry.get("max_y"))
+    if (
+        width is None
+        or length is None
+        or width <= 0
+        or length <= 0
+        or min_x is None
+        or max_x is None
+        or min_y is None
+        or max_y is None
+    ):
+        return None
+    centroid_x = (min_x + max_x) / 2.0
+    centroid_y = (min_y + max_y) / 2.0
+    x_ratio = max(0.0, min(1.0, centroid_x / width))
+    y_ratio = max(0.0, min(1.0, centroid_y / length))
+    col_index = min(cols - 1, max(0, int(x_ratio * cols)))
+    row_index = min(rows - 1, max(0, int(y_ratio * rows)))
+    label = _defect_pattern_location_label(col_index, row_index, cols, rows)
+    return {
+        "key": f"c{col_index + 1}-r{row_index + 1}",
+        "label": label,
+        "col_index": col_index,
+        "row_index": row_index,
+        "center_x_pct": round(((col_index + 0.5) / cols) * 100.0, 2),
+        "center_y_pct": round(((row_index + 0.5) / rows) * 100.0, 2),
+        "x_ratio": round(x_ratio, 4),
+        "y_ratio": round(y_ratio, 4),
+    }
+
+
+def _defect_pattern_slope(points: List[Dict[str, object]]) -> Optional[float]:
+    usable = [
+        (float(point.get("reelIndex")), float(point.get("avgSeverity")))
+        for point in points
+        if _to_float(point.get("reelIndex")) is not None and _to_float(point.get("avgSeverity")) is not None
+    ]
+    if len(usable) < 2:
+        return None
+    count = float(len(usable))
+    sum_x = sum(item[0] for item in usable)
+    sum_y = sum(item[1] for item in usable)
+    sum_xy = sum(item[0] * item[1] for item in usable)
+    sum_x2 = sum(item[0] * item[0] for item in usable)
+    denominator = (count * sum_x2) - (sum_x * sum_x)
+    if abs(denominator) < 1e-9:
+        return None
+    return ((count * sum_xy) - (sum_x * sum_y)) / denominator
+
+
+def _defect_pattern_example_distance(example: Dict[str, object], center: Dict[str, float]) -> float:
+    metrics = (
+        ("widthPct", 1.0),
+        ("heightPct", 1.0),
+        ("areaPct", 1.2),
+        ("aspectRatio", 0.9),
+        ("polygonCount", 1.1),
+        ("dominantPolygonRatio", 0.8),
+    )
+    total = 0.0
+    used = 0
+    for key, weight in metrics:
+        value = _to_float(example.get(key))
+        center_value = _to_float(center.get(key))
+        if value is None or center_value is None:
+            continue
+        total += abs(value - center_value) * weight
+        used += 1
+    return total if used > 0 else float("inf")
+
+
+def _defect_pattern_curate_examples(
+    examples: List[Dict[str, object]],
+    dominant_bucket: str,
+) -> List[Dict[str, object]]:
+    if not examples:
+        return []
+    usable = [dict(example) for example in examples]
+    examples_with_images = [example for example in usable if (example.get("imageSrc") or "").strip()]
+    image_pool = examples_with_images or usable
+    center: Dict[str, float] = {}
+    for key in ("widthPct", "heightPct", "areaPct", "aspectRatio", "polygonCount", "dominantPolygonRatio"):
+        values = [_to_float(example.get(key)) for example in usable]
+        numeric_values = [float(value) for value in values if value is not None]
+        if numeric_values:
+            center[key] = sum(numeric_values) / len(numeric_values)
+    for example in usable:
+        example["_distance"] = _defect_pattern_example_distance(example, center)
+    typical = min(image_pool, key=lambda example: (float(example.get("_distance") or 0.0), int(example.get("defectId") or 0)))
+    largest = max(
+        image_pool,
+        key=lambda example: (_to_float(example.get("areaPct")) or _to_float(example.get("polygonArea")) or 0.0, int(example.get("defectId") or 0)),
+    )
+    highest_severity = max(
+        image_pool,
+        key=lambda example: (_to_float(example.get("severityValue")) or 0.0, int(example.get("defectId") or 0)),
+    )
+    dominant_region_pool = [example for example in image_pool if str(example.get("bucketLabel") or "") == str(dominant_bucket or "")]
+    common_region_example = min(
+        dominant_region_pool or image_pool,
+        key=lambda example: (float(example.get("_distance") or 0.0), int(example.get("defectId") or 0)),
+    )
+    ordered: List[Dict[str, object]] = []
+    used_ids = set()
+
+    def push(example: Optional[Dict[str, object]], tag: str) -> None:
+        if not example:
+            return
+        defect_id = int(example.get("defectId") or 0)
+        if defect_id in used_ids:
+            existing = next((item for item in ordered if int(item.get("defectId") or 0) == defect_id), None)
+            if existing:
+                tags = list(existing.get("selectionTags") or [])
+                if tag not in tags:
+                    tags.append(tag)
+                    existing["selectionTags"] = tags
+            return
+        payload = dict(example)
+        payload["selectionTags"] = [tag]
+        ordered.append(payload)
+        used_ids.add(defect_id)
+
+    push(typical, "Typical")
+    push(largest, "Largest")
+    push(highest_severity, "Highest Severity")
+    push(common_region_example, "Common Region")
+
+    remaining = sorted(
+        usable,
+        key=lambda example: (
+            0 if (example.get("imageSrc") or "").strip() else 1,
+            float(example.get("_distance") or 0.0),
+            -(_to_float(example.get("severityValue")) or 0.0),
+            int(example.get("defectId") or 0),
+        ),
+    )
+    for example in remaining:
+        defect_id = int(example.get("defectId") or 0)
+        if defect_id in used_ids:
+            continue
+        ordered.append(dict(example))
+        used_ids.add(defect_id)
+        if len(ordered) >= 18:
+            break
+
+    distances = [float(example.get("_distance") or 0.0) for example in usable if _to_float(example.get("_distance")) is not None]
+    threshold = sorted(distances)[int(len(distances) * 0.85)] if distances else float("inf")
+    for example in ordered:
+        example["isTypical"] = "Typical" in (example.get("selectionTags") or [])
+        example["isOutlier"] = float(example.get("_distance") or 0.0) >= threshold if threshold != float("inf") else False
+        example.pop("_distance", None)
+    return ordered
+
+
+def _defect_pattern_curate_location_examples(
+    examples: List[Dict[str, object]],
+    dominant_class: str,
+) -> List[Dict[str, object]]:
+    if not examples:
+        return []
+    usable = [dict(example) for example in examples]
+    image_pool = [example for example in usable if (example.get("imageSrc") or "").strip()] or usable
+    center_x = sum((_to_float(example.get("locationXRatio")) or 0.0) for example in usable) / max(len(usable), 1)
+    center_y = sum((_to_float(example.get("locationYRatio")) or 0.0) for example in usable) / max(len(usable), 1)
+    for example in usable:
+        x_ratio = _to_float(example.get("locationXRatio")) or center_x
+        y_ratio = _to_float(example.get("locationYRatio")) or center_y
+        example["_distance"] = abs(x_ratio - center_x) + abs(y_ratio - center_y)
+    typical = min(image_pool, key=lambda example: (float(example.get("_distance") or 0.0), int(example.get("defectId") or 0)))
+    largest = max(
+        image_pool,
+        key=lambda example: (_to_float(example.get("areaPct")) or _to_float(example.get("polygonArea")) or 0.0, int(example.get("defectId") or 0)),
+    )
+    highest_severity = max(
+        image_pool,
+        key=lambda example: (_to_float(example.get("severityValue")) or 0.0, int(example.get("defectId") or 0)),
+    )
+    dominant_class_pool = [example for example in image_pool if str(example.get("className") or "") == dominant_class]
+    dominant_class_example = min(
+        dominant_class_pool or image_pool,
+        key=lambda example: (float(example.get("_distance") or 0.0), int(example.get("defectId") or 0)),
+    )
+    ordered: List[Dict[str, object]] = []
+    used_ids = set()
+
+    def push(example: Optional[Dict[str, object]], tag: str) -> None:
+        if not example:
+            return
+        defect_id = int(example.get("defectId") or 0)
+        if defect_id in used_ids:
+            existing = next((item for item in ordered if int(item.get("defectId") or 0) == defect_id), None)
+            if existing:
+                tags = list(existing.get("selectionTags") or [])
+                if tag not in tags:
+                    tags.append(tag)
+                    existing["selectionTags"] = tags
+            return
+        payload = dict(example)
+        payload["selectionTags"] = [tag]
+        ordered.append(payload)
+        used_ids.add(defect_id)
+
+    push(typical, "Typical")
+    push(largest, "Largest")
+    push(highest_severity, "Highest Severity")
+    push(dominant_class_example, "Dominant Class")
+
+    remaining = sorted(
+        usable,
+        key=lambda example: (
+            0 if (example.get("imageSrc") or "").strip() else 1,
+            float(example.get("_distance") or 0.0),
+            -(_to_float(example.get("severityValue")) or 0.0),
+            int(example.get("defectId") or 0),
+        ),
+    )
+    for example in remaining:
+        defect_id = int(example.get("defectId") or 0)
+        if defect_id in used_ids:
+            continue
+        ordered.append(dict(example))
+        used_ids.add(defect_id)
+        if len(ordered) >= 18:
+            break
+    distances = [float(example.get("_distance") or 0.0) for example in usable if _to_float(example.get("_distance")) is not None]
+    threshold = sorted(distances)[int(len(distances) * 0.85)] if distances else float("inf")
+    for example in ordered:
+        example["isTypical"] = "Typical" in (example.get("selectionTags") or [])
+        example["isOutlier"] = float(example.get("_distance") or 0.0) >= threshold if threshold != float("inf") else False
+        example.pop("_distance", None)
+    return ordered
+
+
+def _build_defect_pattern_summary_cards(
+    class_key: str,
+    class_label: str,
+    total_defects: int,
+    bucket_totals: Counter,
+    class_counter: Counter,
+    location_groups: List[Dict[str, object]],
+    trend_series: List[Dict[str, object]],
+) -> List[Dict[str, str]]:
+    cards: List[Dict[str, str]] = []
+    top_bucket, top_bucket_count = (bucket_totals.most_common(1)[0] if bucket_totals else ("", 0))
+    top_bucket_share = (top_bucket_count / total_defects) if total_defects > 0 else 0.0
+    if top_bucket and top_bucket_share >= 0.45:
+        cards.append(
+            {
+                "title": "Location Pattern",
+                "body": f"Most defects occur in the {top_bucket} region.",
+                "tone": "strong",
+            }
+        )
+    elif top_bucket and top_bucket_share >= 0.34:
+        cards.append(
+            {
+                "title": "Location Pattern",
+                "body": f"Defects lean toward the {top_bucket} region, but the spread is still mixed across the reel.",
+                "tone": "info",
+            }
+        )
+    else:
+        cards.append(
+            {
+                "title": "Location Pattern",
+                "body": "Defects are spread across the reel with no single dominant region.",
+                "tone": "neutral",
+            }
+        )
+    if class_key == "all":
+        top_class, top_class_count = (class_counter.most_common(1)[0] if class_counter else ("Unclassified", 0))
+        if total_defects > 0 and top_class_count / total_defects >= 0.35:
+            cards.append(
+                {
+                    "title": "Dominant Class",
+                    "body": f"{top_class} is the dominant defect class.",
+                    "tone": "info",
+                }
+            )
+    else:
+        cards.append(
+            {
+                "title": "Class Focus",
+                "body": f"Analysis is filtered to {class_label} defects.",
+                "tone": "info",
+            }
+        )
+    top_group = location_groups[0] if location_groups else None
+    if top_group and int(top_group.get("uniqueReelCount") or 0) >= 3:
+        cards.append(
+            {
+                "title": "Location Cluster",
+                "body": f"{top_group.get('label') or 'One zone'} affects {int(top_group.get('uniqueReelCount') or 0)} reels and is the main repeat location.",
+                "tone": "strong",
+            }
+        )
+    else:
+        cards.append(
+            {
+                "title": "Location Cluster",
+                "body": "No single format region clearly dominates across reels.",
+                "tone": "neutral",
+            }
+        )
+    strongest_trend: Optional[Tuple[float, str]] = None
+    for series in trend_series:
+        slope = _defect_pattern_slope(series.get("points") or [])
+        if slope is None:
+            continue
+        label = str(series.get("label") or "Region")
+        if strongest_trend is None or abs(slope) > abs(strongest_trend[0]):
+            strongest_trend = (slope, label)
+    if strongest_trend and strongest_trend[0] >= 0.18:
+        cards.append(
+            {
+                "title": "Severity Trend",
+                "body": f"{strongest_trend[1]} severity is trending upward across reels.",
+                "tone": "warn",
+            }
+        )
+    elif strongest_trend and strongest_trend[0] <= -0.18:
+        cards.append(
+            {
+                "title": "Severity Trend",
+                "body": f"{strongest_trend[1]} severity is easing down across reels.",
+                "tone": "info",
+            }
+        )
+    else:
+        cards.append(
+            {
+                "title": "Severity Trend",
+                "body": "Severity is broadly stable by reel position.",
+                "tone": "neutral",
+            }
+        )
+    return cards[:4]
+
+
+def _build_defect_pattern_analyzer_payload(
+    session: Session,
+    start: datetime,
+    end: datetime,
+    min_feet: Optional[float],
+    selections: List[Dict[str, object]],
+) -> Dict[str, object]:
+    selection_clause = _defect_trends_selection_clause(selections)
+    if selection_clause is None:
+        return {"machines": []}
+    defect_exists = (
+        session.query(Defect.defect_id)
+        .filter(Defect.reel_id == Reel.reel_id)
+        .filter(Defect.defect_time >= start)
+        .filter(Defect.defect_time <= end)
+        .exists()
+    )
+    reel_query = (
+        session.query(Reel)
+        .options(selectinload(Reel.machine))
+        .filter(Reel.time_start <= end)
+        .filter(Reel.time_end >= start)
+        .filter(selection_clause)
+        .filter(defect_exists)
+    )
+    if min_feet is not None:
+        reel_query = reel_query.filter(_defect_trends_reel_feet_expr() >= min_feet)
+    reels = reel_query.order_by(Reel.machine_id.asc(), Reel.time_start.asc(), Reel.reel_id.asc()).all()
+    if not reels:
+        return {"machines": []}
+    reels_by_id = {reel.reel_id: reel for reel in reels if reel.reel_id is not None}
+    reel_ids = list(reels_by_id.keys())
+    defects = (
+        session.query(Defect)
+        .filter(Defect.reel_id.in_(reel_ids))
+        .filter(Defect.defect_time >= start)
+        .filter(Defect.defect_time <= end)
+        .order_by(Defect.reel_id.asc(), Defect.defect_time.asc(), Defect.defect_id.asc())
+        .all()
+    )
+    defects_by_machine: Dict[int, List[Defect]] = defaultdict(list)
+    reels_by_machine: Dict[int, List[Reel]] = defaultdict(list)
+    for reel in reels:
+        reels_by_machine[reel.machine_id].append(reel)
+    for defect in defects:
+        reel = reels_by_id.get(defect.reel_id)
+        if not reel:
+            continue
+        defects_by_machine[reel.machine_id].append(defect)
+
+    machines_payload: List[Dict[str, object]] = []
+    for machine_id, machine_reels in reels_by_machine.items():
+        machine_reels.sort(key=lambda reel: (reel.time_start or datetime.min, reel.reel_id or 0))
+        machine_defects = defects_by_machine.get(machine_id, [])
+        if not machine_defects:
+            continue
+        reel_payload: List[Dict[str, object]] = []
+        reel_meta_by_id: Dict[int, Dict[str, object]] = {}
+        for index, reel in enumerate(machine_reels):
+            reel_meta = {
+                "reelId": reel.reel_id,
+                "reelCode": reel.reel_code or f"Reel {index + 1}",
+                "jobLabel": _defect_trends_format_job_label(reel.job_name, reel.order_number),
+                "orderIndex": index + 1,
+                "reelFeetTotal": round(_reel_length_feet(reel), 3),
+            }
+            reel_payload.append(reel_meta)
+            if reel.reel_id is not None:
+                reel_meta_by_id[int(reel.reel_id)] = reel_meta
+
+        class_labels: Dict[str, str] = {}
+        class_counter: Counter = Counter()
+        heatmap_stats: Dict[str, Dict[Tuple[str, int], Dict[str, object]]] = defaultdict(dict)
+        trend_stats: Dict[str, Dict[Tuple[str, int], Dict[str, float]]] = defaultdict(dict)
+        location_group_stats: Dict[str, Dict[str, Dict[str, object]]] = defaultdict(dict)
+        heatmap_bucket_totals: Dict[str, Counter] = defaultdict(Counter)
+        location_parse_stats = {
+            "singlePolygonDefects": 0,
+            "multiPolygonDefects": 0,
+            "skippedMalformedEntries": 0,
+            "missingFormatDimensions": 0,
+            "excludedFromLocationMap": 0,
+        }
+
+        for defect in machine_defects:
+            reel = reels_by_id.get(defect.reel_id)
+            reel_meta = reel_meta_by_id.get(int(defect.reel_id)) if defect.reel_id is not None else None
+            if not reel or not reel_meta:
+                continue
+            class_label = str(defect.class_name or "").strip() or "Unclassified"
+            class_key = _defect_pattern_class_key(class_label)
+            class_labels[class_key] = class_label
+            class_counter[class_label] += 1
+            position_ratio = _defect_pattern_position_ratio(reel, defect)
+            heatmap_bucket = _defect_pattern_bucket_for_ratio(position_ratio, DEFECT_PATTERN_HEATMAP_BUCKETS)
+            trend_bucket = _defect_pattern_bucket_for_ratio(position_ratio, DEFECT_PATTERN_TREND_BUCKETS)
+            severity_value = _to_float(defect.severity_value)
+            magnitude_value = _to_float(defect.magnitude_value)
+            geometry = _defect_pattern_geometry(
+                defect.coords_json,
+                _to_float(reel.format_width),
+                _to_float(reel.format_length),
+            )
+            polygon_count = int(geometry.get("polygon_count") or 0)
+            if polygon_count == 1:
+                location_parse_stats["singlePolygonDefects"] += 1
+            elif polygon_count > 1:
+                location_parse_stats["multiPolygonDefects"] += 1
+            location_parse_stats["skippedMalformedEntries"] += int(geometry.get("malformed_polygon_count") or 0)
+            location_bucket = _defect_pattern_location_bucket(
+                geometry,
+                _to_float(reel.format_width),
+                _to_float(reel.format_length),
+                DEFECT_PATTERN_LOCATION_GRID["cols"],
+                DEFECT_PATTERN_LOCATION_GRID["rows"],
+            )
+            if geometry.get("valid") and location_bucket is None:
+                if not _to_float(reel.format_width) or not _to_float(reel.format_length):
+                    location_parse_stats["missingFormatDimensions"] += 1
+                location_parse_stats["excludedFromLocationMap"] += 1
+
+            for group_key in ("all", class_key):
+                if heatmap_bucket:
+                    heatmap_bucket_totals[group_key][str(heatmap_bucket.get("label") or heatmap_bucket["key"])] += 1
+                    cell_key = (str(heatmap_bucket["key"]), int(defect.reel_id))
+                    cell = heatmap_stats[group_key].setdefault(
+                        cell_key,
+                        {"count": 0, "severity_total": 0.0, "severity_count": 0, "class_counter": Counter()},
+                    )
+                    cell["count"] = int(cell.get("count") or 0) + 1
+                    if severity_value is not None:
+                        cell["severity_total"] = float(cell.get("severity_total") or 0.0) + severity_value
+                        cell["severity_count"] = int(cell.get("severity_count") or 0) + 1
+                    cell["class_counter"][class_label] += 1
+                if trend_bucket:
+                    trend_key = (str(trend_bucket["key"]), int(defect.reel_id))
+                    trend_entry = trend_stats[group_key].setdefault(
+                        trend_key,
+                        {
+                            "count": 0.0,
+                            "severity_total": 0.0,
+                            "severity_count": 0.0,
+                            "magnitude_total": 0.0,
+                            "magnitude_count": 0.0,
+                        },
+                    )
+                    trend_entry["count"] = float(trend_entry.get("count") or 0.0) + 1.0
+                    if severity_value is not None:
+                        trend_entry["severity_total"] = float(trend_entry.get("severity_total") or 0.0) + severity_value
+                        trend_entry["severity_count"] = float(trend_entry.get("severity_count") or 0.0) + 1.0
+                    if magnitude_value is not None:
+                        trend_entry["magnitude_total"] = float(trend_entry.get("magnitude_total") or 0.0) + magnitude_value
+                        trend_entry["magnitude_count"] = float(trend_entry.get("magnitude_count") or 0.0) + 1.0
+                if location_bucket:
+                    bucket_key = str(location_bucket["key"])
+                    group_entry = location_group_stats[group_key].setdefault(
+                        bucket_key,
+                        {
+                            "count": 0,
+                            "severity_total": 0.0,
+                            "severity_count": 0,
+                            "magnitude_total": 0.0,
+                            "magnitude_count": 0,
+                            "class_counter": Counter(),
+                            "reels": set(),
+                            "label": location_bucket.get("label") or bucket_key,
+                            "colIndex": int(location_bucket.get("col_index") or 0),
+                            "rowIndex": int(location_bucket.get("row_index") or 0),
+                            "centerXPct": _to_float(location_bucket.get("center_x_pct")),
+                            "centerYPct": _to_float(location_bucket.get("center_y_pct")),
+                            "representative_area": _to_float(geometry.get("area_pct")) or _to_float(geometry.get("polygon_area")) or 0.0,
+                            "representative_image": (defect.image_src or "").replace("\\", "/"),
+                            "examples": [],
+                        },
+                    )
+                    group_entry["count"] = int(group_entry.get("count") or 0) + 1
+                    if severity_value is not None:
+                        group_entry["severity_total"] = float(group_entry.get("severity_total") or 0.0) + severity_value
+                        group_entry["severity_count"] = int(group_entry.get("severity_count") or 0) + 1
+                    if magnitude_value is not None:
+                        group_entry["magnitude_total"] = float(group_entry.get("magnitude_total") or 0.0) + magnitude_value
+                        group_entry["magnitude_count"] = int(group_entry.get("magnitude_count") or 0) + 1
+                    group_entry["class_counter"][class_label] += 1
+                    group_entry["reels"].add(int(defect.reel_id))
+                    group_entry["examples"].append(
+                        {
+                            "defectId": defect.defect_id,
+                            "imageSrc": (defect.image_src or "").replace("\\", "/"),
+                            "coords": _serialize_coords(defect.coords_json),
+                            "className": class_label,
+                            "magnitudeValue": magnitude_value,
+                            "severityValue": severity_value,
+                            "formatPosition": _to_float(defect.format_position),
+                            "reelId": reel_meta["reelId"],
+                            "reelCode": reel_meta["reelCode"],
+                            "reelIndex": reel_meta["orderIndex"],
+                            "jobLabel": reel_meta["jobLabel"],
+                            "defectTime": _iso(defect.defect_time),
+                            "formatWidth": _to_float(reel.format_width),
+                            "formatLength": _to_float(reel.format_length),
+                            "bucketLabel": str(heatmap_bucket.get("label") or heatmap_bucket["key"]) if heatmap_bucket else "",
+                            "locationKey": bucket_key,
+                            "locationLabel": str(location_bucket.get("label") or bucket_key),
+                            "locationXRatio": location_bucket.get("x_ratio"),
+                            "locationYRatio": location_bucket.get("y_ratio"),
+                            "locationColIndex": location_bucket.get("col_index"),
+                            "locationRowIndex": location_bucket.get("row_index"),
+                            "widthPct": geometry.get("width_pct"),
+                            "heightPct": geometry.get("height_pct"),
+                            "areaPct": geometry.get("area_pct"),
+                            "aspectRatio": geometry.get("aspect_ratio"),
+                            "polygonCount": geometry.get("polygon_count"),
+                            "dominantPolygonRatio": geometry.get("dominant_polygon_ratio"),
+                            "polygonArea": geometry.get("polygon_area"),
+                            "previewMode": geometry.get("preview_mode"),
+                            "centroidXPct": round(float(location_bucket.get("x_ratio") or 0.0) * 100.0, 2),
+                            "centroidYPct": round(float(location_bucket.get("y_ratio") or 0.0) * 100.0, 2),
+                        }
+                    )
+                    current_area = _to_float(geometry.get("area_pct")) or _to_float(geometry.get("polygon_area")) or 0.0
+                    if current_area > float(group_entry.get("representative_area") or 0.0):
+                        group_entry["representative_area"] = current_area
+                        group_entry["representative_image"] = (defect.image_src or "").replace("\\", "/")
+
+        normalized_class_counts: Counter = Counter()
+        for label, count in class_counter.items():
+            normalized_class_counts[_defect_pattern_class_key(label)] += int(count or 0)
+
+        class_options = [
+            {"key": "all", "label": "All Classes", "count": sum(class_counter.values())}
+        ] + [
+            {"key": class_key, "label": class_labels[class_key], "count": count}
+            for class_key, count in sorted(
+                ((key, int(count or 0)) for key, count in normalized_class_counts.items()),
+                key=lambda item: (-item[1], class_labels.get(item[0], item[0])),
+            )
+        ]
+
+        heatmap_by_class: Dict[str, Dict[str, object]] = {}
+        trend_by_class: Dict[str, List[Dict[str, object]]] = {}
+        location_map_by_class: Dict[str, Dict[str, object]] = {}
+        location_groups_by_class: Dict[str, List[Dict[str, object]]] = {}
+        summary_cards_by_class: Dict[str, List[Dict[str, str]]] = {}
+
+        for option in class_options:
+            group_key = str(option["key"])
+            heatmap_matrix: List[List[int]] = []
+            avg_severity_matrix: List[List[Optional[float]]] = []
+            hover_matrix: List[List[str]] = []
+            for bucket in DEFECT_PATTERN_HEATMAP_BUCKETS:
+                row_counts: List[int] = []
+                row_severity: List[Optional[float]] = []
+                row_hover: List[str] = []
+                for reel_meta in reel_payload:
+                    reel_id = int(reel_meta["reelId"])
+                    stats_entry = heatmap_stats[group_key].get((str(bucket["key"]), reel_id), {})
+                    count_value = int(stats_entry.get("count") or 0)
+                    severity_count = int(stats_entry.get("severity_count") or 0)
+                    avg_severity = (
+                        round(float(stats_entry.get("severity_total") or 0.0) / severity_count, 3)
+                        if severity_count > 0
+                        else None
+                    )
+                    dominant_class = ""
+                    if group_key == "all":
+                        class_counter_cell = stats_entry.get("class_counter") or Counter()
+                        dominant_class = class_counter_cell.most_common(1)[0][0] if class_counter_cell else ""
+                    hover_parts = [
+                        f"<b>{reel_meta['reelCode']}</b>",
+                        f"Job: {reel_meta['jobLabel']}",
+                        f"Reel order: #{reel_meta['orderIndex']}",
+                        f"Region: {bucket['label']}",
+                        f"Defect count: {count_value}",
+                    ]
+                    if avg_severity is not None:
+                        hover_parts.append(f"Avg severity: {avg_severity:.2f}")
+                    if dominant_class:
+                        hover_parts.append(f"Dominant class: {dominant_class}")
+                    row_counts.append(count_value)
+                    row_severity.append(avg_severity)
+                    row_hover.append("<br>".join(hover_parts))
+                heatmap_matrix.append(row_counts)
+                avg_severity_matrix.append(row_severity)
+                hover_matrix.append(row_hover)
+            heatmap_by_class[group_key] = {
+                "bucketLabels": [str(bucket["label"]) for bucket in DEFECT_PATTERN_HEATMAP_BUCKETS],
+                "reelLabels": [f"#{int(reel['orderIndex'])}" for reel in reel_payload],
+                "reels": reel_payload,
+                "z": heatmap_matrix,
+                "avgSeverity": avg_severity_matrix,
+                "hover": hover_matrix,
+            }
+
+            trend_series: List[Dict[str, object]] = []
+            for bucket in DEFECT_PATTERN_TREND_BUCKETS:
+                points_payload: List[Dict[str, object]] = []
+                for reel_meta in reel_payload:
+                    reel_id = int(reel_meta["reelId"])
+                    stats_entry = trend_stats[group_key].get((str(bucket["key"]), reel_id))
+                    if not stats_entry:
+                        continue
+                    count_value = int(round(float(stats_entry.get("count") or 0.0)))
+                    severity_count = int(round(float(stats_entry.get("severity_count") or 0.0)))
+                    magnitude_count = int(round(float(stats_entry.get("magnitude_count") or 0.0)))
+                    if count_value <= 0 or (severity_count <= 0 and magnitude_count <= 0):
+                        continue
+                    avg_severity = float(stats_entry.get("severity_total") or 0.0) / max(severity_count, 1)
+                    avg_magnitude = (
+                        float(stats_entry.get("magnitude_total") or 0.0) / max(magnitude_count, 1)
+                        if magnitude_count > 0
+                        else None
+                    )
+                    points_payload.append(
+                        {
+                            "reelId": reel_meta["reelId"],
+                            "reelCode": reel_meta["reelCode"],
+                            "jobLabel": reel_meta["jobLabel"],
+                            "reelIndex": reel_meta["orderIndex"],
+                            "avgSeverity": round(avg_severity, 3),
+                            "avgMagnitude": round(avg_magnitude, 4) if avg_magnitude is not None else None,
+                            "count": count_value,
+                        }
+                    )
+                trend_series.append(
+                    {
+                        "key": bucket["key"],
+                        "label": bucket["label"],
+                        "points": points_payload,
+                    }
+                )
+            trend_by_class[group_key] = trend_series
+
+            location_cells: List[Dict[str, object]] = []
+            raw_groups = []
+            for group_bucket_key, group_entry in location_group_stats[group_key].items():
+                count_value = int(group_entry.get("count") or 0)
+                severity_count = int(group_entry.get("severity_count") or 0)
+                magnitude_count = int(group_entry.get("magnitude_count") or 0)
+                avg_severity = (
+                    float(group_entry.get("severity_total") or 0.0) / max(severity_count, 1)
+                    if severity_count > 0
+                    else None
+                )
+                avg_magnitude = (
+                    float(group_entry.get("magnitude_total") or 0.0) / max(magnitude_count, 1)
+                    if magnitude_count > 0
+                    else None
+                )
+                dominant_class = (
+                    (group_entry.get("class_counter") or Counter()).most_common(1)[0][0]
+                    if group_entry.get("class_counter")
+                    else "Unclassified"
+                )
+                curated_examples = _defect_pattern_curate_location_examples(
+                    list(group_entry.get("examples") or []),
+                    str(dominant_class or ""),
+                )
+                reels_affected = len(group_entry.get("reels") or set())
+                location_payload = {
+                    "key": group_bucket_key,
+                    "label": group_entry.get("label") or group_bucket_key,
+                    "colIndex": int(group_entry.get("colIndex") or 0),
+                    "rowIndex": int(group_entry.get("rowIndex") or 0),
+                    "centerXPct": _to_float(group_entry.get("centerXPct")),
+                    "centerYPct": _to_float(group_entry.get("centerYPct")),
+                    "count": count_value,
+                    "sharePct": round((count_value / max(int(option["count"]) or 1, 1)) * 100.0, 1),
+                    "avgSeverity": round(avg_severity, 3) if avg_severity is not None else None,
+                    "avgMagnitude": round(avg_magnitude, 4) if avg_magnitude is not None else None,
+                    "dominantClassName": dominant_class,
+                    "uniqueReelCount": reels_affected,
+                    "thumbnailSrc": group_entry.get("representative_image") or "",
+                    "examples": curated_examples,
+                }
+                location_cells.append(
+                    {
+                        "key": group_bucket_key,
+                        "label": group_entry.get("label") or group_bucket_key,
+                        "colIndex": int(group_entry.get("colIndex") or 0),
+                        "rowIndex": int(group_entry.get("rowIndex") or 0),
+                        "count": count_value,
+                        "reelsAffected": reels_affected,
+                        "avgSeverity": round(avg_severity, 3) if avg_severity is not None else None,
+                        "avgMagnitude": round(avg_magnitude, 4) if avg_magnitude is not None else None,
+                        "dominantClassName": dominant_class,
+                    }
+                )
+                if count_value >= 2:
+                    raw_groups.append(location_payload)
+            raw_groups.sort(
+                key=lambda item: (
+                    -(int(item.get("uniqueReelCount") or 0)),
+                    -int(item.get("count") or 0),
+                    -(float(item.get("avgMagnitude") or item.get("avgSeverity") or 0.0)),
+                )
+            )
+            location_groups_by_class[group_key] = raw_groups[:12]
+            location_map_by_class[group_key] = {
+                "cols": DEFECT_PATTERN_LOCATION_GRID["cols"],
+                "rows": DEFECT_PATTERN_LOCATION_GRID["rows"],
+                "cells": location_cells,
+            }
+            summary_cards_by_class[group_key] = _build_defect_pattern_summary_cards(
+                group_key,
+                str(option["label"]),
+                int(option.get("count") or 0),
+                heatmap_bucket_totals[group_key],
+                class_counter,
+                location_groups_by_class[group_key],
+                trend_by_class[group_key],
+            )
+
+        machines_payload.append(
+            {
+                "machineId": machine_id,
+                "machineName": machine_reels[0].machine.name if machine_reels[0].machine else f"Press {machine_id}",
+                "classOptions": class_options,
+                "heatmapByClass": heatmap_by_class,
+                "trendByClass": trend_by_class,
+                "locationMapByClass": location_map_by_class,
+                "locationGroupsByClass": location_groups_by_class,
+                "summaryCardsByClass": summary_cards_by_class,
+                "locationParseStats": location_parse_stats,
+            }
+        )
+
+    machines_payload.sort(
+        key=lambda item: (
+            _machine_sort_key(item.get("machineName")),
+            (item.get("machineName") or "").lower(),
+        )
+    )
+    return {"machines": machines_payload}
+
+
 def _build_defect_trend_payload(
     session: Session,
     start: datetime,
@@ -8392,6 +9580,9 @@ def _build_defect_trend_payload(
         if not reel:
             continue
         total_feet = _reel_length_feet(reel)
+        coordinate_summary = _defect_coordinate_summary(defect.coords_json)
+        format_width = _to_float(reel.format_width)
+        format_length = _to_float(reel.format_length)
         start_value = _to_float(reel.reel_start)
         format_position = _to_float(defect.format_position)
         local_feet = None
@@ -8415,6 +9606,15 @@ def _build_defect_trend_payload(
                 "magnitudeValue": _to_float(defect.magnitude_value),
                 "severityValue": _to_float(defect.severity_value),
                 "imageSrc": (defect.image_src or "").replace("\\", "/"),
+                "coords": _serialize_coords(defect.coords_json),
+                "coordCentroidX": coordinate_summary["centroid_x"],
+                "coordCentroidY": coordinate_summary["centroid_y"],
+                "coordMinX": coordinate_summary["min_x"],
+                "coordMaxX": coordinate_summary["max_x"],
+                "coordMinY": coordinate_summary["min_y"],
+                "coordMaxY": coordinate_summary["max_y"],
+                "formatWidth": format_width,
+                "formatLength": format_length,
                 "formatPosition": format_position,
                 "feetFromReelStart": round(local_feet, 3) if local_feet is not None else None,
                 "reelFeetTotal": round(total_feet, 3) if total_feet is not None else None,
@@ -8447,8 +9647,8 @@ def _build_defect_trend_payload(
         previous_reference_filename: Optional[str] = None
         previous_reference_display_name: Optional[str] = None
         previous_reference_image_src: Optional[str] = None
-        previous_mask_coords: Optional[str] = None
-        previous_mask_detail: Optional[Dict[str, object]] = None
+        previous_mask_signature: Optional[Tuple[Tuple[str, str, str], ...]] = None
+        previous_mask_details: List[Dict[str, object]] = []
         for reel in machine_reels:
             total_feet = _reel_length_feet(reel)
             rlm_reel = rlm_reel_by_dashboard_reel.get(reel.reel_id) if reel.reel_id is not None else None
@@ -8511,42 +9711,63 @@ def _build_defect_trend_payload(
             ordered_masks = sorted(
                 list(reel.masks or []),
                 key=lambda mask: (
-                    _to_float(getattr(mask, "format_value", None)) if _to_float(getattr(mask, "format_value", None)) is not None else float("inf"),
                     mask.timestamp or datetime.min,
                     int(mask.mask_id or 0),
+                    _to_float(getattr(mask, "format_value", None)) if _to_float(getattr(mask, "format_value", None)) is not None else float("inf"),
                 ),
             )
-            for mask in ordered_masks:
-                current_coords = (mask.coords or "").strip()
-                mask_format = _to_float(getattr(mask, "format_value", None))
-                mask_local_feet = None
-                reel_start_value_bst = _to_float(reel.reel_start)
-                reel_format_length_bst = _to_float(reel.format_length)
-                serialized_mask = _serialize_mask_detail(mask)
-                if reel_start_value_bst is not None and reel_format_length_bst is not None and mask_format is not None:
-                    mask_local_feet = ((mask_format - reel_start_value_bst) * reel_format_length_bst) / MM_PER_FOOT
-                    if total_feet:
-                        mask_local_feet = max(0.0, min(total_feet, mask_local_feet))
-                if previous_mask_coords is not None and current_coords != previous_mask_coords:
+            serialized_masks = [_serialize_mask_detail(mask) for mask in ordered_masks]
+            current_mask_details = _active_mask_details(serialized_masks)
+            current_mask_signature = tuple(sorted(_active_mask_signature(current_mask_details)))
+            if current_mask_signature:
+                anchor_mask = next(
+                    (
+                        mask
+                        for mask in reversed(ordered_masks)
+                        if bool(
+                            (getattr(mask, "coords", None) or "").strip()
+                            or (getattr(mask, "xml_id", None) or "").strip()
+                            or (getattr(mask, "sensitivitysetid", None) or "").strip()
+                        )
+                    ),
+                    None,
+                )
+                if (
+                    previous_mask_signature is not None
+                    and current_mask_signature != previous_mask_signature
+                    and anchor_mask is not None
+                ):
+                    mask_format = _to_float(getattr(anchor_mask, "format_value", None))
+                    mask_local_feet = None
+                    reel_start_value_bst = _to_float(reel.reel_start)
+                    reel_format_length_bst = _to_float(reel.format_length)
+                    if reel_start_value_bst is not None and reel_format_length_bst is not None and mask_format is not None:
+                        mask_local_feet = ((mask_format - reel_start_value_bst) * reel_format_length_bst) / MM_PER_FOOT
+                        if total_feet:
+                            mask_local_feet = max(0.0, min(total_feet, mask_local_feet))
+                    current_coords = (getattr(anchor_mask, "coords", None) or "").strip()
+                    previous_coords = ""
+                    if previous_mask_details:
+                        previous_coords = (previous_mask_details[-1].get("coords") or "").strip()
                     mask_events.append(
                         {
                             "reelId": reel.reel_id,
                             "reelCode": reel.reel_code,
                             "jobName": reel.job_name,
                             "orderNumber": reel.order_number,
-                            "time": _iso(mask.timestamp or reel.time_start or reel.time_end),
+                            "time": _iso(anchor_mask.timestamp or reel.time_start or reel.time_end),
                             "formatPosition": mask_format,
                             "feetFromReelStart": round(mask_local_feet, 3) if mask_local_feet is not None else None,
                             "coords": current_coords,
-                            "previousCoords": previous_mask_coords,
+                            "previousCoords": previous_coords,
                             "formatWidth": _to_float(reel.format_width),
                             "formatLength": _to_float(reel.format_length),
-                            "beforeMasks": _active_mask_details([previous_mask_detail] if previous_mask_detail else []),
-                            "afterMasks": _active_mask_details([serialized_mask]),
+                            "beforeMasks": previous_mask_details,
+                            "afterMasks": current_mask_details,
                         }
                     )
-                previous_mask_coords = current_coords
-                previous_mask_detail = serialized_mask
+                previous_mask_signature = current_mask_signature
+                previous_mask_details = current_mask_details
             reel_start_value = _to_float(rlm_reel.reel_start) if rlm_reel else None
             reel_format_length = _to_float(rlm_reel.format_length) if rlm_reel else None
             reel_total_feet = compute_reel_feet_from_range(
@@ -8678,6 +9899,24 @@ def api_defect_trend_data():
         except Exception as exc:
             current_app.logger.exception("Failed to build defect trend data")
             return jsonify({"error": f"Unable to load defect trend data: {exc}"}), 500
+
+
+@dashboard_bp.route("/api/defect-trends/pattern-analyzer", methods=["POST"])
+def api_defect_trend_pattern_analyzer():
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Invalid JSON payload."}), 400
+    with SessionLocal() as session:
+        try:
+            start, end = _defect_trends_parse_window(payload)
+            min_feet = _defect_trends_parse_min_feet(payload.get("min_feet"))
+            selections = _normalize_defect_trend_selections(payload)
+            return jsonify(_build_defect_pattern_analyzer_payload(session, start, end, min_feet, selections))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:
+            current_app.logger.exception("Failed to build defect pattern analyzer")
+            return jsonify({"error": f"Unable to load defect pattern analyzer: {exc}"}), 500
 
 
 @dashboard_bp.route("/api/defects")
