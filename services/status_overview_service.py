@@ -27,6 +27,8 @@ MAKE_READY_FEET_LIMIT = 5000.0
 BST_OFF_ACTIVE_PCT = 0.0
 RLM_OFF_MONITORING_POINTS = 0
 STALE_NO_REEL_MINUTES = 60
+CLOSED_ALERT_STATES = ("ACKNOWLEDGED", "MAKE_READY", "RESOLVED")
+REOPEN_SUPPRESSING_ALERT_STATES = {"ACKNOWLEDGED", "MAKE_READY"}
 
 STATUS_OVERVIEW_MACHINE_ORDER = [
     "press 5",
@@ -116,7 +118,7 @@ class StatusOverviewService:
             row.acknowledge_comment = comment
             row.is_active = False
             session.commit()
-        return True, "Alert acknowledged."
+        return True, "Alert closed."
 
     def resolve_alert(self, alert_id: int, actor: str, comment: str) -> Tuple[bool, str]:
         return self.acknowledge_alert(alert_id, actor, comment)
@@ -387,8 +389,7 @@ class StatusOverviewService:
                 source = "SYSTEM"
                 state = "make-ready"
             elif minutes_since_activity is None or minutes_since_activity >= STALE_NO_REEL_MINUTES:
-                minutes_value = max(int(minutes_since_activity or STALE_NO_REEL_MINUTES), STALE_NO_REEL_MINUTES)
-                title = f"Standby for {minutes_value}m"
+                title = "Standby"
                 source = "SYSTEM"
                 state = "stale"
             elif bst_off and rlm_off:
@@ -439,7 +440,7 @@ class StatusOverviewService:
             workflow_rank = 3
             active_row = None
             issue_key = f"{key}|{title}" if title and is_alertable else None
-            status_text = title or "All Systems Active"
+            status_text = self._card_status_text(state)
             candidate_preview = {
                 "issueKey": issue_key,
                 "reelId": alert_reel["reelId"],
@@ -469,28 +470,15 @@ class StatusOverviewService:
                     existing_row = reel_row or reel_key_row or latest_row
                     if candidate_preview and self._should_suppress_reopen(existing_row, candidate_preview):
                         active_row = existing_row
-                        if existing_row and existing_row.alert_state == "RESOLVED":
-                            workflow_badge = "Resolved"
-                            workflow_rank = 2
-                            state = "resolved"
-                            status_text = f"{title} (RESOLVED)"
-                        elif existing_row and existing_row.alert_state == "ACKNOWLEDGED":
-                            workflow_badge = "Acknowledged"
-                            workflow_rank = 2
-                            state = "critical"
-                            status_text = f"{title} (Acked)"
-                            is_alertable = False
-                        elif existing_row and existing_row.alert_state == "MAKE_READY":
+                        if existing_row and existing_row.alert_state == "MAKE_READY":
                             workflow_badge = "Make Ready"
                             workflow_rank = 2
                             state = "make-ready"
-                            status_text = "Make Ready"
+                            status_text = self._card_status_text(state)
                             is_alertable = False
-                        elif existing_row and existing_row.alert_state == "SUPERSEDED":
-                            workflow_badge = "Superseded"
+                        elif existing_row and existing_row.alert_state in REOPEN_SUPPRESSING_ALERT_STATES:
                             workflow_rank = 2
-                            state = "superseded"
-                            status_text = f"{title} (SUPERSEDED)"
+                            status_text = self._card_status_text(state)
                             is_alertable = False
                         else:
                             workflow_badge = "New"
@@ -561,6 +549,15 @@ class StatusOverviewService:
             "detail": "Inactive" if is_off else "Active",
             "subdetail": f"{pts} pts | {density:.1f}/1k ft",
         }
+
+    def _card_status_text(self, state: str) -> str:
+        if state == "make-ready":
+            return "Make Ready"
+        if state == "stale":
+            return "Standby"
+        if state == "critical":
+            return "Inactive"
+        return "Active"
 
     def _build_alert_detail(
         self,
@@ -707,12 +704,12 @@ class StatusOverviewService:
             current_reel = current_reels.get((row.machine_name or "").strip().lower())
             if not current_reel:
                 continue
-            if self._active_row_is_current_reel(row, current_reel):
-                row.alert_state = "RESOLVED"
-                row.resolved_comment = "Current reel is no longer alerting."
-            else:
-                row.alert_state = "SUPERSEDED"
-                row.resolved_comment = "Superseded by newer reel."
+            row.alert_state = "RESOLVED"
+            row.resolved_comment = (
+                "Current reel is no longer alerting."
+                if self._active_row_is_current_reel(row, current_reel)
+                else "Alert no longer applies to the current reel."
+            )
             row.is_active = False
             row.resolved_at = now
             row.resolved_by = "system"
@@ -908,6 +905,8 @@ class StatusOverviewService:
     ) -> bool:
         if not row:
             return False
+        if row.alert_state not in REOPEN_SUPPRESSING_ALERT_STATES:
+            return False
         candidate_reel_id = candidate.get("reelId")
         if row.reel_id is not None and candidate_reel_id is not None:
             return row.reel_id == candidate_reel_id
@@ -951,7 +950,7 @@ class StatusOverviewService:
         )
         closed_rows = (
             session.query(StatusOverviewAlert)
-            .filter(StatusOverviewAlert.alert_state.in_(("ACKNOWLEDGED", "MAKE_READY", "SUPERSEDED", "RESOLVED")))
+            .filter(StatusOverviewAlert.alert_state.in_(CLOSED_ALERT_STATES))
             .filter(StatusOverviewAlert.updated_at >= resolved_cutoff)
             .order_by(StatusOverviewAlert.updated_at.desc())
             .limit(24)
@@ -1510,10 +1509,6 @@ class StatusOverviewService:
     def _sort_priority(self, state: str, workflow_rank: int) -> int:
         if state == "critical":
             return workflow_rank
-        if state == "resolved":
-            return 2
-        if state in {"acknowledged", "superseded"}:
-            return 2
         if state == "stale":
             return 2
         return 3

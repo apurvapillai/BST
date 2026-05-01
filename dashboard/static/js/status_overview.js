@@ -215,7 +215,7 @@
       const alertState = String(alert.alertState || "").toUpperCase();
       return alertState === "ACKNOWLEDGED" || alertState === "MAKE_READY";
     }).length;
-    const autoCleared = resolvedAlerts.filter((alert) => String(alert.alertState || "").toUpperCase() === "SUPERSEDED").length;
+    const systemResolved = resolvedAlerts.filter((alert) => String(alert.alertState || "").toUpperCase() === "RESOLVED").length;
 
     refs.historySummary.innerHTML = `
       <article class="status-history-summary-card status-history-summary-card--active">
@@ -228,7 +228,7 @@
         <strong>${resolvedAlerts.length}</strong>
         <div class="status-history-summary-meta">
           <span>Manual: ${addressedResolved}</span>
-          <span>Superseded: ${autoCleared}</span>
+          <span>System: ${systemResolved}</span>
         </div>
       </article>
     `;
@@ -385,10 +385,7 @@
   function formatHistoryAlertHeading(alert) {
     const machineName = String(alert.machineName || "").trim() || "Unknown";
     const state = String(alert.alertState || "").toUpperCase();
-    if (state === "RESOLVED") return `${machineName} (RESOLVED)`;
-    if (state === "ACKNOWLEDGED") return `${machineName} (Acked)`;
     if (state === "MAKE_READY") return `${machineName} (MAKE READY)`;
-    if (state === "SUPERSEDED") return `${machineName} (SUPERSEDED)`;
     return machineName;
   }
 
@@ -437,13 +434,13 @@
     const machine = String(alert.machineName || "").trim();
     const title = String(alert.alertTitle || "Alert").trim();
     const alertState = String(alert.alertState || "").toUpperCase();
-    const resolvedSuffix = alertState === "RESOLVED" ? " (RESOLVED)" : alertState === "MAKE_READY" ? " (MAKE READY)" : alertState === "ACKNOWLEDGED" ? " (Acked)" : alertState === "SUPERSEDED" ? " (SUPERSEDED)" : "";
+    const resolvedSuffix = alertState === "MAKE_READY" ? " (MAKE READY)" : "";
     if (machine && title) return `${machine.toUpperCase()} - ${title}${resolvedSuffix}`;
     return `${title || "Alert"}${resolvedSuffix}`;
   }
 
   function isClosedAlertState(alertState) {
-    return ["ACKNOWLEDGED", "MAKE_READY", "RESOLVED", "SUPERSEDED"].includes(String(alertState || "").toUpperCase());
+    return ["ACKNOWLEDGED", "MAKE_READY", "RESOLVED"].includes(String(alertState || "").toUpperCase());
   }
 
   function renderAlertModalBody(alert) {
@@ -452,7 +449,7 @@
     const rlm = metadata.rlm || {};
     const summaryLines = buildAlertSummaryLines(alert, bst, rlm);
     const closeComment = alert.acknowledgeComment || alert.resolvedComment;
-    const closeLabel = String(alert.alertState || "").toUpperCase() === "ACKNOWLEDGED" ? "Acknowledged Comment" : "Close Comment";
+    const closeLabel = "Close Comment";
     const noteMarkup = [
       closeComment ? `<div class="status-alert-note status-alert-note--resolved"><label>${escapeHtml(closeLabel)}</label><strong>${escapeHtml(closeComment)}</strong></div>` : "",
     ]
@@ -534,7 +531,7 @@
     if (action === "make-ready") {
       applyOptimisticMakeReady(alertId);
     } else if (action === "acknowledge") {
-      applyOptimisticAcknowledged(alertId);
+      applyOptimisticClosed(alertId);
     }
     refs.alertModal.close();
     state.alertModalReturnTarget = null;
@@ -560,20 +557,15 @@
     if (chip) chip.state = chipState;
   }
 
-  function applyOptimisticAcknowledged(alertId) {
+  function applyOptimisticClosed(alertId) {
     const cards = state.board?.cards || [];
     const card = cards.find((item) => Number(item.alertId) === Number(alertId));
     if (!card) return;
     card.state = "critical";
-    card.statusText = appendStatusSuffix(card.statusText || "Alert", "Acked");
-    card.workflowBadge = "Acknowledged";
+    card.statusText = "Inactive";
+    card.workflowBadge = null;
     card.alertId = null;
     render();
-  }
-
-  function appendStatusSuffix(value, suffix) {
-    const text = String(value || "").replace(/\s+\((ACKNOWLEDGED|ACKED|RESOLVED|SUPERSEDED|MAKE READY)\)$/i, "");
-    return `${text} (${suffix})`;
   }
 
   async function focusAlert(alertId) {

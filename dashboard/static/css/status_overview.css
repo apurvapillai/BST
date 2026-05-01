@@ -317,24 +317,6 @@
   animation: statusCardCriticalPulse 1.8s ease-in-out infinite;
 }
 
-.status-card.acknowledged {
-  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.94));
-  border-color: rgba(100, 116, 139, 0.48);
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
-}
-
-.status-card.superseded {
-  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.94));
-  border-color: rgba(100, 116, 139, 0.48);
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
-}
-
-.status-card.resolved {
-  background: linear-gradient(180deg, rgba(187, 247, 208, 0.97), rgba(220, 252, 231, 0.94));
-  border-color: rgba(22, 163, 74, 0.78);
-  box-shadow: 0 10px 24px rgba(22, 163, 74, 0.18);
-}
-
 .status-card.make-ready {
   background: linear-gradient(180deg, rgba(191, 219, 254, 0.97), rgba(219, 234, 254, 0.94));
   border-color: rgba(37, 99, 235, 0.78);
@@ -457,21 +439,6 @@
   background: #eefbf1 !important;
 }
 
-.status-card.acknowledged .status-card-status-band {
-  border-color: rgba(100, 116, 139, 0.2);
-  background: #f8fafc !important;
-}
-
-.status-card.superseded .status-card-status-band {
-  border-color: rgba(100, 116, 139, 0.2);
-  background: #f8fafc !important;
-}
-
-.status-card.resolved .status-card-status-band {
-  border-color: rgba(22, 163, 74, 0.42);
-  background: #eefbf1 !important;
-}
-
 .status-card.make-ready .status-card-status-band {
   border-color: rgba(37, 99, 235, 0.42);
   background: #eff6ff !important;
@@ -575,18 +542,6 @@
 }
 
 .status-card.healthy .status-card-status {
-  color: #166534;
-}
-
-.status-card.acknowledged .status-card-status {
-  color: #475569;
-}
-
-.status-card.superseded .status-card-status {
-  color: #475569;
-}
-
-.status-card.resolved .status-card-status {
   color: #166534;
 }
 
@@ -879,12 +834,6 @@
   border-color: rgba(22, 163, 74, 0.2);
   background: linear-gradient(180deg, rgba(240, 253, 244, 0.98), rgba(255, 255, 255, 0.98));
   box-shadow: inset 3px 0 0 rgba(22, 163, 74, 0.78);
-}
-
-.status-alert-item.superseded {
-  border-color: rgba(100, 116, 139, 0.22);
-  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(255, 255, 255, 0.98));
-  box-shadow: inset 3px 0 0 rgba(100, 116, 139, 0.72);
 }
 
 .status-alert-item:hover {
@@ -1191,13 +1140,6 @@
   box-shadow: inset 4px 0 0 rgba(100, 116, 139, 0.72);
 }
 
-.status-alert-modal[data-alert-state="superseded"] .status-alert-header {
-  border-bottom-color: rgba(100, 116, 139, 0.16);
-  background:
-    linear-gradient(180deg, rgba(241, 245, 249, 0.96), rgba(255, 255, 255, 0.98));
-  box-shadow: inset 4px 0 0 rgba(100, 116, 139, 0.72);
-}
-
 .status-alert-modal[data-alert-state="resolved"] .status-alert-header {
   border-bottom-color: rgba(22, 163, 74, 0.16);
   background:
@@ -1226,11 +1168,6 @@
 }
 
 .status-alert-modal[data-alert-state="acknowledged"] .status-alert-kicker {
-  background: rgba(100, 116, 139, 0.12);
-  color: #475569;
-}
-
-.status-alert-modal[data-alert-state="superseded"] .status-alert-kicker {
   background: rgba(100, 116, 139, 0.12);
   color: #475569;
 }
@@ -1662,11 +1599,6 @@ body.dark-mode .status-card.critical[data-alert-id]:not([data-alert-id=""]) {
   animation: statusCardCriticalPulseDark 1.8s ease-in-out infinite;
 }
 
-body.dark-mode .status-card.resolved {
-  background: linear-gradient(180deg, rgba(22, 101, 52, 0.58), rgba(30, 41, 59, 0.96));
-  border-color: rgba(74, 222, 128, 0.62);
-}
-
 body.dark-mode .status-card.make-ready {
   background: linear-gradient(180deg, rgba(29, 78, 216, 0.56), rgba(30, 41, 59, 0.96));
   border-color: rgba(96, 165, 250, 0.68);
@@ -1709,21 +1641,6 @@ body.dark-mode .status-card.healthy .status-card-status-band {
   background: #14532d !important;
 }
 
-body.dark-mode .status-card.acknowledged .status-card-status-band {
-  border-color: rgba(148, 163, 184, 0.2);
-  background: #334155 !important;
-}
-
-body.dark-mode .status-card.superseded .status-card-status-band {
-  border-color: rgba(148, 163, 184, 0.2);
-  background: #334155 !important;
-}
-
-body.dark-mode .status-card.resolved .status-card-status-band {
-  border-color: rgba(74, 222, 128, 0.42);
-  background: #14532d !important;
-}
-
 body.dark-mode .status-card.make-ready .status-card-status-band {
   border-color: rgba(96, 165, 250, 0.46);
   background: #1e3a8a !important;
@@ -1753,18 +1670,6 @@ body.dark-mode .status-card-status {
 }
 
 body.dark-mode .status-card.healthy .status-card-status {
-  color: #bbf7d0;
-}
-
-body.dark-mode .status-card.acknowledged .status-card-status {
-  color: #cbd5e1;
-}
-
-body.dark-mode .status-card.superseded .status-card-status {
-  color: #cbd5e1;
-}
-
-body.dark-mode .status-card.resolved .status-card-status {
   color: #bbf7d0;
 }
 
@@ -1863,12 +1768,6 @@ body.dark-mode .status-alert-item.resolved {
   box-shadow: inset 3px 0 0 rgba(74, 222, 128, 0.78);
 }
 
-body.dark-mode .status-alert-item.superseded {
-  background: linear-gradient(180deg, rgba(51, 65, 85, 0.42), rgba(30, 41, 59, 0.98));
-  border-color: rgba(148, 163, 184, 0.24);
-  box-shadow: inset 3px 0 0 rgba(148, 163, 184, 0.72);
-}
-
 body.dark-mode .status-alert-modal,
 body.dark-mode .status-history-modal,
 body.dark-mode .status-settings-modal {
@@ -1895,12 +1794,6 @@ body.dark-mode .status-alert-modal[data-alert-state="acknowledged"] .status-aler
   box-shadow: inset 4px 0 0 rgba(148, 163, 184, 0.72);
 }
 
-body.dark-mode .status-alert-modal[data-alert-state="superseded"] .status-alert-header {
-  background:
-    linear-gradient(180deg, rgba(51, 65, 85, 0.52), rgba(15, 23, 42, 0.96));
-  box-shadow: inset 4px 0 0 rgba(148, 163, 184, 0.72);
-}
-
 body.dark-mode .status-alert-modal[data-alert-state="resolved"] .status-alert-header {
   background:
     linear-gradient(180deg, rgba(20, 83, 45, 0.42), rgba(15, 23, 42, 0.96));
@@ -1913,11 +1806,6 @@ body.dark-mode .status-alert-kicker {
 }
 
 body.dark-mode .status-alert-modal[data-alert-state="acknowledged"] .status-alert-kicker {
-  background: rgba(148, 163, 184, 0.14);
-  color: #cbd5e1;
-}
-
-body.dark-mode .status-alert-modal[data-alert-state="superseded"] .status-alert-kicker {
   background: rgba(148, 163, 184, 0.14);
   color: #cbd5e1;
 }
