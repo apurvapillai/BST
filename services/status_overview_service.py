@@ -528,10 +528,10 @@ class StatusOverviewService:
 
     def _build_bst_box(self, metrics: Optional[Dict[str, float]], is_off: bool) -> Dict[str, Any]:
         if not metrics:
-            return {"label": "BST STATUS", "state": "neutral", "detail": "No data", "subdetail": ""}
+            return {"label": "Inspection Status", "state": "neutral", "detail": "No data", "subdetail": ""}
         state = "off" if is_off else "healthy"
         return {
-            "label": "BST STATUS",
+            "label": "Inspection Status",
             "state": state,
             "detail": "Inactive" if is_off else "Active",
             "subdetail": f"{metrics['activePct']:.1f}% inspection",
@@ -547,7 +547,7 @@ class StatusOverviewService:
             "label": "RLM STATUS",
             "state": state,
             "detail": "Inactive" if is_off else "Active",
-            "subdetail": f"{pts} pts | {density:.1f}/1k ft",
+            "subdetail": f"{pts} pts",
         }
 
     def _card_status_text(self, state: str) -> str:
@@ -1268,7 +1268,22 @@ class StatusOverviewService:
         )
         reel_number = (bst_reel.reel_code if bst_reel and bst_reel.reel_code else None) or (rlm_reel.reel_id if rlm_reel else None)
         job_number = (bst_reel.order_number or bst_reel.job_name if bst_reel else None) or (rlm_reel.job_name if rlm_reel else None)
-        history_state = self._reel_history_state(alert_rows, machine_name, reel_number, bst_reel.reel_id if bst_reel else None, feet)
+        matching_alerts = self._matching_reel_alert_rows(alert_rows, machine_name, reel_number, bst_reel.reel_id if bst_reel else None)
+        bst_state = self._reel_history_channel_state(
+            matching_alerts,
+            "BST",
+            feet,
+            has_data=bst_pct is not None,
+            is_off=bool(bst_pct is not None and bst_pct <= BST_OFF_ACTIVE_PCT),
+        )
+        rlm_state = self._reel_history_channel_state(
+            matching_alerts,
+            "RLM",
+            feet,
+            has_data=rlm_points is not None,
+            is_off=bool(rlm_points is not None and rlm_points <= RLM_OFF_MONITORING_POINTS),
+        )
+        history_state = self._combined_reel_history_state(bst_state, rlm_state)
         return {
             "label": "Current" if index == 0 else f"Prior {index}",
             "reelNumber": reel_number,
@@ -1281,18 +1296,17 @@ class StatusOverviewService:
             "lastUpdated": self._iso_local(last_updated),
             "timeEnd": self._iso_local(time_end),
             "state": history_state,
+            "bstState": bst_state,
+            "rlmState": rlm_state,
         }
 
-    def _reel_history_state(
+    def _matching_reel_alert_rows(
         self,
         alert_rows: List[StatusOverviewAlert],
         machine_name: Optional[str],
         reel_number: Optional[Any],
         reel_id: Optional[int],
-        feet: Optional[float],
-    ) -> str:
-        if feet is not None and feet < MAKE_READY_FEET_LIMIT:
-            return "make-ready"
+    ) -> List[StatusOverviewAlert]:
         matching = []
         reel_key = self._alert_reel_key(machine_name, reel_number, None)
         for row in alert_rows:
@@ -1301,11 +1315,33 @@ class StatusOverviewService:
                 continue
             if reel_key and self._alert_reel_key_from_row(row) == reel_key:
                 matching.append(row)
-        if not matching:
-            return "healthy"
-        if any(row.alert_state == "MAKE_READY" for row in matching):
+        return matching
+
+    def _reel_history_channel_state(
+        self,
+        matching_alerts: List[StatusOverviewAlert],
+        source: str,
+        feet: Optional[float],
+        *,
+        has_data: bool,
+        is_off: bool,
+    ) -> str:
+        if not has_data:
+            return "neutral"
+        if feet is not None and feet < MAKE_READY_FEET_LIMIT:
             return "make-ready"
-        return "alert"
+        if any(row.alert_state == "MAKE_READY" for row in matching_alerts):
+            return "make-ready"
+        source = source.upper()
+        if is_off or any((row.alert_source or "").upper() in {source, "BOTH"} for row in matching_alerts):
+            return "alert"
+        return "healthy"
+
+    def _combined_reel_history_state(self, bst_state: str, rlm_state: str) -> str:
+        for state in ("alert", "make-ready", "healthy"):
+            if state in {bst_state, rlm_state}:
+                return state
+        return "neutral"
 
     def _normalize_reel_token(self, value: Optional[Any]) -> str:
         return str(value or "").strip().lower()

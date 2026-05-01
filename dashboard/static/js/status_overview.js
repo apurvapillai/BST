@@ -33,7 +33,6 @@
     alertFooter: document.getElementById("statusAlertFooter"),
     alertComment: document.getElementById("statusAlertComment"),
     makeReadyBtn: document.getElementById("statusAlertMakeReadyBtn"),
-    resolveBtn: document.getElementById("statusAlertResolveBtn"),
   };
 
   async function loadBoard() {
@@ -310,7 +309,7 @@
       const alertId = Number(node.getAttribute("data-alert-id"));
       if (!alertId) return;
       node.addEventListener("click", (event) => {
-        if (event.target?.closest(".status-card-reel-strip")) return;
+        if (event.target?.closest(".status-card-reel-history")) return;
         event.preventDefault();
         event.stopPropagation();
         openAlertModal(alertId, { returnTarget: null });
@@ -331,28 +330,44 @@
   function renderCardReelHistory(history) {
     if (!history.length) return "";
     return `
-      <div class="status-card-reel-strip">
-        ${history
-          .map((row) => {
-            return `
-              <span
-                class="status-card-reel-chip ${escapeAttr(row.state || "healthy")}"
-                tabindex="0"
-              >
-                ${escapeHtml(row.reelNumber || "--")}
-                <span class="status-card-reel-tooltip" role="tooltip">
-                  <strong>Reel - ${escapeHtml(row.reelNumber || "--")}</strong>
-                  <small>${escapeHtml(formatTime(row.timeEnd))}</small>
-                  <small>Job - ${escapeHtml(row.jobNumber || "--")}</small>
-                  <small>Feet - ${escapeHtml(row.feet || "--")}</small>
-                  <small>BST - ${escapeHtml(row.bstPct || "--")}</small>
-                  <small>RLM - ${escapeHtml(row.rlmPoints || "--")}</small>
-                </span>
-              </span>
-            `;
-          })
-          .join("")}
+      <div class="status-card-reel-history">
+        ${renderReelHistoryGroup("BST", "bstState", history)}
+        ${renderReelHistoryGroup("RLM", "rlmState", history)}
       </div>
+    `;
+  }
+
+  function renderReelHistoryGroup(label, stateKey, history) {
+    const groupClass = `status-card-reel-group--${label.toLowerCase()}`;
+    return `
+      <div class="status-card-reel-group ${escapeAttr(groupClass)}">
+        <span class="status-card-reel-label">${escapeHtml(label)}</span>
+        <div class="status-card-reel-strip">
+          ${history.map((row) => renderReelHistoryChip(row, label, stateKey)).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderReelHistoryChip(row, label, stateKey) {
+    const stateClass = row[stateKey] || row.state || "healthy";
+    const metricLine = label === "BST"
+      ? `BST - ${escapeHtml(row.bstPct || "--")}`
+      : `RLM - ${escapeHtml(row.rlmPoints || "--")}`;
+    return `
+      <span
+        class="status-card-reel-chip ${escapeAttr(stateClass)}"
+        tabindex="0"
+      >
+        ${escapeHtml(row.reelNumber || "--")}
+        <span class="status-card-reel-tooltip" role="tooltip">
+          <strong>${escapeHtml(label)} - Reel ${escapeHtml(row.reelNumber || "--")}</strong>
+          <small>${escapeHtml(formatTime(row.timeEnd))}</small>
+          <small>Job - ${escapeHtml(row.jobNumber || "--")}</small>
+          <small>Feet - ${escapeHtml(row.feet || "--")}</small>
+          <small>${metricLine}</small>
+        </span>
+      </span>
     `;
   }
 
@@ -419,9 +434,7 @@
     refs.alertComment.value = "";
     setMessage(refs.alertModalMessage, "");
     refs.makeReadyBtn.hidden = closed;
-    refs.resolveBtn.hidden = closed;
     refs.makeReadyBtn.disabled = closed;
-    refs.resolveBtn.disabled = closed;
     refs.alertFooter.hidden = closed;
     refs.alertFooter.style.display = closed ? "none" : "";
     if (state.alertModalReturnTarget === "history") {
@@ -554,7 +567,11 @@
     const history = card.reelHistory || [];
     const currentReel = String(card.reelNumber || "").trim().toLowerCase();
     const chip = history.find((row) => String(row.reelNumber || "").trim().toLowerCase() === currentReel) || history[0];
-    if (chip) chip.state = chipState;
+    if (chip) {
+      chip.state = chipState;
+      chip.bstState = chipState;
+      chip.rlmState = chipState;
+    }
   }
 
   function applyOptimisticClosed(alertId) {
@@ -591,7 +608,6 @@
   }
 
   function bindEvents() {
-    bindGuardedClick(refs.resolveBtn, () => submitAlertAction("acknowledge").catch((err) => console.error(err)));
     bindGuardedClick(refs.makeReadyBtn, () => submitAlertAction("make-ready").catch((err) => console.error(err)));
     bindGuardedClick(refs.historyOpenBtn, () => {
       refs.historyModal?.showModal();
