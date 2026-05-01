@@ -1,4 +1,6 @@
 (function () {
+  const BOARD_REFRESH_MS = 30000;
+
   const state = {
     board: null,
     refreshTimer: null,
@@ -604,7 +606,7 @@
     if (state.refreshTimer) clearTimeout(state.refreshTimer);
     state.refreshTimer = window.setTimeout(() => {
       loadBoard().catch((err) => console.error(err));
-    }, 300000);
+    }, BOARD_REFRESH_MS);
   }
 
   function bindEvents() {

@@ -326,27 +326,15 @@ class StatusOverviewService:
             machine_name = bst.get("machineName") or rlm.get("machineName") or key.title()
             machine_id = bst.get("machineId")
 
-            rlm_latest = {"reel": rlm.get("latestReel"), "health": rlm.get("latestHealth")} if rlm.get("latestReel") else None
-            bst_reel = bst.get("latestReel")
-            rlm_reel = rlm_latest["reel"] if rlm_latest else rlm.get("latestReel")
-            bst_latest_metrics = bst.get("latestMetrics")
-            bst_metrics = bst_latest_metrics if bst_latest_metrics and bst_latest_metrics["phaseSeconds"] > 0 else None
-            rlm_health = rlm_latest["health"] if rlm_latest else None
-
-            bst_activity = bst.get("latestActivity")
-            rlm_activity = rlm.get("latestActivity")
-            last_activity = self._latest_activity(bst_activity, rlm_activity)
-            display_reel = self._display_reel_info(bst_reel, rlm_reel, last_activity, bst_activity, rlm_activity)
-            if self._display_needs_synced_bst_fallback(display_reel, bst_reel, bst_metrics, bst, rlm_reel):
-                fallback = bst.get("latestReliable")
-                if fallback:
-                    bst_reel = fallback["reel"]
-                    bst_metrics = fallback["metrics"]
-                    bst_activity = self._bst_local_time(bst_reel.time_end or bst_reel.time_start)
-                    last_activity = self._latest_activity(bst_activity, None)
-                    display_reel = self._display_reel_info(bst_reel, None, last_activity, bst_activity, None)
-                    rlm_reel = None
-                    rlm_health = None
+            display_context = self._select_display_reel_context(bst, rlm)
+            bst_reel = display_context["bstReel"]
+            bst_metrics = display_context["bstMetrics"]
+            bst_activity = display_context["bstActivity"]
+            rlm_reel = display_context["rlmReel"]
+            rlm_health = display_context["rlmHealth"]
+            rlm_activity = display_context["rlmActivity"]
+            last_activity = display_context["lastActivity"]
+            display_reel = display_context["displayReel"]
             bst_is_current = self._bst_reel_is_current_display(bst_reel, display_reel)
             rlm_is_current = self._rlm_reel_is_current_display(rlm_reel, display_reel)
 
@@ -1242,6 +1230,80 @@ class StatusOverviewService:
                 return rlm_reel
         return None
 
+    def _select_display_reel_context(
+        self,
+        bst: Dict[str, Any],
+        rlm: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        synced = self._latest_synced_reel_context(bst, rlm)
+        if synced:
+            return synced
+
+        rlm_latest = {"reel": rlm.get("latestReel"), "health": rlm.get("latestHealth")} if rlm.get("latestReel") else None
+        bst_reel = bst.get("latestReel")
+        rlm_reel = rlm_latest["reel"] if rlm_latest else rlm.get("latestReel")
+        bst_latest_metrics = bst.get("latestMetrics")
+        bst_metrics = bst_latest_metrics if bst_latest_metrics and bst_latest_metrics["phaseSeconds"] > 0 else None
+        rlm_health = rlm_latest["health"] if rlm_latest else None
+
+        bst_activity = bst.get("latestActivity")
+        rlm_activity = rlm.get("latestActivity")
+        last_activity = self._latest_activity(bst_activity, rlm_activity)
+        display_reel = self._display_reel_info(bst_reel, rlm_reel, last_activity, bst_activity, rlm_activity)
+        if self._display_needs_synced_bst_fallback(display_reel, bst_reel, bst_metrics, bst, rlm_reel):
+            fallback = bst.get("latestReliable")
+            if fallback:
+                bst_reel = fallback["reel"]
+                bst_metrics = fallback["metrics"]
+                bst_activity = self._bst_local_time(bst_reel.time_end or bst_reel.time_start)
+                last_activity = self._latest_activity(bst_activity, None)
+                display_reel = self._display_reel_info(bst_reel, None, last_activity, bst_activity, None)
+                rlm_reel = None
+                rlm_health = None
+                rlm_activity = None
+
+        return {
+            "bstReel": bst_reel,
+            "bstMetrics": bst_metrics,
+            "bstActivity": bst_activity,
+            "rlmReel": rlm_reel,
+            "rlmHealth": rlm_health,
+            "rlmActivity": rlm_activity,
+            "lastActivity": last_activity,
+            "displayReel": display_reel,
+        }
+
+    def _latest_synced_reel_context(self, bst: Dict[str, Any], rlm: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        rlm_reels = rlm.get("recentRows") or []
+        rlm_health_map = rlm.get("healthMap") or {}
+        if not rlm_reels or not rlm_health_map:
+            return None
+
+        for bst_reel in bst.get("recentReels") or []:
+            metrics = (bst.get("recentMetrics") or {}).get(bst_reel.reel_id)
+            if not metrics or metrics.get("phaseSeconds", 0) <= 0:
+                continue
+            rlm_reel = self._match_rlm_reel(bst_reel, rlm_reels, 0)
+            if not rlm_reel:
+                continue
+            rlm_health = rlm_health_map.get(rlm_reel.reel_db_id)
+            if not rlm_health:
+                continue
+            bst_activity = self._bst_local_time(bst_reel.time_end or bst_reel.time_start)
+            rlm_activity = self._central_time(rlm_reel.production_end_dt or rlm_reel.production_start_dt)
+            last_activity = self._latest_activity(bst_activity, rlm_activity)
+            return {
+                "bstReel": bst_reel,
+                "bstMetrics": metrics,
+                "bstActivity": bst_activity,
+                "rlmReel": rlm_reel,
+                "rlmHealth": rlm_health,
+                "rlmActivity": rlm_activity,
+                "lastActivity": last_activity,
+                "displayReel": self._display_reel_info(bst_reel, rlm_reel, last_activity, bst_activity, rlm_activity),
+            }
+        return None
+
     def _serialize_reel_history_row(
         self,
         index: int,
@@ -1332,8 +1394,7 @@ class StatusOverviewService:
             return "make-ready"
         if any(row.alert_state == "MAKE_READY" for row in matching_alerts):
             return "make-ready"
-        source = source.upper()
-        if is_off or any((row.alert_source or "").upper() in {source, "BOTH"} for row in matching_alerts):
+        if is_off:
             return "alert"
         return "healthy"
 
