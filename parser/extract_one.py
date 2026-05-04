@@ -1,7 +1,6 @@
 import os
 import shutil
 import zipfile
-import tempfile
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from typing import List, Optional, Dict, Any
@@ -17,28 +16,36 @@ from db.models import (
     ReferenceImage,
     InspectionPhase,
     Mask,
-    RLMConfig,
-    RLMPhase,
-    RLMMonitoring,
 )
 
 # Flask static root
 STATIC_ROOT = os.path.join("dashboard", "static")
 # Images live under: dashboard/static/images/<machine_name>/<YYYY-MM-DD>/{defects,reference}/...
 DASHBOARD_IMG_DIR = os.path.join(STATIC_ROOT, "images")
+IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png")
 
 
-def _ensure_day_dirs(machine_name: str, date_str: str) -> Dict[str, str]:
+def _ensure_day_dirs(
+    machine_name: str,
+    date_str: str,
+    include_defects: bool = True,
+    include_reference: bool = True,
+) -> Dict[str, str]:
     """
     Ensure and return per-machine, per-day folders for image saving.
-    Returns absolute paths: {"defects": <path>, "reference": <path>}
+    Returns absolute paths for requested image kinds.
     """
     base_dir = os.path.join(DASHBOARD_IMG_DIR, machine_name, date_str)
     defect_dir = os.path.join(base_dir, "defects")
     reference_dir = os.path.join(base_dir, "reference")
-    os.makedirs(defect_dir, exist_ok=True)
-    os.makedirs(reference_dir, exist_ok=True)
-    return {"defects": defect_dir, "reference": reference_dir}
+    paths: Dict[str, str] = {}
+    if include_defects:
+        os.makedirs(defect_dir, exist_ok=True)
+        paths["defects"] = defect_dir
+    if include_reference:
+        os.makedirs(reference_dir, exist_ok=True)
+        paths["reference"] = reference_dir
+    return paths
 
 
 def parse_datetime(date_str: str, time_str: str) -> datetime:
@@ -83,6 +90,75 @@ def safe_join_relpath(abs_path: str, static_root: str = STATIC_ROOT) -> str:
     return os.path.relpath(abs_path, start=static_root).replace("\\", "/")
 
 
+def normalize_zip_image_path(path: Optional[str]) -> str:
+    if not path:
+        return ""
+    cleaned = str(path).replace("\\", "/").strip()
+    while cleaned.startswith("../"):
+        cleaned = cleaned[3:]
+    cleaned = cleaned.lstrip("/")
+    return "/".join(part for part in cleaned.split("/") if part not in {"", "."})
+
+
+def build_image_member_index(members: List[str]) -> Dict[str, str]:
+    index: Dict[str, str] = {}
+    for member in members:
+        normalized = normalize_zip_image_path(member)
+        if normalized.lower().endswith(IMAGE_EXTENSIONS):
+            index[normalized] = member
+    return index
+
+
+def find_image_member(image_members: Dict[str, str], path: Optional[str]) -> Optional[str]:
+    normalized = normalize_zip_image_path(path)
+    if not normalized:
+        return None
+    if normalized in image_members:
+        return image_members[normalized]
+
+    basename = os.path.basename(normalized).lower()
+    matches = [
+        member
+        for member_path, member in image_members.items()
+        if os.path.basename(member_path).lower() == basename
+    ]
+    if len(matches) == 1:
+        return matches[0]
+
+    for member_path, member in image_members.items():
+        if member_path.endswith(f"/{normalized}"):
+            return member
+    return None
+
+
+def unique_filename(basename: str, used: set) -> str:
+    candidate = basename
+    stem, ext = os.path.splitext(basename)
+    counter = 2
+    while candidate in used:
+        candidate = f"{stem}_{counter}{ext}"
+        counter += 1
+    used.add(candidate)
+    return candidate
+
+
+def copy_zip_image(
+    zf: zipfile.ZipFile,
+    member: str,
+    target_dir: str,
+    target_basename: Optional[str] = None,
+) -> Optional[str]:
+    basename = target_basename or os.path.basename(normalize_zip_image_path(member))
+    basename = os.path.basename(basename)
+    if not basename:
+        return None
+    os.makedirs(target_dir, exist_ok=True)
+    target_path = os.path.join(target_dir, basename)
+    with zf.open(member, "r") as source, open(target_path, "wb") as target:
+        shutil.copyfileobj(source, target)
+    return target_path
+
+
 def build_intervals(
     events: List[Dict[str, Any]],
     final_end_time: Optional[datetime],
@@ -124,97 +200,88 @@ def build_intervals(
     return intervals
 
 
-def dict_from_element(el: ET.Element) -> Dict[str, Any]:
-    data: Dict[str, Any] = {"_tag": el.tag, "_attrs": dict(el.attrib)}
-    children = []
-    for child in el:
-        children.append(
-            {
-                "_tag": child.tag,
-                "_attrs": dict(child.attrib),
-                "_text": (child.text or "").strip(),
-            }
-        )
-    if children:
-        data["_children"] = children
-    else:
-        data["_text"] = (el.text or "").strip()
-    return data
-
-
 def extract_one(
     zip_path: str,
     machine_name: str,
     save_images: bool = True,
     import_mode: str = "full",
+    save_defect_images: Optional[bool] = None,
+    save_reference_images: Optional[bool] = None,
 ):
     """
     Extract one report ZIP for a specific machine.
 
     Modes:
       - import_mode="full":
-          imports everything currently supported
+          imports all supported BST data
+      - import_mode="data_only":
+          imports all supported BST data; image capture is controlled separately
       - import_mode="minimal":
           imports only Reel + InspectionPhase
 
-    save_images:
-      - True  -> copy defect/reference images into dashboard/static and store image_src
-      - False -> skip extracting/copying images
+    Image capture:
+      - save_reference_images controls reference image files and ReferenceImage rows
+      - save_defect_images controls defect image files and Defect.image_src
+      - save_images is kept for older callers; explicit image flags override it
     """
-    if import_mode not in {"full", "minimal"}:
+    if import_mode not in {"full", "data_only", "minimal"}:
         raise ValueError(f"Unsupported import_mode: {import_mode}")
 
-    tmp_dir = tempfile.mkdtemp(prefix="bst_")
+    if save_defect_images is None:
+        effective_save_defect_images = bool(save_images and import_mode == "full")
+    else:
+        effective_save_defect_images = bool(save_defect_images and import_mode != "minimal")
+
+    if save_reference_images is None:
+        effective_save_reference_images = bool(save_images and import_mode == "full")
+    else:
+        effective_save_reference_images = bool(save_reference_images and import_mode != "minimal")
+
+    needs_image_zip = effective_save_defect_images or effective_save_reference_images
+    image_zf: Optional[zipfile.ZipFile] = None
 
     try:
         with zipfile.ZipFile(zip_path, "r") as zf:
-            xml_name_candidates = [n for n in zf.namelist() if n.lower().endswith("report.xml")]
+            zip_members = zf.namelist()
+            image_members = build_image_member_index(zip_members) if needs_image_zip else {}
+            xml_name_candidates = [n for n in zip_members if n.lower().endswith("report.xml")]
             if not xml_name_candidates:
                 print(f"⚠️ No report.xml found in {zip_path}. Skipping.")
                 return
 
             xml_name = xml_name_candidates[0]
-            zf.extract(xml_name, tmp_dir)
-            xml_path = os.path.join(tmp_dir, xml_name)
+            with zf.open(xml_name, "r") as xml_file:
+                tree = ET.parse(xml_file)
+                root = tree.getroot()
 
-            # Only extract image assets when they might actually be used
-            if import_mode == "full" and save_images:
-                for member in zf.namelist():
-                    lower = member.lower()
-                    if lower.endswith((".jpg", ".jpeg", ".png")):
-                        zf.extract(member, tmp_dir)
+            order_node = root.find("order")
+            job_node = root.find("order/job")
+            order_number = order_node.attrib.get("number") if order_node is not None else None
+            job_name = job_node.attrib.get("name") if job_node is not None else None
 
-        tree = ET.parse(xml_path)
-        root = tree.getroot()
+            reel_code = None
+            if root.tag.endswith("reel"):
+                reel_code = root.attrib.get("id")
+            else:
+                reel_node = root.find(".//reel")
+                if reel_node is not None:
+                    reel_code = reel_node.attrib.get("id")
 
-        order_node = root.find("order")
-        job_node = root.find("order/job")
-        order_number = order_node.attrib.get("number") if order_node is not None else None
-        job_name = job_node.attrib.get("name") if job_node is not None else None
+            format_length = text_as_float(root.find("order/job/formatlength"))
+            format_width = text_as_float(root.find("order/job/formatwidth"))
 
-        reel_code = None
-        if root.tag.endswith("reel"):
-            reel_code = root.attrib.get("id")
-        else:
-            reel_node = root.find(".//reel")
-            if reel_node is not None:
-                reel_code = reel_node.attrib.get("id")
+            reelstart_node = root.find("production/reelstart")
+            reelend_node = root.find("production/reelend")
+            reel_start = attr_as_float(reelstart_node, "format")
+            reel_end = attr_as_float(reelend_node, "format")
 
-        format_length = text_as_float(root.find("order/job/formatlength"))
-        format_width = text_as_float(root.find("order/job/formatwidth"))
+            start_node = root.find("production/productiontime/start")
+            end_node = root.find("production/productiontime/end")
+            if start_node is None or end_node is None:
+                raise ValueError("Missing production start/end nodes")
 
-        reelstart_node = root.find("production/reelstart")
-        reelend_node = root.find("production/reelend")
-        reel_start = attr_as_float(reelstart_node, "format")
-        reel_end = attr_as_float(reelend_node, "format")
-
-        start_node = root.find("production/productiontime/start")
-        end_node = root.find("production/productiontime/end")
-        if start_node is None or end_node is None:
-            raise ValueError("Missing production start/end nodes")
-
-        time_start = parse_datetime(start_node.attrib["date"], start_node.attrib["time"])
-        time_end = parse_datetime(end_node.attrib["date"], end_node.attrib["time"])
+            time_start = parse_datetime(start_node.attrib["date"], start_node.attrib["time"])
+            time_end = parse_datetime(end_node.attrib["date"], end_node.attrib["time"])
 
         with Session(engine) as session:
             machine = session.query(Machine).filter_by(name=machine_name).first()
@@ -253,11 +320,19 @@ def extract_one(
 
             defect_img_dir: Optional[str] = None
             reference_img_dir: Optional[str] = None
-            if import_mode == "full" and save_images:
+            if effective_save_defect_images or effective_save_reference_images:
+                image_zf = zipfile.ZipFile(zip_path, "r")
                 date_str = time_start.strftime("%Y-%m-%d")
-                img_dirs = _ensure_day_dirs(machine_name, date_str)
-                defect_img_dir = img_dirs["defects"]
-                reference_img_dir = img_dirs["reference"]
+                img_dirs = _ensure_day_dirs(
+                    machine_name,
+                    date_str,
+                    include_defects=effective_save_defect_images,
+                    include_reference=effective_save_reference_images,
+                )
+                if effective_save_defect_images:
+                    defect_img_dir = img_dirs["defects"]
+                if effective_save_reference_images:
+                    reference_img_dir = img_dirs["reference"]
 
             # Always build inspection phases, even in minimal mode
             status_events = []
@@ -301,7 +376,7 @@ def extract_one(
                 return
 
             # -------------------------
-            # Full mode below
+            # BST data modes below
             # -------------------------
 
             for sset in root.findall("inspection/sensitivitysets/set"):
@@ -344,20 +419,13 @@ def extract_one(
                 format_position = float(defect.attrib.get("format", 0) or 0)
 
                 image_src_rel = None
-                if save_images and defect_img_dir:
+                if effective_save_defect_images and defect_img_dir and image_zf is not None:
                     img_node = defect.find("image")
                     if img_node is not None:
-                        relative_path = (
-                            img_node.attrib.get("src", "").replace("../", "").replace("\\", "/")
-                        )
-                        if relative_path:
-                            extracted_img_path = os.path.join(tmp_dir, relative_path)
-                            if os.path.exists(extracted_img_path):
-                                target_path = os.path.join(
-                                    defect_img_dir,
-                                    os.path.basename(extracted_img_path),
-                                )
-                                shutil.copy(extracted_img_path, target_path)
+                        member = find_image_member(image_members, img_node.attrib.get("src"))
+                        if member:
+                            target_path = copy_zip_image(image_zf, member, defect_img_dir)
+                            if target_path:
                                 image_src_rel = safe_join_relpath(target_path)
 
                 coords_payload: List[Dict[str, Optional[List[float]]]] = []
@@ -382,7 +450,7 @@ def extract_one(
                     )
                 )
 
-            if save_images and reference_img_dir:
+            if effective_save_reference_images and reference_img_dir and image_zf is not None:
                 ref_entries: List[Dict[str, Optional[str]]] = []
 
                 for ref_node in root.findall(".//reference_images/*"):
@@ -395,40 +463,49 @@ def extract_one(
                         or ((ref_node.text or "").strip() if ref_node.text else None)
                     )
                     ref_id = attrs.get("id")
-                    format_val = ref_id.split("_")[-1] if ref_id and "_" in ref_id else None
+                    format_val = (
+                        attrs.get("format")
+                        or attrs.get("formatposition")
+                        or attrs.get("position")
+                        or (ref_id.split("_")[-1] if ref_id and "_" in ref_id else None)
+                    )
 
                     if path:
                         ref_entries.append(
                             {
-                                "path": path.replace("../", "").replace("\\", "/"),
+                                "path": normalize_zip_image_path(path),
                                 "format": format_val,
                             }
                         )
 
                 if not ref_entries:
-                    for root_dir, _, files in os.walk(tmp_dir):
-                        for fn in files:
-                            lower = fn.lower()
-                            if lower.endswith((".jpg", ".jpeg", ".png")) and "reference" in lower:
-                                rel = os.path.relpath(
-                                    os.path.join(root_dir, fn),
-                                    start=tmp_dir,
-                                ).replace("\\", "/")
-                                ref_entries.append({"path": rel, "format": None})
+                    for member_path in sorted(image_members):
+                        if "reference" in member_path.lower():
+                            ref_entries.append({"path": member_path, "format": None})
 
-                seen_ref_basenames = set()
+                seen_ref_members = set()
+                used_ref_filenames = set()
                 for ref in ref_entries:
-                    src_path = os.path.join(tmp_dir, ref["path"])
-                    if not os.path.exists(src_path):
+                    member = find_image_member(image_members, ref.get("path"))
+                    if not member:
                         continue
 
-                    basename = os.path.basename(src_path)
-                    if basename in seen_ref_basenames:
+                    if member in seen_ref_members:
                         continue
-                    seen_ref_basenames.add(basename)
+                    seen_ref_members.add(member)
 
-                    target_path = os.path.join(reference_img_dir, basename)
-                    shutil.copy(src_path, target_path)
+                    basename = unique_filename(
+                        os.path.basename(normalize_zip_image_path(member)),
+                        used_ref_filenames,
+                    )
+                    target_path = copy_zip_image(
+                        image_zf,
+                        member,
+                        reference_img_dir,
+                        target_basename=basename,
+                    )
+                    if not target_path:
+                        continue
                     image_src_rel = safe_join_relpath(target_path)
 
                     session.add(
@@ -480,96 +557,34 @@ def extract_one(
                     )
                 )
 
-            rlm = root.find(".//rlmmodule")
-            if rlm is not None:
-                cfg: Dict[str, Any] = {"_tag": rlm.tag, "_attrs": dict(rlm.attrib)}
-                for child in rlm:
-                    cfg[child.tag] = dict_from_element(child)
-                session.add(RLMConfig(reel_id=reel.reel_id, config_json=cfg))
-
-                rlm_status_events = []
-                for st in rlm.findall(".//statusprotocol/*"):
-                    phase = st.tag
-                    try:
-                        start_time = parse_datetime(st.attrib["date"], st.attrib["time"])
-                    except Exception:
-                        continue
-                    fmt = attr_as_float(st, "format")
-                    rlm_status_events.append({"phase": phase, "time": start_time, "format": fmt})
-
-                rlm_intervals = build_intervals(
-                    rlm_status_events,
-                    final_end_time=time_end,
-                    final_end_format=reel_end,
-                )
-                for iv in rlm_intervals:
-                    session.add(
-                        RLMPhase(
-                            reel_id=reel.reel_id,
-                            phase=iv["phase"],
-                            start_time=iv["start_time"],
-                            end_time=iv["end_time"],
-                            start_format=iv.get("start_format"),
-                            end_format=iv.get("end_format"),
-                        )
-                    )
-
-                for mon in rlm.findall(".//monitorings/*"):
-                    _insert_rlm_monitor_if_possible(mon, session, reel.reel_id)
-
             session.commit()
+            image_bits = []
+            if effective_save_reference_images:
+                image_bits.append("reference images")
+            if effective_save_defect_images:
+                image_bits.append("defect images")
+            image_label = f" with {', '.join(image_bits)}" if image_bits else ""
             print(
                 f"✅ Inserted Reel {reel.reel_id} ({machine_name}: {order_number}/{job_name}) "
-                f"and all related data. save_images={save_images}, import_mode={import_mode}"
+                f"and BST data{image_label}. "
+                f"save_reference_images={effective_save_reference_images}, "
+                f"save_defect_images={effective_save_defect_images}, import_mode={import_mode}"
             )
 
     except Exception as e:
         print(f"❌ Failed on {zip_path} for {machine_name}: {e}")
         raise
     finally:
-        try:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-        except Exception:
-            pass
-
-
-def _insert_rlm_monitor_if_possible(node: ET.Element, session: Session, reel_id: int):
-    attrs = node.attrib
-    date_str = attrs.get("date")
-    time_str = attrs.get("time")
-    if not (date_str and time_str):
-        return
-
-    try:
-        ts = parse_datetime(date_str, time_str)
-    except Exception:
-        return
-
-    def _first_float(*keys) -> Optional[float]:
-        for k in keys:
-            if k in attrs and attrs[k] not in (None, ""):
-                try:
-                    return float(attrs[k])
-                except Exception:
-                    continue
-        return None
-
-    curlength = _first_float("curlength", "currentlength", "cl")
-    webspeed = _first_float("webspeed", "speed", "ws")
-
-    if curlength is None and webspeed is None:
-        return
-
-    session.add(
-        RLMMonitoring(
-            reel_id=reel_id,
-            timestamp=ts,
-            curlength=curlength,
-            webspeed=webspeed,
-        )
-    )
+        if image_zf is not None:
+            image_zf.close()
 
 
 if __name__ == "__main__":
     test_file = "data/Press 5/2025-09-16_23-32_903286_11.zip"
-    extract_one(test_file, "Press 5", save_images=True, import_mode="full")
+    extract_one(
+        test_file,
+        "Press 5",
+        import_mode="full",
+        save_reference_images=True,
+        save_defect_images=False,
+    )

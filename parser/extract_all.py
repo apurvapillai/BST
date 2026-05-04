@@ -8,7 +8,15 @@ DATA_DIR = Path("data")
 
 MACHINES = [
     "Press 5",
+    "Press 6",
+    "Press 7",
+    "Press 8",
+    "Press 9",
+    "Press 11",
+    "Press 12",
+    "Press 13",
     "Press 14",
+    "Press 15",
 ]
 
 CUTOFF_DATE = datetime(2025, 10, 30)
@@ -41,7 +49,13 @@ def extract_all():
             print(f"📦 Processing {zip_path} for {machine_name} ...")
 
             try:
-                extract_one(str(zip_path), machine_name)
+                extract_one(
+                    str(zip_path),
+                    machine_name,
+                    import_mode="full",
+                    save_reference_images=True,
+                    save_defect_images=False,
+                )
             except Exception as e:
                 print(f"❌ Failed on {zip_path}: {e}")
 

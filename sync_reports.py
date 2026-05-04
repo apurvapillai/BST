@@ -17,23 +17,28 @@ from parser.extract_one import extract_one
 # Machine registry
 # --------------------------------------------------------------------------- #
 
+DEFAULT_MACHINE_CAPTURE = {
+    "import_mode": "full",
+    "save_reference_images": True,
+    "save_defect_images": False,
+}
+
 MACHINES = [
-    {"name": "Press 5", "host": "192.168.20.61", "save_images": True, "import_mode": "full"},
-    {"name": "Press 6", "host": "192.168.20.64", "save_images": False, "import_mode": "minimal"},
-    {"name": "Press 7", "host": "192.168.20.62", "save_images": False, "import_mode": "minimal"},
-    {"name": "Press 8", "host": "192.168.20.63", "save_images": False, "import_mode": "minimal"},
-    {"name": "Press 9", "host": "192.168.20.78", "save_images": False, "import_mode": "minimal"},
+    {"name": "Press 5", "host": "192.168.20.61", **DEFAULT_MACHINE_CAPTURE},
+    {"name": "Press 6", "host": "192.168.20.64", **DEFAULT_MACHINE_CAPTURE},
+    {"name": "Press 7", "host": "192.168.20.62", **DEFAULT_MACHINE_CAPTURE},
+    {"name": "Press 8", "host": "192.168.20.63", **DEFAULT_MACHINE_CAPTURE},
+    {"name": "Press 9", "host": "192.168.20.78", **DEFAULT_MACHINE_CAPTURE},
     {
         "name": "Press 11",
         "host": "192.168.20.82",
-        "save_images": False,
-        "import_mode": "minimal",
+        **DEFAULT_MACHINE_CAPTURE,
         "base_path": "protocols",
     },
-    {"name": "Press 12", "host": "192.168.20.83", "save_images": False, "import_mode": "minimal"},
-    {"name": "Press 13", "host": "192.168.20.170", "save_images": False, "import_mode": "minimal"},
-    {"name": "Press 14", "host": "192.168.20.147", "save_images": True, "import_mode": "full"},
-    {"name": "Press 15", "host": "192.168.20.126", "save_images": False, "import_mode": "minimal"},
+    {"name": "Press 12", "host": "192.168.20.83", **DEFAULT_MACHINE_CAPTURE},
+    {"name": "Press 13", "host": "192.168.20.170", **DEFAULT_MACHINE_CAPTURE},
+    {"name": "Press 14", "host": "192.168.20.147", **DEFAULT_MACHINE_CAPTURE},
+    {"name": "Press 15", "host": "192.168.20.126", **DEFAULT_MACHINE_CAPTURE},
 ]
 
 DATA_ROOT = Path("data")
@@ -218,13 +223,24 @@ def should_process(entry: ZipEntry, state: State) -> bool:
 def sync_machine(
     machine_name: str,
     host: str,
-    save_images: bool = True,
+    save_images: Optional[bool] = None,
     import_mode: str = "full",
     base_path: str = "protocol",
+    save_reference_images: Optional[bool] = None,
+    save_defect_images: Optional[bool] = None,
 ) -> None:
+    legacy_save_images = True if save_images is None else save_images
+    reference_images_enabled = (
+        legacy_save_images if save_reference_images is None else save_reference_images
+    )
+    defect_images_enabled = legacy_save_images if save_defect_images is None else save_defect_images
+
     print(f"\n{'=' * 80}")
     print(f"🔄 Syncing {machine_name} ({host})")
-    print(f"   mode={import_mode}, save_images={save_images}, base_path={base_path}")
+    print(
+        f"   mode={import_mode}, reference_images={reference_images_enabled}, "
+        f"defect_images={defect_images_enabled}, base_path={base_path}"
+    )
     print(f"{'=' * 80}")
 
     session = requests.Session()
@@ -262,8 +278,10 @@ def sync_machine(
             extract_one(
                 str(target_path),
                 machine_name,
-                save_images=save_images,
+                save_images=legacy_save_images,
                 import_mode=import_mode,
+                save_reference_images=save_reference_images,
+                save_defect_images=save_defect_images,
             )
 
             # only mark success after extract_one finishes
@@ -291,11 +309,13 @@ def sync_machine(
 def sync_reports() -> None:
     for machine in MACHINES:
         sync_machine(
-            machine["name"],
-            machine["host"],
-            machine.get("save_images", True),
-            machine.get("import_mode", "full"),
-            machine.get("base_path", "protocol"),
+            machine_name=machine["name"],
+            host=machine["host"],
+            save_images=machine.get("save_images"),
+            import_mode=machine.get("import_mode", "full"),
+            base_path=machine.get("base_path", "protocol"),
+            save_reference_images=machine.get("save_reference_images"),
+            save_defect_images=machine.get("save_defect_images"),
         )
 
 
