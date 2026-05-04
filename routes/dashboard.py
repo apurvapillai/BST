@@ -6889,7 +6889,11 @@ def api_job_explorer():
             return jsonify({"error": str(exc)}), 400
 
         page, page_size = _paginate()
-        base_query = _apply_reel_filters(session.query(Reel), filters, include_reel_code=False)
+        explorer_filters = dict(filters)
+        explorer_filters["reel_code"] = None
+        explorer_filters["reel_codes"] = []
+        explorer_filters["reel_ids"] = []
+        base_query = _apply_reel_filters(session.query(Reel), explorer_filters, include_reel_code=False)
 
         raw_status_filters = request.args.getlist("review_status")
         valid_statuses = {"pass", "fail", "uninspected"}
@@ -7774,13 +7778,19 @@ def api_reel_summary(reel_id: int):
                 selectinload(Reel.inspection_phases),
                 selectinload(Reel.rlm_config),
                 selectinload(Reel.rlm_phases),
-                selectinload(Reel.rlm_monitoring),
                 selectinload(Reel.defects),
             )
             .first()
         )
         if not reel:
             return jsonify({"error": "Reel not found"}), 404
+
+        rlm_monitor_count = (
+            session.query(func.count(RLMMonitoring.monitor_id))
+            .filter(RLMMonitoring.reel_id == reel.reel_id)
+            .scalar()
+            or 0
+        )
 
         reference_images = [
             {
@@ -7885,7 +7895,7 @@ def api_reel_summary(reel_id: int):
             "rlm": {
                 "config": reel.rlm_config.config_json if reel.rlm_config else None,
                 "phases": rlm_phases,
-                "monitor_count": len(reel.rlm_monitoring or []),
+                "monitor_count": int(rlm_monitor_count),
                 "points": _extract_monpoints(reel.rlm_config.config_json) if reel.rlm_config else [],
                 "tolerances": _extract_tolerances(reel.rlm_config.config_json) if reel.rlm_config else None,
             },

@@ -48,7 +48,18 @@
       const response = await fetch(url.toString(), {
         headers: { Accept: "application/json" },
       });
-      const data = await response.json();
+      const text = await response.text();
+      let data = null;
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch (err) {
+          const message = response.ok
+            ? "Server returned an invalid JSON response"
+            : response.statusText || `Request failed (${response.status})`;
+          throw new Error(message);
+        }
+      }
       if (!response.ok) {
         const message = data && data.error ? data.error : response.statusText;
         throw new Error(message);

@@ -1,8 +1,6 @@
 (function () {
-  let jobModal = null;
-  let jobModalSelect = null;
-  let jobModalClose = null;
-  let requestedJobTab = "";
+  let pendingAutoJobTab = "";
+  let autoJobSelectionPromise = null;
   const guardedTabs = new Set(["job", "defects", "qc-review", "heatmap"]);
   const TAB_SCRIPT_CONFIG = {
     job: { path: "/static/js/tabs/job_explorer.js", exportName: "JobExplorerTab" },
@@ -85,83 +83,101 @@
     }
   }
 
-  function openJobModal(targetTab) {
-    if (!jobModal || !jobModalSelect) return;
-    requestedJobTab = targetTab || "";
-    const options = Filters.getJobOptions ? Filters.getJobOptions() : [];
-    const autoSelected = autoSelectLatestJob(targetTab, options);
-    if (autoSelected) {
-      return;
+  async function requestLatestJobSelection(targetTab) {
+    pendingAutoJobTab = targetTab || pendingAutoJobTab || "job";
+    if (autoJobSelectionPromise) {
+      return autoJobSelectionPromise;
     }
-    Utils.populateSelect(jobModalSelect, options, { placeholder: "Select a job" });
-    jobModalSelect.value = "";
-    jobModal.classList.remove("hidden");
-    jobModal.setAttribute("aria-hidden", "false");
-    jobModalSelect.focus();
+    autoJobSelectionPromise = autoSelectLatestJob()
+      .then((selected) => {
+        if (!selected && Filters && typeof Filters.promptJobSelection === "function") {
+          Filters.promptJobSelection(pendingAutoJobTab);
+        }
+        return selected;
+      })
+      .catch((err) => {
+        console.error("Unable to auto-select latest job", err);
+        if (Filters && typeof Filters.promptJobSelection === "function") {
+          Filters.promptJobSelection(pendingAutoJobTab);
+        }
+      })
+      .finally(() => {
+        autoJobSelectionPromise = null;
+      });
+    return autoJobSelectionPromise;
   }
 
-  function autoSelectLatestJob(targetTab, options) {
+  async function autoSelectLatestJob() {
     const selectedJob =
       Filters && typeof Filters.getState === "function" ? String(Filters.getState().job || "").trim() : "";
     if (selectedJob) {
-      const target = targetTab || requestedJobTab || "job";
-      requestedJobTab = "";
+      const target = consumeRequestedJobTab();
       Router.setActive(target);
       return true;
     }
-    const entries = Array.isArray(options) ? options.filter((option) => option && option.value) : [];
+    if (Filters && typeof Filters.ready === "function") {
+      await Filters.ready();
+    }
+    if (
+      Filters &&
+      typeof Filters.hasFreshOptions === "function" &&
+      !Filters.hasFreshOptions() &&
+      typeof Filters.refreshOptions === "function"
+    ) {
+      await Filters.refreshOptions(true);
+    }
+    let options = Filters.getJobOptions ? Filters.getJobOptions() : [];
+    let entries = Array.isArray(options) ? options.filter((option) => option && option.value) : [];
+    if (!entries.length && Filters && typeof Filters.refreshOptions === "function") {
+      await Filters.refreshOptions(true);
+      options = Filters.getJobOptions ? Filters.getJobOptions() : [];
+      entries = Array.isArray(options) ? options.filter((option) => option && option.value) : [];
+    }
     if (!entries.length) return false;
     const latestJob = String(entries[0].value || "").trim();
     if (!latestJob) return false;
-    requestedJobTab = targetTab || "";
     Filters.set("job", latestJob, { emit: true, updateUrl: true });
-    const target = targetTab || requestedJobTab || "job";
-    requestedJobTab = "";
+    const target = consumeRequestedJobTab();
     Router.setActive(target);
     return true;
   }
 
-  function closeJobModal() {
-    if (!jobModal) return;
-    jobModal.classList.add("hidden");
-    jobModal.setAttribute("aria-hidden", "true");
+  function consumeRequestedJobTab() {
+    const target =
+      (Router.consumePendingJobTab && Router.consumePendingJobTab()) ||
+      pendingAutoJobTab ||
+      "job";
+    pendingAutoJobTab = "";
+    return target;
   }
 
-  function setupJobModal() {
-    jobModal = document.getElementById("jobSelectModal");
-    jobModalSelect = document.getElementById("jobSelectModalInput");
-    jobModalClose = document.getElementById("jobSelectModalClose");
-    if (!jobModal || !jobModalSelect || !jobModalClose) {
-      return;
-    }
-    jobModalSelect.addEventListener("change", () => {
-      const value = (jobModalSelect.value || "").trim();
-      if (!value) return;
-      Filters.set("job", value, { emit: true, updateUrl: true });
-      closeJobModal();
-      const target =
-        (Router.consumePendingJobTab && Router.consumePendingJobTab()) ||
-        requestedJobTab ||
-        "job";
-      requestedJobTab = "";
-      Router.setActive(target);
-    });
-    jobModalClose.addEventListener("click", () => {
-      closeJobModal();
-      if (Router.consumePendingJobTab) {
-        Router.consumePendingJobTab();
-      }
-    });
+  function setupJobAutoSelection() {
     window.addEventListener("dashboard:job-required", (event) => {
       const target = event && event.detail && event.detail.tab ? event.detail.tab : "";
-      openJobModal(target);
+      requestLatestJobSelection(target);
     });
+  }
+
+  function getActiveJobRequiredTab() {
+    const activeTab = Router && typeof Router.current === "function" ? Router.current() : "";
+    if (!activeTab) return "";
+    if (Router && typeof Router.requiresJobTab === "function") {
+      return Router.requiresJobTab(activeTab) ? activeTab : "";
+    }
+    return guardedTabs.has(activeTab) ? activeTab : "";
+  }
+
+  function shouldAutoSelectJobForPayload(payload) {
+    const activeTab = getActiveJobRequiredTab();
+    if (!activeTab) return "";
+    const job = payload && payload.job !== undefined ? payload.job : "";
+    return String(job || "").trim() ? "" : activeTab;
   }
 
   function initTabs() {
     // normalizeDashboardUrl(); // disabled to preserve incoming hashes
     bindTabNav();
-    setupJobModal();
+    setupJobAutoSelection();
     Filters.init();
     if (typeof OverviewTab !== "undefined" && OverviewTab && typeof OverviewTab.init === "function") {
       OverviewTab.init();
@@ -207,6 +223,11 @@
         return;
       }
       lastFiltersKey = nextKey;
+      const autoJobTab = shouldAutoSelectJobForPayload(payload);
+      if (autoJobTab) {
+        requestLatestJobSelection(autoJobTab);
+        return;
+      }
       Router.reloadActive();
     });
   }

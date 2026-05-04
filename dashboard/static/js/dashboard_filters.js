@@ -241,6 +241,7 @@
     let refreshOptionsQueued = false;
     let urlSyncEnabled = false;
     let readyResolve = null;
+    let lastOptionsKey = "";
     const readyPromise = new Promise((resolve) => {
       readyResolve = resolve;
     });
@@ -283,6 +284,21 @@
     const scheduleEmit = Utils.debounce(() => emit(false), FETCH_DEBOUNCE_MS);
     let firstEmit = true;
     const scheduleOptionsRefresh = Utils.debounce(() => refreshOptions(), 200);
+
+    function optionsKey(filters = getState()) {
+      return [
+        filters.machine_id || "",
+        filters.start || "",
+        filters.end || "",
+        filters.job || "",
+        filters.order || "",
+        Array.isArray(filters.reel_id) ? filters.reel_id.join(",") : filters.reel_id || "",
+      ].join("|");
+    }
+
+    function hasFreshOptions() {
+      return Boolean(lastOptionsKey && lastOptionsKey === optionsKey());
+    }
 
     function hasJobSelection() {
       return Boolean((state.job || "").trim());
@@ -509,6 +525,12 @@
       });
     }
 
+    function clearReelSelectionState() {
+      state.reel_ids = [];
+      pendingReelCodes = [];
+      syncReelSelect();
+    }
+
     function handleInputChange(field, value) {
       if (updating) return;
       markUserInteraction();
@@ -519,9 +541,7 @@
           if (elements.job) elements.job.value = "";
           state.order = "";
           if (elements.order) elements.order.value = "";
-          state.reel_ids = [];
-          pendingReelCodes = [];
-          syncReelSelect();
+          clearReelSelectionState();
           renderChips();
           persistFilters({
             machine_id: state.machine_id,
@@ -552,9 +572,7 @@
           if (elements.job) elements.job.value = state.job;
           state.order = "";
           if (elements.order) elements.order.value = "";
-          state.reel_ids = [];
-          pendingReelCodes = [];
-          syncReelSelect();
+          clearReelSelectionState();
           renderChips();
           persistFilters({
             job: state.job,
@@ -565,7 +583,9 @@
           break;
         case "order":
           state.order = value || "";
-          persistFilters({ order: state.order });
+          clearReelSelectionState();
+          renderChips();
+          persistFilters({ order: state.order, reel_ids: state.reel_ids.slice() });
           scheduleOptionsRefresh();
           break;
         case "reel":
@@ -594,13 +614,16 @@
       refreshOptionsQueued = true;
       LoadingOverlay.show();
       try {
-        const data = await Api.get("filters", {}, getState());
+        const requestState = getState();
+        const requestOptionsKey = optionsKey(requestState);
+        const data = await Api.get("filters", {}, requestState);
         updating = true;
         const jobOptions = ensureCurrentJobOption(data.jobs || []);
         updateSelect(elements.job, jobOptions, state.job ? [state.job] : []);
         updateSelect(elements.order, data.orders || [], state.order ? [state.order] : []);
         updateSelect(elements.reel, data.reel_codes || [], state.reel_ids);
         hydratePendingReelIds();
+        lastOptionsKey = requestOptionsKey;
         updating = false;
         updateDependentFilters();
         renderChips();
@@ -816,9 +839,7 @@
           if (elements.job) elements.job.value = "";
           state.order = "";
           if (elements.order) elements.order.value = "";
-          state.reel_ids = [];
-          pendingReelCodes = [];
-          syncReelSelect();
+          clearReelSelectionState();
           updateDependentFilters();
           persistFilters({
             machine_id: state.machine_id,
@@ -848,9 +869,7 @@
           if (elements.job) elements.job.value = "";
           state.order = "";
           if (elements.order) elements.order.value = "";
-          state.reel_ids = [];
-          pendingReelCodes = [];
-          syncReelSelect();
+          clearReelSelectionState();
           renderChips();
           updateDependentFilters();
           persistFilters({ job: state.job, order: state.order, reel_ids: state.reel_ids.slice() });
@@ -860,8 +879,9 @@
         case "order":
           state.order = "";
           if (elements.order) elements.order.value = "";
+          clearReelSelectionState();
+          renderChips();
           updateDependentFilters();
-          persistFilters({ order: state.order });
           persistFilters({ order: state.order, reel_ids: state.reel_ids.slice() });
           await refreshOptions(true);
           emit(true);
@@ -964,9 +984,7 @@
           if (elements.job) elements.job.value = state.job;
           state.order = "";
           if (elements.order) elements.order.value = "";
-          state.reel_ids = [];
-          pendingReelCodes = [];
-          syncReelSelect();
+          clearReelSelectionState();
           renderChips();
           persistFilters({ job: state.job, order: state.order, reel_ids: state.reel_ids.slice() });
           needsOptionsRefresh = true;
@@ -977,7 +995,10 @@
             ensureOrderOption(ORDER_NONE, "None");
           }
           if (elements.order) elements.order.value = state.order;
-          persistFilters({ order: state.order });
+          clearReelSelectionState();
+          renderChips();
+          persistFilters({ order: state.order, reel_ids: state.reel_ids.slice() });
+          needsOptionsRefresh = true;
           break;
         case "start":
           state.start = value || "";
@@ -1306,6 +1327,8 @@
         optionListeners.add(cb);
         return () => optionListeners.delete(cb);
       },
+      refreshOptions,
+      hasFreshOptions,
       set,
       setMany,
       addReel,

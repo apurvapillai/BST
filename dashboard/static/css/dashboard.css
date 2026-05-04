@@ -5131,11 +5131,6 @@ body.drivers-reference-viewer-open {
   font-size: 15px;
 }
 
-.job-select-dialog {
-  max-width: 420px;
-  background: linear-gradient(135deg, #ffffff, #f8fafc);
-}
-
 .modal-close-btn {
   position: absolute;
   top: 14px;
