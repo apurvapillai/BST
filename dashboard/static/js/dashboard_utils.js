@@ -856,6 +856,7 @@
           backgroundImage: null,
           backgroundImageUrl: null,
           backgroundImageLoading: false,
+          backgroundImageFailed: false,
           referenceBackground: null,
         };
         heatmapState.set(key, state);
@@ -869,6 +870,7 @@
           state.backgroundImage = null;
         }
         state.backgroundImageLoading = false;
+        state.backgroundImageFailed = false;
       }
       window.requestAnimationFrame(() => render(container, reel, masks, state));
     }
@@ -887,14 +889,17 @@
         state.backgroundImage = null;
         state.backgroundImageUrl = null;
         state.backgroundImageLoading = false;
+        state.backgroundImageFailed = false;
       } else if (state.backgroundImageUrl !== referenceBackground) {
         state.backgroundImageUrl = referenceBackground;
         state.backgroundImage = null;
         state.backgroundImageLoading = false;
+        state.backgroundImageFailed = false;
       }
 
-      if (!parsed.shapes.length) {
-        const message = hasDimensionsOriginal ? "No mask coordinates" : "Format dimensions unavailable";
+      const hasMaskShapes = parsed.shapes.length > 0;
+      if (!hasMaskShapes && !hasDimensionsOriginal) {
+        const message = "Format dimensions unavailable";
         container.classList.add("heatmap-empty");
         container.innerHTML = `<span class='badge'>${message}</span>`;
         return;
@@ -941,19 +946,25 @@
       if (referenceBackground) {
         if (state.backgroundImage) {
           backgroundImage = state.backgroundImage;
-        } else if (!state.backgroundImageLoading) {
+        } else if (!state.backgroundImageLoading && !state.backgroundImageFailed) {
           state.backgroundImageLoading = true;
           requestBackgroundImage(referenceBackground, (img) => {
             state.backgroundImageLoading = false;
             if (!img) {
               if (state.backgroundImageUrl === referenceBackground) {
                 state.backgroundImage = null;
+                state.backgroundImageFailed = true;
               }
+              window.requestAnimationFrame(() => {
+                if (!container.isConnected) return;
+                render(container, reel, masks, state);
+              });
               return;
             }
             if (state.referenceBackground !== referenceBackground || !container.isConnected) {
               return;
             }
+            state.backgroundImageFailed = false;
             state.backgroundImage = img;
             window.requestAnimationFrame(() => {
               if (!container.isConnected) return;
@@ -1017,6 +1028,18 @@
       ctx.fillText(`Y: ±${Utils.formatNumber(workingLength / 2, 1)}`, size - 8, 8);
 
       container.appendChild(canvas);
+      if (!hasMaskShapes) {
+        const badge = document.createElement("span");
+        badge.className = "badge heatmap-status-badge";
+        badge.textContent = "No masks";
+        container.appendChild(badge);
+      }
+      if (referenceBackground && state.backgroundImageFailed) {
+        const badge = document.createElement("span");
+        badge.className = "badge heatmap-status-badge heatmap-status-badge--warning";
+        badge.textContent = "Reference unavailable";
+        container.appendChild(badge);
+      }
     }
 
     function collectMasks(masks) {

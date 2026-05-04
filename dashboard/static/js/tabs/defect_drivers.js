@@ -109,6 +109,19 @@
       }
     }
 
+    function latestReferenceImageFromDetail(detail = {}) {
+      if (detail.latest_reference_image && detail.latest_reference_image.image_src) {
+        return detail.latest_reference_image;
+      }
+      const images = Array.isArray(detail.reference_images) ? detail.reference_images : [];
+      for (let index = images.length - 1; index >= 0; index -= 1) {
+        if (images[index] && images[index].image_src) {
+          return images[index];
+        }
+      }
+      return null;
+    }
+
     function renderTimelineDetailEmpty() {
       if (!els.timelineDetail) return;
       activeReferenceDetail = null;
@@ -1625,6 +1638,7 @@
                 format_width: Number(detail.format_width) || null,
                 format_length: Number(detail.format_length) || null,
               },
+              referenceImage: latestReferenceImageFromDetail(detail),
               beforeMasks: Array.isArray(detail.before_masks) ? detail.before_masks : [],
               afterMasks: Array.isArray(detail.after_masks) ? detail.after_masks : [],
             }
@@ -1983,7 +1997,7 @@
       });
     }
 
-    function buildMaskViewerColumn(title, reel, masks, suffix) {
+    function buildMaskViewerColumn(title, reel, masks, suffix, referenceBackground) {
       const host = document.createElement("div");
       host.className = "defect-footprint";
       const reelId = `drivers-mask-compare-${suffix}`;
@@ -2011,6 +2025,7 @@
             format_length: reel && reel.format_length !== undefined ? reel.format_length : null,
           },
           masks: Array.isArray(masks) ? masks : [],
+          referenceBackground: referenceBackground || null,
         },
       };
     }
@@ -2096,8 +2111,24 @@
       });
       const content = document.createElement("div");
       content.className = "defect-footprints-inline drivers-mask-footprint-compare";
-      const before = buildMaskViewerColumn("Before", activeMaskDetail.reel, activeMaskDetail.beforeMasks, "before");
-      const after = buildMaskViewerColumn("After", activeMaskDetail.reel, activeMaskDetail.afterMasks, "after");
+      const referenceBackground =
+        activeMaskDetail.referenceImage && activeMaskDetail.referenceImage.image_src
+          ? urlForStatic(activeMaskDetail.referenceImage.image_src)
+          : null;
+      const before = buildMaskViewerColumn(
+        "Before",
+        activeMaskDetail.reel,
+        activeMaskDetail.beforeMasks,
+        "before",
+        referenceBackground
+      );
+      const after = buildMaskViewerColumn(
+        "After",
+        activeMaskDetail.reel,
+        activeMaskDetail.afterMasks,
+        "after",
+        referenceBackground
+      );
       content.appendChild(before.host);
       content.appendChild(after.host);
       window.openFootprintModalContent(content, `${activeMaskDetail.title} · ${activeMaskDetail.subtitle}`);

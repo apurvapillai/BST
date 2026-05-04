@@ -4708,6 +4708,15 @@ def api_defect_drivers():
             serialized_masks_for_state = [_serialize_mask_detail(mask) for mask in masks_for_state]
             effective_mask_signature = tuple(sorted(_active_mask_signature(serialized_masks_for_state)))
             ordered_refs = _ordered_reference_images(reel.reference_images)
+            serialized_reference_images = [
+                _serialize_reference_detail(
+                    image,
+                    order_index=index + 1,
+                    reel_time=_iso(reel.time_end or reel.time_start),
+                )
+                for index, image in enumerate(ordered_refs)
+            ]
+            latest_reference_image = serialized_reference_images[-1] if serialized_reference_images else None
             record = {
                 "reel_id": reel_id,
                 "reel_code": reel.reel_code or f"Reel {reel_id}",
@@ -4717,6 +4726,8 @@ def api_defect_drivers():
                 "time": _iso(reel.time_end or reel.time_start),
                 "time_sort": reel.time_end or reel.time_start or window_end,
                 "length_ft": length_ft,
+                "format_length": _to_float(reel.format_length),
+                "format_width": _to_float(reel.format_width),
                 "total_defects": total_defects_reel,
                 "defects_per_1000ft": _rate_per_1000ft(total_defects_reel, length_ft),
                 "avg_defect_size": avg_size,
@@ -4745,14 +4756,8 @@ def api_defect_drivers():
                 "reference_signature": _reference_signature(ordered_refs),
                 "reference_count": len(ordered_refs),
                 "reference_repeated_updates": max(len(ordered_refs) - 1, 0),
-                "reference_images": [
-                    _serialize_reference_detail(
-                        image,
-                        order_index=index + 1,
-                        reel_time=_iso(reel.time_end or reel.time_start),
-                    )
-                    for index, image in enumerate(ordered_refs)
-                ],
+                "reference_images": serialized_reference_images,
+                "latest_reference_image": latest_reference_image,
                 "speed_avg": _to_float(speed_entry.get("avg_speed")),
                 "speed_min": _to_float(speed_entry.get("min_speed")),
                 "speed_max": _to_float(speed_entry.get("max_speed")),
@@ -5262,6 +5267,10 @@ def api_defect_drivers():
                             "job": record.get("job"),
                             "order": record.get("order"),
                             "time": record.get("time"),
+                            "format_length": record.get("format_length"),
+                            "format_width": record.get("format_width"),
+                            "latest_reference_image": record.get("latest_reference_image"),
+                            "reference_images": record.get("reference_images") or [],
                             "before_mask_count": len(prev_set),
                             "after_mask_count": len(curr_set),
                             "coordinate_change_count": coordinate_change_count,
