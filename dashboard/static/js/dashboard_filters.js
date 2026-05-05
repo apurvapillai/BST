@@ -1268,13 +1268,13 @@
     function promptJobSelection(targetTab) {
       const jobCard = elements.job ? elements.job.closest(".filter-card") : null;
       if (!jobCard) {
-        window.alert("Select a job before opening the Job Explorer or Defect Explorer.");
+        window.alert("Select a job before opening this dashboard tab.");
         return;
       }
       const message =
-        targetTab === "defects"
-          ? "Select a job to access the Defect Explorer."
-          : "Select a job to access the Job Explorer.";
+        targetTab === "job"
+          ? "Select a job to access the Job Explorer."
+          : "Select a job to access this tab.";
       let hint = jobCard.querySelector(".job-required-hint");
       if (!hint) {
         hint = document.createElement("div");

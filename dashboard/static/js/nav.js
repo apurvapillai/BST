@@ -1,7 +1,7 @@
 (function () {
   const SIDEBAR_COLLAPSE_KEY = "bstSidebarCollapsed";
   const THEME_KEY = "bstTheme";
-  const jobRequiredTabs = new Set(["job", "defects", "qc-review", "heatmap"]);
+  const jobRequiredTabs = new Set(["job", "qc-review"]);
 
   function getFilterState() {
     if (!window.FilterState || typeof window.FilterState.getFilters !== "function") {

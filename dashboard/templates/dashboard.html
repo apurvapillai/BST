@@ -122,10 +122,8 @@
     <div class="tabs tabs-muted" id="tabNav" aria-label="Defects sections">
       <button type="button" class="tab tab-active" data-tab="overview">Overview</button>
       <button type="button" class="tab" data-tab="job">Job Explorer</button>
-      <button type="button" class="tab" data-tab="defects">Defect Explorer</button>
       <button type="button" class="tab" data-tab="defect-trends">Defect Trends</button>
       <button type="button" class="tab" data-tab="qc-review">QC Review</button>
-      <button type="button" class="tab" data-tab="heatmap">Heatmap</button>
       <button type="button" class="tab" data-tab="reference-check">Reference Check</button>
       <button type="button" class="tab" data-tab="defect-drivers">Defect Drivers</button>
     </div>
@@ -491,190 +489,6 @@
             </section>
 
           </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Defect Explorer Tab -->
-    <section id="tab-defects" class="tab-content hidden">
-      <div class="defect-group defect-group--review">
-      <div class="defect-review-panel" id="defectReviewPanel">
-        <div class="defect-review-header">
-          <div class="defect-review-copy">
-            <h4>Reel Review</h4>
-            <p class="defect-review-status" data-review-status>
-              Select a reel from Job Explorer to start a review.
-            </p>
-            <p class="defect-review-meta" data-review-meta></p>
-          </div>
-          <p class="defect-review-note">
-            QC decisions are managed in the QC Review tab.
-          </p>
-        </div>
-        <div class="review-form-host" data-review-form-host></div>
-      </div>
-        <div class="defect-decision-summary" id="defectDecisionSummary">
-          <div class="defect-decision-card total">
-            <span>Total Defects</span>
-            <strong data-decision-total>--</strong>
-          </div>
-          <div class="defect-decision-card pass">
-            <span>Total Pass</span>
-            <strong data-decision-pass>--</strong>
-          </div>
-          <div class="defect-decision-card fail">
-            <span>Total Fail</span>
-            <strong data-decision-fail>--</strong>
-          </div>
-          <div class="defect-decision-card pending">
-            <span>Unidentified</span>
-            <strong data-decision-unidentified>--</strong>
-          </div>
-        </div>
-
-        <div class="table-wrapper defect-table-section">
-          <h4 class="defect-table-title">Defect Records</h4>
-          <div class="defect-table-scroll">
-            <table id="defectTable">
-              <thead>
-                <tr>
-                  <th>Reel Code</th>
-                  <th>Time</th>
-                  <th>Order</th>
-                  <th>Job</th>
-              <th>Type</th>
-              <th>Magnitude</th>
-              <th>Severity</th>
-              <th>Position</th>
-              <th>Image</th>
-              <th>QC Decision</th>
-            </tr>
-          </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-        <div class="pagination" id="defectPagination"></div>
-      </div>
-
-      <div class="defect-group">
-        <div class="defect-toolbar">
-          <div class="defect-filter">
-            <label for="defectTypeFilter">Type</label>
-            <select id="defectTypeFilter">
-              <option value="">All</option>
-            </select>
-          </div>
-          <div class="defect-filter">
-            <label for="defectPhaseFilter">Phase</label>
-            <select id="defectPhaseFilter">
-              <option value="">All</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-              <option value="learn">Learn</option>
-            </select>
-          </div>
-          <div class="defect-filter range">
-            <label>Magnitude</label>
-            <input type="number" id="magnitudeMin" placeholder="Min" step="0.1">
-            <span>–</span>
-            <input type="number" id="magnitudeMax" placeholder="Max" step="0.1">
-          </div>
-          <div class="defect-filter range">
-            <label>Severity</label>
-            <input type="number" id="severityMin" placeholder="Min" step="0.1">
-            <span>–</span>
-            <input type="number" id="severityMax" placeholder="Max" step="0.1">
-          </div>
-          <div class="defect-filter range">
-            <label>Position</label>
-            <input type="number" id="positionMin" placeholder="Min" step="1">
-            <span>–</span>
-            <input type="number" id="positionMax" placeholder="Max" step="1">
-          </div>
-          <div class="defect-filter range">
-            <label>Size</label>
-            <input type="number" id="sizeMin" placeholder="Min" step="1">
-            <span>–</span>
-            <input type="number" id="sizeMax" placeholder="Max" step="1">
-          </div>
-        </div>
-
-        <div class="defect-summary" id="defectSummary">
-          <div class="defect-summary-card total">
-            <h4>Total Defects</h4>
-            <p data-defect-total>--</p>
-          </div>
-          <div class="defect-summary-types" id="defectSummaryTypes"></div>
-        </div>
-
-        <div class="charts">
-          <div class="chart">
-            <div class="chart-header">
-              <div class="chart-header__copy">
-                <p class="kpi-section__title">Defects by Type</p>
-                <small>Distribution of defect classes returned by these filters.</small>
-              </div>
-            </div>
-            <div id="defectTypeChart" class="chart-plot"></div>
-          </div>
-          <div class="chart">
-            <div class="chart-header">
-              <div class="chart-header__copy">
-                <p class="kpi-section__title">Magnitude Distribution</p>
-                <small>Histogram of detected defect magnitudes for this result set.</small>
-              </div>
-            </div>
-            <div id="defectMagnitudeChart" class="chart-plot"></div>
-          </div>
-          <div class="chart">
-            <div class="chart-header">
-              <div class="chart-header__copy">
-                <p class="kpi-section__title">Severity Distribution</p>
-                <small>How often each severity bucket appears in the selection.</small>
-              </div>
-            </div>
-            <div id="defectSeverityChart" class="chart-plot"></div>
-          </div>
-          <div class="chart">
-            <div class="chart-header">
-              <div class="chart-header__copy">
-                <p class="kpi-section__title">Position Distribution</p>
-                <small>Defect counts grouped by the reported position bucket.</small>
-              </div>
-            </div>
-            <div id="defectPositionChart" class="chart-plot"></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="defect-group">
-        <div class="defect-footprints-grid">
-          <div class="defect-footprint">
-            <div class="defect-footprint-header">
-              <h4>Defect Heatmap</h4>
-              <button type="button" class="footprint-expand-btn" data-footprint-target="heatmap-defect-explorer" data-footprint-title="Defect Heatmap" aria-label="Open full screen">
-                ⤢
-              </button>
-            </div>
-            <div class="heatmap-wrapper heatmap-empty" id="heatmap-defect-explorer">
-              <span class="badge">Load defects to view footprints.</span>
-            </div>
-          </div>
-          <div class="defect-footprint">
-            <div class="defect-footprint-header">
-              <h4>Mask Footprints</h4>
-              <button type="button" class="footprint-expand-btn" data-footprint-target="mask-heatmap-defect-explorer" data-footprint-title="Mask Footprints" aria-label="Open full screen">
-                ⤢
-              </button>
-            </div>
-            <div class="heatmap-wrapper heatmap-empty" id="mask-heatmap-defect-explorer">
-              <span class="badge">No mask data for current filters.</span>
-            </div>
-          </div>
-        </div>
-        <div class="defect-footprints-legend-grid">
-          <div class="heatmap-legend heatmap-legend-job" id="heatmap-defect-explorer-legend"></div>
         </div>
       </div>
     </section>
@@ -1164,52 +978,6 @@
       </div>
     </section>
 
-    <!-- Heatmap Tab -->
-    <section id="tab-heatmap" class="tab-content hidden">
-      <div class="heatmap-editor" id="heatmapEditor">
-        <div class="heatmap-sidebar">
-          <div class="heatmap-sidebar-header">
-            <h3>Heatmap Zones</h3>
-            <p>
-              Choose a job, then drag over the reference image to outline critical regions. Assign a weight between 0 and 100 to describe how severe a defect is in that area.
-            </p>
-            <div class="heatmap-tools">
-              <span class="heatmap-tools-label">Draw Mode</span>
-              <div class="heatmap-tool-buttons" id="heatmapTools">
-                <button type="button" class="heatmap-tool-btn heatmap-tool-btn-active" data-heatmap-tool="rectangle">Rectangle</button>
-                <button type="button" class="heatmap-tool-btn" data-heatmap-tool="polygon">Polygon</button>
-              </div>
-              <div class="heatmap-zoom-group">
-                <span class="heatmap-tools-label">Zoom</span>
-                <div class="heatmap-zoom-controls" aria-label="Heatmap zoom controls">
-                  <button type="button" class="heatmap-zoom-btn" data-heatmap-zoom="in" aria-label="Zoom in">+</button>
-                  <button type="button" class="heatmap-zoom-btn" data-heatmap-zoom="out" aria-label="Zoom out">&minus;</button>
-                  <button type="button" class="heatmap-zoom-btn heatmap-zoom-reset" data-heatmap-zoom="reset">Reset</button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="heatmap-canvas">
-          <div class="heatmap-stage-container">
-            <div class="heatmap-stage heatmap-stage--disabled" id="heatmapStage">
-              <img id="heatmapReferenceImage" alt="Reference image" class="heatmap-reference hidden" decoding="async">
-              <div class="heatmap-regions-layer" id="heatmapRegionsLayer"></div>
-              <div class="heatmap-regions-layer heatmap-regions-layer--draft" id="heatmapDraftLayer"></div>
-            </div>
-          </div>
-          <div class="heatmap-empty" id="heatmapEmptyNotice">
-            Select a job to load its reference image and begin marking important zones.
-          </div>
-          <div class="heatmap-actions">
-            <div class="heatmap-actions-card">
-              <button type="button" id="heatmapSaveBtn" class="heatmap-save-btn" disabled>Save Heatmap</button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <section id="tab-reference-check" class="tab-content hidden">
       <div class="reference-check-page" id="referenceCheckPage">
         <section class="reference-check-hero">
@@ -1316,19 +1084,6 @@
         <div class="modal-actions drivers-reference-viewer__actions">
           <button type="button" class="button-secondary" id="driversReferenceViewerDismiss">Close</button>
         </div>
-      </div>
-    </div>
-
-    <div class="heatmap-modal hidden" id="heatmapModal" role="dialog" aria-modal="true" aria-labelledby="heatmapModalTitle">
-      <div class="heatmap-modal__dialog">
-        <h3 id="heatmapModalTitle">Update Region Weight</h3>
-        <p>Set the importance level for this zone (0–100).</p>
-        <input type="number" min="0" max="100" id="heatmapModalInput" class="heatmap-modal__input">
-        <div class="heatmap-modal__actions">
-          <button type="button" class="button-secondary" data-heatmap-modal-cancel>Cancel</button>
-          <button type="button" class="button-primary" data-heatmap-modal-save>Save</button>
-        </div>
-        <button type="button" class="heatmap-modal__close" aria-label="Close" data-heatmap-modal-cancel>&times;</button>
       </div>
     </div>
 

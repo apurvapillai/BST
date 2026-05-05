@@ -123,28 +123,23 @@
     const tabs = {};
     let active = "overview";
     let pendingJobTab = "";
-    const jobRequiredTabs = new Set(["job", "defects", "qc-review", "heatmap"]);
+    const jobRequiredTabs = new Set(["job", "qc-review"]);
     const hashToRoute = {
       "job-explorer": "job",
-      "defect-explorer": "defects",
       "defect-trends": "defect-trends",
       "defect-drivers": "defect-drivers",
       "reference-check": "reference-check",
       overview: "overview",
-      heatmap: "heatmap",
       "qc-review": "qc-review",
       job: "job",
-      defects: "defects",
       "defect-trends": "defect-trends",
     };
     const routeToHash = {
       job: "job-explorer",
-      defects: "defect-explorer",
       "defect-trends": "defect-trends",
       "defect-drivers": "defect-drivers",
       "reference-check": "reference-check",
       overview: "overview",
-      heatmap: "heatmap",
       "qc-review": "qc-review",
     };
 

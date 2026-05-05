@@ -52,15 +52,8 @@
     meta.textContent = display || label || counter || "";
   }
 
-  function isDefectTabActive() {
-    const tab = document.getElementById("tab-defects");
-    return Boolean(tab && !tab.classList.contains("hidden"));
-  }
-
   function syncModalMetaBarVisibility() {
-    const modal = document.getElementById("imageModal");
-    const shouldShow =
-      Boolean(modal && modal.classList.contains("show")) && isDefectTabActive();
+    const shouldShow = false;
     ["modalMetaBar", "modalDecisionBar"].forEach((id) => {
       const bar = document.getElementById(id);
       if (bar) {
@@ -313,7 +306,7 @@
     const modal = document.getElementById("imageModal");
     const img = document.getElementById("modalImage");
     if (!modal || !img || !modal.classList.contains("show")) return;
-    const cells = Array.from(document.querySelectorAll("#defectTable tbody td img"));
+    const cells = [];
     if (!cells.length) return;
     let currentIndex = Number(img.dataset.index);
     if (Number.isNaN(currentIndex) || currentIndex < 0) {
@@ -334,7 +327,7 @@
     if (!modal || !img) return;
     resetModalImageScale();
     img.src = src;
-    const cells = Array.from(document.querySelectorAll("#defectTable tbody td img"));
+    const cells = [];
     let index = element ? cells.findIndex((cell) => cell === element) : -1;
     if (index < 0) {
       index = cells.findIndex((cell) => cell && cell.src === img.src);
