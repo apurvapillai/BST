@@ -105,7 +105,7 @@ class RLMLiveService:
             self._ensure_alert_config(session)
 
     def get_overview(self) -> Dict[str, object]:
-        """Builds the complete payload consumed by /rlm/live.
+        """Builds the live RLM status payload used by shared status surfaces.
 
         Payload keys:
             plantSummary: aggregate press counts + last updated time

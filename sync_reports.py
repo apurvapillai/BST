@@ -48,6 +48,7 @@ CUTOFF_DATE = datetime(2025, 10, 30)
 
 DEFAULT_COOKIE = "JSESSIONID=abc123xyz; othercookie=value"
 COOKIE_FROM_ENV = os.environ.get("PROTOCOL_COOKIE")
+DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 
 
 # --------------------------------------------------------------------------- #
@@ -194,15 +195,28 @@ def download_zip(session: requests.Session, entry: ZipEntry, target: Path) -> No
     response.raise_for_status()
 
     target.parent.mkdir(parents=True, exist_ok=True)
+    temp_target = target.with_name(f"{target.name}.part")
 
-    first_chunk = response.raw.read(4)
-    if not first_chunk.startswith(b"PK"):
-        raise ValueError(f"{entry.filename} does not look like a ZIP (missing PK header)")
-
-    with target.open("wb") as handle:
-        handle.write(first_chunk)
-        for chunk in response.iter_content(chunk_size=8192):
-            handle.write(chunk)
+    saw_content = False
+    try:
+        with temp_target.open("wb") as handle:
+            for chunk in response.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
+                if not chunk:
+                    continue
+                if not saw_content:
+                    if not chunk.startswith(b"PK"):
+                        raise ValueError(f"{entry.filename} does not look like a ZIP (missing PK header)")
+                    saw_content = True
+                handle.write(chunk)
+        if not saw_content:
+            raise ValueError(f"{entry.filename} downloaded as an empty response")
+        temp_target.replace(target)
+    except Exception:
+        try:
+            temp_target.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def should_process(entry: ZipEntry, state: State) -> bool:

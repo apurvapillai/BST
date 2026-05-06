@@ -1,11 +1,11 @@
 const DefectTrendsTab = (() => {
   const MAGNITUDE_COLOR = "#2563eb";
   const SPEED_COLOR = "rgba(34, 197, 94, 0.5)";
-  const PRESS_COLORS = ["#2563eb", "#f97316", "#10b981", "#e11d48", "#8b5cf6", "#14b8a6", "#f59e0b", "#0ea5e9"];
   const BST_OFF_ANNOTATION_Y = 0.94;
   const REEL_CHANGE_ANNOTATION_Y = 0.78;
   const REFERENCE_CHANGE_ANNOTATION_Y = 0.62;
   const MASK_CHANGE_ANNOTATION_Y = 0.28;
+  const DEFAULT_SELECTED_PRESS_NUMBERS = new Set([5, 6]);
 
   const state = {
     initialized: false,
@@ -116,7 +116,6 @@ const DefectTrendsTab = (() => {
     elements.yMax = document.getElementById("defectTrendsYMax");
     elements.apply = document.getElementById("defectTrendsApply");
     elements.localFilterChips = document.getElementById("defectTrendsLocalFilterChips");
-    elements.combinedSubtitle = document.getElementById("defectTrendsCombinedSubtitle");
     elements.detailSubtitle = document.getElementById("defectTrendsDetailSubtitle");
     elements.showImageDefects = document.getElementById("defectTrendsLegendShowImageDefects");
     elements.showReferenceFlags = document.getElementById("defectTrendsLegendShowReferenceFlags");
@@ -130,7 +129,6 @@ const DefectTrendsTab = (() => {
     elements.maskPrev = document.getElementById("defectTrendsMaskPrev");
     elements.maskNext = document.getElementById("defectTrendsMaskNext");
     elements.maskStatus = document.getElementById("defectTrendsMaskStatus");
-    elements.combinedChart = document.getElementById("defectTrendsCombinedChart");
     elements.machinePanels = document.getElementById("defectTrendsMachinePanels");
     elements.loadingOverlay = document.getElementById("defectTrendsLoadingOverlay");
     elements.loadingText = document.getElementById("defectTrendsLoadingText");
@@ -377,6 +375,7 @@ const DefectTrendsTab = (() => {
 
   function syncSelectionsFromOptions() {
     const validMachineIds = new Set(state.machineOptions.map((machine) => String(machine.machineId)));
+    const hasPriorSelections = state.selections.size > 0;
     Array.from(state.selections.keys()).forEach((machineId) => {
       if (!validMachineIds.has(machineId)) {
         state.selections.delete(machineId);
@@ -387,12 +386,23 @@ const DefectTrendsTab = (() => {
       const current = state.selections.get(machineId);
       const validJobKeys = new Set((machine.jobOptions || []).map((job) => job.value));
       if (!current) {
-        state.selections.set(machineId, { enabled: true, expanded: false, jobKeys: [] });
+        state.selections.set(machineId, {
+          enabled: hasPriorSelections ? false : isDefaultSelectedPress(machine),
+          expanded: false,
+          jobKeys: [],
+        });
         return;
       }
       current.jobKeys = (current.jobKeys || []).filter((jobKey) => validJobKeys.has(jobKey));
       state.selections.set(machineId, current);
     });
+  }
+
+  function isDefaultSelectedPress(machine) {
+    const name = String((machine && machine.machineName) || "");
+    const match = name.match(/(?:press|machine)\s*0*(\d+)/i) || name.match(/\b0*(\d+)\b/);
+    if (!match) return false;
+    return DEFAULT_SELECTED_PRESS_NUMBERS.has(Number(match[1]));
   }
 
   function buildSelectionsPayload() {
@@ -452,7 +462,7 @@ const DefectTrendsTab = (() => {
     }
     if (canSatisfySelectionsFromRawData(selections)) {
       syncDataToCurrentSelections(selections);
-      fetchPatternData(selections);
+      schedulePatternFetch(selections);
       return;
     }
     fetchData(selections);
@@ -500,8 +510,8 @@ const DefectTrendsTab = (() => {
         machines: applySelectionFiltersToMachines((state.rawData && state.rawData.machines) || [], selections),
       };
       state.dataStatus = ((state.data && state.data.machines) || []).length ? "ready" : "empty";
-      await fetchPatternData(selections);
       renderCharts();
+      schedulePatternFetch(selections);
     } catch (error) {
       if (error && error.name === "AbortError") return;
       state.data = null;
@@ -512,6 +522,22 @@ const DefectTrendsTab = (() => {
     } finally {
       hideLoadingOverlay();
     }
+  }
+
+  function schedulePatternFetch(selectionsPayload) {
+    const selections = selectionsPayload || buildSelectionsPayload();
+    if (!state.active || state.optionsStatus !== "ready") return;
+    state.patternStatus = "loading";
+    state.patternError = "";
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(() => {
+        void fetchPatternData(selections);
+      }, { timeout: 500 });
+      return;
+    }
+    window.setTimeout(() => {
+      void fetchPatternData(selections);
+    }, 0);
   }
 
   function applySelectionFiltersToMachines(machines, selectionsPayload) {
@@ -862,19 +888,16 @@ const DefectTrendsTab = (() => {
     if (!elements.selectionSummary) return;
     if (state.optionsStatus === "loading") {
       elements.selectionSummary.textContent = "Loading presses…";
-      if (elements.combinedSubtitle) elements.combinedSubtitle.textContent = "Loading press options…";
       if (elements.detailSubtitle) elements.detailSubtitle.textContent = "Loading press options…";
       return;
     }
     if (state.optionsStatus === "error") {
       elements.selectionSummary.textContent = state.optionsError || "Unable to load defect trend options.";
-      if (elements.combinedSubtitle) elements.combinedSubtitle.textContent = "Options request failed.";
       if (elements.detailSubtitle) elements.detailSubtitle.textContent = "Options request failed.";
       return;
     }
     if (!state.machineOptions.length) {
       elements.selectionSummary.textContent = "No presses with defect data in the selected window.";
-      if (elements.combinedSubtitle) elements.combinedSubtitle.textContent = "No presses available for the selected time window.";
       if (elements.detailSubtitle) elements.detailSubtitle.textContent = "No presses available for the selected time window.";
       return;
     }
@@ -892,11 +915,6 @@ const DefectTrendsTab = (() => {
         ? `${enabledMachines.length} presses selected · ${selectedJobs} job overrides active`
         : `${enabledMachines.length} presses selected · all jobs included`;
     elements.selectionSummary.textContent = summary;
-    if (elements.combinedSubtitle) {
-      elements.combinedSubtitle.textContent = enabledMachines.length
-        ? `Magnitude value by feet across ${formatCount(enabledMachines.length, "selected press")}.`
-        : "Select at least one press to view the combined defect trend.";
-    }
     if (elements.detailSubtitle) {
       elements.detailSubtitle.textContent = enabledMachines.length
         ? `Each selected press plotted with magnitude, severity, and speed delta on the same feet axis.`
@@ -989,94 +1007,8 @@ const DefectTrendsTab = (() => {
 
   function renderCharts() {
     const machines = ((state.data && state.data.machines) || []).filter((machine) => (machine.points || []).length);
-    renderCombinedChart(machines);
     renderMachinePanels(machines);
     renderEventNavigator(machines);
-  }
-
-  function renderCombinedChart(machinesInput = null) {
-    if (!elements.combinedChart) return;
-    if (state.dataStatus === "loading") {
-      elements.combinedChart.innerHTML = '<div class="delta-trends-empty">Loading combined defect trend…</div>';
-      return;
-    }
-    if (state.dataStatus === "error") {
-      elements.combinedChart.innerHTML = `<div class="delta-trends-empty">${escapeHtml(state.dataError || "Unable to load defect trend data.")}</div>`;
-      return;
-    }
-    const machines = Array.isArray(machinesInput)
-      ? machinesInput
-      : ((state.data && state.data.machines) || []).filter((machine) => (machine.points || []).length);
-    if (!machines.length) {
-      elements.combinedChart.innerHTML = '<div class="delta-trends-empty">No defect points available for the current filter state.</div>';
-      return;
-    }
-    const traces = machines
-      .map((machine, index) => buildCombinedTrace(machine, PRESS_COLORS[index % PRESS_COLORS.length]))
-      .flat()
-      .filter(Boolean);
-    const chartNode = resetChartHost(elements.combinedChart, "defectTrendsCombinedPlot");
-    window.Plotly.react(chartNode, traces, buildChartLayout({
-      xTitle: "Feet",
-      yTitle: "Severity Value",
-      xRange: resolveFullXRangeFromTraces(traces),
-      yRange: resolveYRangeFromValues(traces.flatMap((trace) => (Array.isArray(trace && trace.y) ? trace.y : []))),
-      showLegend: true,
-    }), getPlotConfig());
-    bindCombinedLegendSync(chartNode);
-  }
-
-  function buildCombinedTrace(machine, color) {
-    const series = buildMachineSeries(machine);
-    if (!series.x.length) return null;
-    const legendGroup = `machine-${machine.machineId}`;
-    return [
-      {
-        x: series.x,
-        y: series.severity,
-        mode: "lines",
-        name: machine.machineName || `Press ${machine.machineId}`,
-        legendgroup: legendGroup,
-        line: { color, width: 2.4, shape: "linear" },
-        hoverinfo: "skip",
-        connectgaps: false,
-      },
-      {
-        x: series.hoverX,
-        y: series.hoverSeverity,
-        text: series.severityHover,
-        mode: "markers",
-        name: machine.machineName || `Press ${machine.machineId}`,
-        legendgroup: legendGroup,
-        marker: { color, size: 10, opacity: 0.001 },
-        hovertemplate: "%{text}<extra></extra>",
-        showlegend: false,
-      },
-    ];
-  }
-
-  function bindCombinedLegendSync(target) {
-    if (!target || typeof target.on !== "function") return;
-    if (typeof target.removeAllListeners === "function") {
-      target.removeAllListeners("plotly_legendclick");
-    }
-    target.on("plotly_legendclick", (event) => {
-      const trace = event && event.data && event.data[event.curveNumber];
-      if (!trace) return false;
-      const group = trace.legendgroup || "";
-      if (!group || !Array.isArray(target.data)) return false;
-      const nextVisible = trace.visible === "legendonly" ? true : "legendonly";
-      const indices = [];
-      target.data.forEach((candidate, index) => {
-        if ((candidate && candidate.legendgroup) === group) {
-          indices.push(index);
-        }
-      });
-      if (indices.length && window.Plotly && typeof window.Plotly.restyle === "function") {
-        window.Plotly.restyle(target, { visible: nextVisible }, indices);
-      }
-      return false;
-    });
   }
 
   function renderMachinePanels(machinesInput = null) {
@@ -1807,7 +1739,7 @@ const DefectTrendsTab = (() => {
     if (!host || !machine) return;
     const machineId = String(machine && machine.machineId || "");
     const analyzer = getMachinePatternData(machineId);
-    if (state.patternStatus === "loading" && !analyzer) {
+    if ((state.patternStatus === "idle" || state.patternStatus === "loading") && !analyzer) {
       host.innerHTML = '<div class="delta-trends-empty">Loading defect pattern analyzer…</div>';
       return;
     }
@@ -3209,7 +3141,7 @@ const DefectTrendsTab = (() => {
   function buildVisibleMachineStats(machine) {
     const reels = Array.isArray(machine && machine.reels) ? machine.reels : [];
     const points = Array.isArray(machine && machine.points) ? machine.points : [];
-    const visibleDefects = points.filter((point) => pointIsVisible(point));
+    const visibleDefects = points.filter((point) => pointIsPlottable(point));
     const visibleReelIds = new Set(visibleDefects.map((point) => String(point && point.reelId || "")).filter(Boolean));
     const visibleJobs = new Set(
       reels
@@ -3243,7 +3175,7 @@ const DefectTrendsTab = (() => {
     reels.forEach((reel) => {
       const reelId = String(reel && reel.reelId || "");
       const reelPoints = (pointsByReel.get(reelId) || [])
-        .filter((point) => pointIsVisible(point))
+        .filter((point) => pointIsPlottable(point))
         .slice()
         .sort((a, b) => {
           const af = Number(a && a.feetFromReelStart);
@@ -3288,7 +3220,7 @@ const DefectTrendsTab = (() => {
     reels.forEach((reel) => {
       const reelId = String(reel && reel.reelId || "");
       const reelPoints = (pointsByReel.get(reelId) || [])
-        .filter((point) => pointIsVisible(point))
+        .filter((point) => pointIsPlottable(point))
         .slice()
         .sort((a, b) => {
           const af = Number(a && a.feetFromReelStart);
@@ -3342,7 +3274,7 @@ const DefectTrendsTab = (() => {
     reels.forEach((reel) => {
       const reelId = String(reel && reel.reelId || "");
       const reelPoints = (pointsByReel.get(reelId) || [])
-        .filter((point) => pointIsVisible(point))
+        .filter((point) => pointIsPlottable(point))
         .slice()
         .sort((a, b) => {
           const af = Number(a && a.feetFromReelStart);
@@ -4029,7 +3961,7 @@ const DefectTrendsTab = (() => {
       reelPoints.forEach((point) => {
         const localFeet = Number(point && point.feetFromReelStart);
         const xValue = cumulativeFeet + (Number.isFinite(localFeet) ? localFeet : 0);
-        const visible = pointIsVisible(point);
+        const visible = pointIsPlottable(point);
         const severityValue = visible ? valueOrNull(point && point.severityValue) : 0;
         x.push(xValue);
         severity.push(0);
@@ -4104,7 +4036,7 @@ const DefectTrendsTab = (() => {
       reelPoints.forEach((point) => {
         const localFeet = Number(point && point.feetFromReelStart);
         const xValue = cumulativeFeet + (Number.isFinite(localFeet) ? localFeet : 0);
-        if (pointIsVisible(point)) {
+        if (pointIsPlottable(point)) {
           visibleReelDefectCount += 1;
           const localBinStart = Math.floor(Math.max(Number.isFinite(localFeet) ? localFeet : 0, 0) / binSize) * binSize;
           cumulativeVisibleByLocalBin.set(localBinStart, visibleReelDefectCount);
@@ -4361,23 +4293,6 @@ const DefectTrendsTab = (() => {
     return [resolvedMin, resolvedMax];
   }
 
-  function resolveFullXRangeFromTraces(traces) {
-    const values = [];
-    (Array.isArray(traces) ? traces : []).forEach((trace) => {
-      (trace && Array.isArray(trace.x) ? trace.x : []).forEach((value) => {
-        const numeric = Number(value);
-        if (Number.isFinite(numeric)) values.push(numeric);
-      });
-    });
-    if (!values.length) return null;
-    let max = values[0];
-    values.forEach((value) => {
-      if (value > max) max = value;
-    });
-    return [0, max];
-  }
-
-
   function scaleSeriesToBottomBand(valuesInput, yRange, pct = 0.2) {
     const values = Array.isArray(valuesInput) ? valuesInput : [];
     if (!Array.isArray(yRange) || yRange.length < 2) {
@@ -4469,6 +4384,10 @@ const DefectTrendsTab = (() => {
   function pointIsBaseVisible(point) {
     if (state.showImageDefects) return !!(point && point.imageSrc);
     return true;
+  }
+
+  function pointIsPlottable(point) {
+    return !!point;
   }
 
   function pointIsVisible(point) {
@@ -5015,7 +4934,7 @@ const DefectTrendsTab = (() => {
   function countVisibleDefectsForReel(machine, reelId) {
     const target = String(reelId || "");
     return (Array.isArray(machine && machine.points) ? machine.points : []).filter((point) => {
-      return String(point && point.reelId || "") === target && pointIsVisible(point);
+      return String(point && point.reelId || "") === target && pointIsPlottable(point);
     }).length;
   }
 
@@ -5054,20 +4973,6 @@ const DefectTrendsTab = (() => {
     return host;
   }
 
-  function resetChartHost(container, id) {
-    if (!container) return null;
-    const existing = container.querySelector(`#${id}`);
-    if (existing && window.Plotly && typeof window.Plotly.purge === "function") {
-      try {
-        window.Plotly.purge(existing);
-      } catch (error) {
-        console.debug("[Dashboard Defect Trends] purge skipped", error);
-      }
-    }
-    container.innerHTML = `<div id="${id}" class="delta-trends-chart"></div>`;
-    return container.querySelector(`#${id}`);
-  }
-
   function showLoadingOverlay(message) {
     if (!elements.loadingOverlay) return;
     loadingOverlayCount += 1;
@@ -5087,9 +4992,6 @@ const DefectTrendsTab = (() => {
   function resizeAllCharts() {
     if (!window.Plotly || !state.active) return;
     const charts = [];
-    if (elements.combinedChart) {
-      charts.push(...elements.combinedChart.querySelectorAll(".js-plotly-plot"));
-    }
     if (elements.machinePanels) {
       charts.push(...elements.machinePanels.querySelectorAll(".js-plotly-plot"));
     }

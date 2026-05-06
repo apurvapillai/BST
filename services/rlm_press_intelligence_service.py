@@ -25,7 +25,7 @@ ISSUE_CLASSES = {
 
 @dataclass(frozen=True)
 class PressIntelligenceFilters:
-    """Normalized filters used by the read-only Press Intelligence aggregate."""
+    """Normalized filters used by the read-only RLM Overview aggregate."""
 
     start: datetime
     end: datetime
@@ -34,7 +34,7 @@ class PressIntelligenceFilters:
 
 
 class RLMPressIntelligenceService:
-    """Read-only aggregate service for the RLM Press Intelligence page.
+    """Read-only aggregate service for the RLM Overview page.
 
     This service intentionally does not import or call RLMLiveService because that
     service owns live alert scanning/config concerns. This module should only run
@@ -42,6 +42,18 @@ class RLMPressIntelligenceService:
     """
 
     repeat_length_service = RLMRepeatLengthService()
+
+    def _trend_filters(self, filters: PressIntelligenceFilters) -> PressIntelligenceFilters:
+        """Keep overview filters intact while giving trends enough history."""
+        trend_start = datetime.combine((filters.end - timedelta(days=9)).date(), datetime.min.time())
+        if filters.start <= trend_start:
+            trend_start = filters.start
+        return PressIntelligenceFilters(
+            start=trend_start,
+            end=filters.end,
+            job=filters.job,
+            min_feet=filters.min_feet,
+        )
 
     def get_press_intelligence(self, filters: PressIntelligenceFilters) -> Dict[str, Any]:
         """Build the full executive payload for press-level RLM comparison.
@@ -57,16 +69,32 @@ class RLMPressIntelligenceService:
             reels = self._get_reels(session, filters)
             reel_ids = [row.reel_db_id for row in reels]
             repeat_length = self._get_repeat_length_batch(session, reel_ids)
+            trend_filters = self._trend_filters(filters)
+            if trend_filters.start == filters.start and trend_filters.end == filters.end:
+                trend_reels = reels
+                trend_repeat_length = repeat_length
+            else:
+                trend_reels = self._get_reels(session, trend_filters)
+                trend_reel_ids = [row.reel_db_id for row in trend_reels]
+                trend_repeat_length = self._get_repeat_length_batch(session, trend_reel_ids)
 
         reel_metrics = self._compute_reel_metrics(
             reels,
             repeat_length,
         )
+        trend_reel_metrics = (
+            reel_metrics
+            if trend_reels is reels
+            else self._compute_reel_metrics(
+                trend_reels,
+                trend_repeat_length,
+            )
+        )
         press_metrics = self._aggregate_press_metrics(reel_metrics)
         comparisons = self._build_comparisons(press_metrics)
         self._annotate_rank_explanations(press_metrics, comparisons)
         category_leaderboards = self._build_category_leaderboards(press_metrics)
-        category_trends = self._build_category_trends(reel_metrics)
+        category_trends = self._build_category_trends(trend_reel_metrics)
 
         return {
             "decisionCards": self._build_decision_cards(press_metrics, comparisons),
@@ -76,7 +104,7 @@ class RLMPressIntelligenceService:
             "categoryTrends": category_trends,
             "comparisons": comparisons,
             "heatmap": self._build_heatmap(press_metrics, category_leaderboards),
-            "trend": self._build_trend(reel_metrics),
+            "trend": self._build_trend(trend_reel_metrics),
             "outlierQueue": [],
             "outliers": [],
             "metadata": {
@@ -84,6 +112,8 @@ class RLMPressIntelligenceService:
                 "end": filters.end.isoformat(),
                 "job": filters.job,
                 "minFeet": filters.min_feet,
+                "trendStart": trend_filters.start.isoformat(),
+                "trendEnd": trend_filters.end.isoformat(),
                 "readOnly": True,
                 "notes": [
                     "Repeat-length quality uses the shared segmented tolerance evaluator for every reel.",
@@ -207,6 +237,7 @@ class RLMPressIntelligenceService:
             oob_count = int(reel_repeat.get("oobPointCount") or 0)
             avg_delta = reel_repeat.get("avgDelta")
             delta_std = reel_repeat.get("deltaStd")
+            delta_sum, delta_sum_sq = self._delta_moments(avg_delta, delta_std, delta_count)
             oob_point_pct = reel_summary.get("bad_point_pct")
             estimated_bad_feet_pct = reel_summary.get("bad_point_pct")
             estimated_bad_feet = reel_summary.get("estimated_bad_feet")
@@ -247,8 +278,8 @@ class RLMPressIntelligenceService:
                     "avgDelta": avg_delta,
                     "avgAbsDelta": reel_repeat.get("avgAbsDelta"),
                     "deltaStd": delta_std,
-                    "deltaSum": None,
-                    "deltaSumSq": None,
+                    "deltaSum": delta_sum,
+                    "deltaSumSq": delta_sum_sq,
                     "oobPointPct": round(oob_point_pct, 3) if oob_point_pct is not None else None,
                     "estimatedBadFeetPct": round(estimated_bad_feet_pct, 3) if estimated_bad_feet_pct is not None else None,
                     "estimatedBadFeet": round(estimated_bad_feet, 3) if estimated_bad_feet is not None else None,
@@ -869,9 +900,8 @@ class RLMPressIntelligenceService:
         """Build compact daily category trends from selected reel metrics.
 
         The payload is derived from the same in-memory reel metrics as the rest
-        of the page. "All" mode includes stacked per-press daily segments for
-        each category, while individual press mode includes one daily bar series
-        per category plus a short operator-readable summary.
+        of the page. Both plant and individual press mode return one daily
+        series per category plus a short operator-readable summary.
         """
         categories = [
             {
@@ -1072,16 +1102,21 @@ class RLMPressIntelligenceService:
                 "headline": "No usable trend data",
                 "detail": category.get("description", ""),
             }
-        first = values[0]
-        last = values[-1]
-        average = sum(values) / len(values)
+        recent_values = values[-10:]
+        first = recent_values[0]
+        last = recent_values[-1]
+        average = sum(recent_values) / len(recent_values)
+        delta = last - first
         direction_text = self._trend_direction_text(first, last, category.get("direction"))
         scope = "Plant" if all_mode else "Selected press"
+        day_count = len(recent_values)
         return {
-            "headline": f"{scope} {direction_text}",
+            "headline": f"{scope} {direction_text} over {day_count} days",
             "detail": (
-                f"Window average {self._format_trend_value(category['key'], average)}. "
-                f"Latest day {self._format_trend_value(category['key'], last)}. "
+                f"{day_count}-day average {self._format_trend_value(category['key'], average)}. "
+                f"Moved from {self._format_trend_value(category['key'], first)} to "
+                f"{self._format_trend_value(category['key'], last)} "
+                f"({self._format_signed_trend_delta(category['key'], delta)}). "
                 f"{category.get('description', '')}"
             ),
         }
@@ -1094,7 +1129,27 @@ class RLMPressIntelligenceService:
         lower_better = direction != "higher_better"
         worsened = delta > 0 if lower_better else delta < 0
         verb = "worsened" if worsened else "improved"
-        return f"{verb} from first to last day"
+        return verb
+
+    def _format_signed_trend_delta(self, key: str, value: float) -> str:
+        """Format a first-to-last trend delta with a visible sign."""
+        magnitude = abs(float(value))
+        sign = "+" if value > 0 else "-" if value < 0 else ""
+        if key == "monitoring_coverage":
+            return f"{sign}{self._format_coverage(magnitude)}"
+        if key == "bad_feet_pct":
+            return f"{sign}{magnitude:.1f} pts"
+        if key == "bad_feet":
+            return f"{sign}{self._format_feet(magnitude)}"
+        if key == "total_feet":
+            return f"{sign}{self._format_feet(magnitude)}"
+        if key in {"delta_variation", "delta_drift"}:
+            return f"{sign}{magnitude:.3f} mm"
+        if key == "speed_instability":
+            return f"{sign}{self._format_speed_swing(magnitude)}"
+        if key == "tolerance_changes":
+            return f"{sign}{magnitude:.0f} changes"
+        return f"{sign}{magnitude:.2f}"
 
     def _format_trend_value(self, key: str, value: Optional[float]) -> str:
         """Format a category trend value with operator-friendly units."""
@@ -1262,6 +1317,23 @@ class RLMPressIntelligenceService:
         mean = total / count
         variance = max((total_sq / count) - (mean * mean), 0.0)
         return round(sqrt(variance), 3)
+
+    def _delta_moments(
+        self,
+        avg_delta: Optional[float],
+        delta_std: Optional[float],
+        delta_count: int,
+    ) -> Tuple[Optional[float], Optional[float]]:
+        """Reconstruct delta sum and sum of squares from per-reel mean/stddev.
+
+        RLMRepeatLengthService exposes mean and population stddev, not raw
+        moments. For combining reels, sum = n * mean and sumsq = n * (std^2 + mean^2).
+        """
+        if delta_count <= 0 or avg_delta is None:
+            return None, None
+        mean = float(avg_delta)
+        std = float(delta_std or 0.0)
+        return mean * delta_count, delta_count * ((std * std) + (mean * mean))
 
     def _compute_reel_outlier_score(
         self,

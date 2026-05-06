@@ -175,7 +175,7 @@
       } catch (err) {
         if (currentRequest !== requestToken) return;
         payload = null;
-        errorMessage = err && err.message ? err.message : "Failed to load Reference Check.";
+        errorMessage = err && err.message ? err.message : "Failed to load Compare References.";
         setViewState("error");
       } finally {
         LoadingOverlay.hide();

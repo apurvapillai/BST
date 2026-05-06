@@ -10,6 +10,7 @@
   const TOL_CHANGE_BAND_TEXT = "#92400e";
   const COLORS = ["#2563eb", "#f97316", "#10b981", "#e11d48", "#8b5cf6", "#14b8a6", "#f59e0b", "#0ea5e9"];
   const JOB_COLORS = ["#0ea5e9", "#f97316", "#34d399", "#f43f5e", "#a855f7", "#14b8a6", "#f59e0b", "#6366f1", "#ec4899", "#22d3ee"];
+  const DEFAULT_SELECTED_PRESS_NUMBERS = new Set([5, 6]);
   const state = {
     defaultStart: "",
     defaultEnd: "",
@@ -282,7 +283,7 @@
       const payload = await readJsonResponse(response, "delta-trends options");
       if (requestToken !== optionsRequestToken) return;
       const normalized = normalizeOptionsResponse(payload);
-      console.info("[RLM Delta Trends] options response count:", normalized.machines.length);
+      console.info("[RLM Trends] options response count:", normalized.machines.length);
       state.machineOptions = normalized.machines;
       state.machineOptionIndex = buildMachineOptionIndex(normalized.machines);
       state.optionsStatus = "ready";
@@ -309,7 +310,7 @@
       state.rawDataCoverage = new Map();
       state.optionsStatus = "error";
       state.optionsError = error && error.message ? error.message : "Unable to load delta trend options.";
-      console.error("[RLM Delta Trends] options load failed", error);
+      console.error("[RLM Trends] options load failed", error);
       renderMachineSelector();
       renderSelectionSummary();
       renderGlobalFilterChips();
@@ -472,17 +473,25 @@
   function reconcileSelections() {
     const nextSelections = new Map();
     const previous = state.selections || new Map();
+    const hasPreviousSelections = previous.size > 0;
     state.machineOptions.forEach((machine) => {
       const key = String(machine.machineId);
       const prior = previous.get(key);
       const validJobValues = new Set((machine.jobOptions || []).map((job) => job.value));
       nextSelections.set(key, {
-        enabled: prior ? prior.enabled !== false : true,
+        enabled: prior ? prior.enabled !== false : hasPreviousSelections ? false : isDefaultSelectedPress(machine),
         expanded: prior ? !!prior.expanded : false,
         jobKeys: prior ? (prior.jobKeys || []).filter((value) => validJobValues.has(value)) : [],
       });
     });
     state.selections = nextSelections;
+  }
+
+  function isDefaultSelectedPress(machine) {
+    const name = String((machine && machine.machineName) || "");
+    const match = name.match(/(?:press|machine)\s*0*(\d+)/i) || name.match(/\b0*(\d+)\b/);
+    if (!match) return false;
+    return DEFAULT_SELECTED_PRESS_NUMBERS.has(Number(match[1]));
   }
 
   function renderMachineSelector() {
@@ -678,14 +687,14 @@
     if (dataAbortController) dataAbortController.abort();
     dataAbortController = new AbortController();
     showLoadingOverlay("Reloading delta trends…");
-    console.info("[RLM Delta Trends] selected press count after action:", enabledSelections.length);
+    console.info("[RLM Trends] selected press count after action:", enabledSelections.length);
     const payload = {
       start: state.start,
       end: state.end,
       min_feet: state.minFeet,
       selections: nextSelectionsPayload,
     };
-    console.info("[RLM Delta Trends] outgoing data request payload:", payload);
+    console.info("[RLM Trends] outgoing data request payload:", payload);
     try {
       state.dataStatus = "loading";
       state.dataError = "";
@@ -711,7 +720,7 @@
       state.data = null;
       state.dataStatus = "error";
       state.dataError = error && error.message ? error.message : "Unable to load delta trend data.";
-      console.error("[RLM Delta Trends] data load failed", error);
+      console.error("[RLM Trends] data load failed", error);
       renderCharts();
     } finally {
       hideLoadingOverlay();
@@ -792,7 +801,7 @@
     try {
       window.Plotly.purge(node);
     } catch (error) {
-      console.warn("[RLM Delta Trends] failed to purge Plotly node", error);
+        console.warn("[RLM Trends] failed to purge Plotly node", error);
     }
   }
 
@@ -844,7 +853,7 @@
       try {
         window.Plotly.Plots.resize(node);
       } catch (error) {
-        console.warn("[RLM Delta Trends] failed to resize Plotly chart", error);
+        console.warn("[RLM Trends] failed to resize Plotly chart", error);
       }
     });
   }
@@ -2155,7 +2164,7 @@
       payload = null;
     }
     if (!response.ok) {
-      console.error(`[RLM Delta Trends] ${label} response error`, {
+      console.error(`[RLM Trends] ${label} response error`, {
         status: response.status,
         statusText: response.statusText,
         payload,

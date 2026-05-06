@@ -40,7 +40,7 @@
     const hash = window.location.hash.replace("#", "") || "overview";
     const pending = getPendingDashboardTab();
     let activeTab = pending;
-    if (path.startsWith("/dashboard") && !path.startsWith("/dashboard/live")) {
+    if (path.startsWith("/dashboard")) {
       activeTab = hash || "overview";
     }
     const links = document.querySelectorAll(".sidebar-link");
@@ -59,20 +59,12 @@
       } else if (route === "rlm-detail") {
         isActive =
           path.startsWith("/rlm") &&
-          !path.startsWith("/rlm/live") &&
           !path.startsWith("/rlm/press-intelligence") &&
-          !path.startsWith("/rlm/job-comparison") &&
           !path.startsWith("/rlm/delta-trends");
-      } else if (route === "rlm-live") {
-        isActive = path.startsWith("/rlm/live");
       } else if (route === "rlm-press-intelligence") {
         isActive = path.startsWith("/rlm/press-intelligence");
-      } else if (route === "rlm-job-comparison") {
-        isActive = path.startsWith("/rlm/job-comparison");
       } else if (route === "rlm-delta-trends") {
         isActive = path.startsWith("/rlm/delta-trends");
-      } else if (route === "dashboard-live") {
-        isActive = path.startsWith("/dashboard/live");
       } else if (route === "status-overview") {
         isActive = path.startsWith("/statusOverview");
       } else if (route === "assistant") {

@@ -33,7 +33,6 @@ from db.models import (
 )
 from db.rlm_connection import RLMSessionLocal
 from db.rlm_models import RLMMachine as RLMDbMachine, RLMMonitoring as RLMDbMonitoring, RLMReel as RLMDbReel
-from services.dashboard_live_service import DashboardLiveService
 from services.rlm_reel_footage import compute_reel_feet_from_range
 from services.rlm_reel_footage import MM_PER_FOOT
 from routes.assistant import build_assistant_chat_response
@@ -80,7 +79,6 @@ REFERENCE_CHECK_COLOR_DOMINANT_WEIGHT = 0.22
 REFERENCE_CHECK_ALIGNMENT_LIGHT_WEIGHT = 0.06
 
 dashboard_bp = Blueprint("dashboard", __name__)
-dashboard_live_service = DashboardLiveService()
 rlm_assistant_service = RLMAssistantService()
 
 
@@ -1477,85 +1475,6 @@ def dashboard_rlm_assistant_chat():
     if not isinstance(payload, dict):
         return jsonify({"error": "Invalid JSON payload."}), 400
     return jsonify(build_assistant_chat_response(payload, service=rlm_assistant_service))
-
-
-@dashboard_bp.route("/live")
-def dashboard_live_home():
-    with SessionLocal() as session:
-        machines = session.query(Machine).order_by(Machine.name.asc()).all()
-    return render_template(
-        "dashboard_live.html",
-        machines=machines,
-    )
-
-
-@dashboard_bp.route("/live/api/overview")
-def dashboard_live_overview():
-    raw_machine_ids = request.args.getlist("machine_id")
-    machine_ids: List[int] = []
-    for raw in raw_machine_ids:
-        try:
-            value = int(raw)
-        except (TypeError, ValueError):
-            continue
-        if value not in machine_ids:
-            machine_ids.append(value)
-    lookback_hours = request.args.get("lookback_hours", type=int)
-    if lookback_hours is None:
-        lookback_hours = request.args.get("window_hours", type=int)
-    try:
-        payload = dashboard_live_service.get_live_payload(
-            machine_ids=machine_ids or None,
-            lookback_hours=lookback_hours,
-        )
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    return jsonify(payload)
-
-
-@dashboard_bp.route("/live/api/alerts")
-def dashboard_live_alerts():
-    status = request.args.get("status")
-    machine_id = request.args.get("machine_id", type=int)
-    lookback_hours = request.args.get("lookback_hours", type=int)
-    alerts = dashboard_live_service.get_alerts(status=status, machine_id=machine_id, lookback_hours=lookback_hours)
-    return jsonify({"alerts": alerts})
-
-
-@dashboard_bp.route("/live/api/alerts/<int:alert_id>/acknowledge", methods=["POST"])
-def dashboard_live_acknowledge(alert_id: int):
-    payload = request.get_json(silent=True) or {}
-    acknowledged_by = (payload.get("acknowledged_by") or "control-room").strip() or "control-room"
-    ok = dashboard_live_service.acknowledge_alert(alert_id, acknowledged_by)
-    if not ok:
-        return jsonify({"ok": False, "message": "Alert not found"}), 404
-    return jsonify({"ok": True})
-
-
-@dashboard_bp.route("/live/api/alerts/<int:alert_id>/unacknowledge", methods=["POST"])
-def dashboard_live_unacknowledge(alert_id: int):
-    ok = dashboard_live_service.unacknowledge_alert(alert_id)
-    if not ok:
-        return jsonify({"ok": False, "message": "Alert not found"}), 404
-    return jsonify({"ok": True})
-
-
-@dashboard_bp.route("/live/api/alerts/acknowledge_all", methods=["POST"])
-def dashboard_live_acknowledge_all():
-    payload = request.get_json(silent=True) or {}
-    status = payload.get("status")
-    acknowledged_by = (payload.get("acknowledged_by") or "control-room").strip() or "control-room"
-    machine_id = payload.get("machine_id")
-    try:
-        machine_id_value = int(machine_id)
-    except (TypeError, ValueError):
-        machine_id_value = None
-    count = dashboard_live_service.acknowledge_all_alerts(
-        acknowledged_by,
-        status=status,
-        machine_id=machine_id_value,
-    )
-    return jsonify({"acknowledged": count})
 
 
 @dashboard_bp.route("/api/filters")
@@ -5270,7 +5189,7 @@ def api_defect_drivers():
                 previous_record = record
 
         timeline = []
-        for record in sorted(reel_records, key=lambda item: item["time_sort"]):
+        for record in sorted(reel_records, key=lambda item: item["time_sort"], reverse=True):
             record["type_breakdown"] = [
                 {
                     "name": cls,

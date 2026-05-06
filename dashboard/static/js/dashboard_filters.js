@@ -1273,7 +1273,7 @@
       }
       const message =
         targetTab === "job"
-          ? "Select a job to access the Job Explorer."
+          ? "Select a job to access the Reel Explorer."
           : "Select a job to access this tab.";
       let hint = jobCard.querySelector(".job-required-hint");
       if (!hint) {

@@ -177,7 +177,6 @@ tbody tr:hover {
 }
 
 .app-shell,
-.rlm-live-shell,
 .insights-shell {
   padding: 24px clamp(8px, 1vw, 16px);
   width: 100%;
@@ -671,7 +670,6 @@ body.sidebar-collapsed .theme-toggle-text {
 .filters,
 .rlm-panel,
 .insights-panel,
-.rlm-live-shell,
 .last-review {
   background: var(--surface);
   border: 1px solid var(--border);

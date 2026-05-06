@@ -120,12 +120,12 @@
 
     <!-- Tabs -->
     <div class="tabs tabs-muted" id="tabNav" aria-label="Defects sections">
-      <button type="button" class="tab tab-active" data-tab="overview">Overview</button>
-      <button type="button" class="tab" data-tab="job">Job Explorer</button>
-      <button type="button" class="tab" data-tab="defect-trends">Defect Trends</button>
-      <button type="button" class="tab" data-tab="qc-review">QC Review</button>
-      <button type="button" class="tab" data-tab="reference-check">Reference Check</button>
-      <button type="button" class="tab" data-tab="defect-drivers">Defect Drivers</button>
+      <button type="button" class="tab tab-active" data-tab="overview">Press Overview</button>
+      <button type="button" class="tab" data-tab="job">Reel Explorer</button>
+      <button type="button" class="tab" data-tab="defect-trends">BST Trends</button>
+      <button type="button" class="tab" data-tab="qc-review">View Defects</button>
+      <button type="button" class="tab" data-tab="reference-check">Compare References</button>
+      <button type="button" class="tab" data-tab="defect-drivers">BST Timeline</button>
     </div>
     <div class="filter-chips hidden" id="defectLocalChips"></div>
 
@@ -270,12 +270,12 @@
       </div>
     </section>
 
-    <!-- Job Explorer Tab -->
+    <!-- Reel Explorer Tab -->
     <section id="tab-job" class="tab-content hidden">
       <div class="job-insights" id="jobInsights">
         <div class="job-insights-bar">
           <div class="job-insights-copy">
-            <p>Job Explorer Insights</p>
+            <p>Reel Explorer Insights</p>
             <small>Summary cards are computed from the full filtered and qualifying reel set, not just the current page.</small>
           </div>
           <div class="job-coverage-stats">
@@ -377,13 +377,13 @@
       </div>
     </section>
 
-    <!-- Defect Drivers Tab -->
+    <!-- BST Timeline Tab -->
     <section id="tab-defect-drivers" class="tab-content hidden">
       <div class="drivers-page">
         <div class="drivers-shell">
           <div class="drivers-header">
             <div>
-              <p class="kpi-section__title">Defect Drivers</p>
+              <p class="kpi-section__title">BST Timeline</p>
               <small>Trace normalized defect swings against process changes, reference churn, mask edits, speed shifts, and reel-length context.</small>
             </div>
             <div class="drivers-header__legend" id="defectDriversLegend"></div>
@@ -402,7 +402,7 @@
             <div class="drivers-section__header">
               <div>
                 <p class="kpi-section__title">Event Timeline</p>
-                <small>Reels are ordered chronologically and annotated with the main drivers that changed around each defect-rate movement.</small>
+                <small>Reels are ordered newest first and annotated with the main drivers that changed around each defect-rate movement.</small>
               </div>
               <div class="job-coverage-filter">
                 <label for="driversMinReelLengthInput">Min ft.</label>
@@ -581,21 +581,8 @@
         <section class="delta-trends-panel">
           <div class="delta-trends-panel__header">
             <div>
-              <p class="delta-trends-panel__eyebrow">Cross-Press Comparison</p>
-              <h2>Combined Defect Trend</h2>
-            </div>
-            <p class="delta-trends-panel__subtitle" id="defectTrendsCombinedSubtitle">All selected presses in one view.</p>
-          </div>
-          <div class="delta-trends-chart-card">
-            <div id="defectTrendsCombinedChart" class="delta-trends-chart"></div>
-          </div>
-        </section>
-
-        <section class="delta-trends-panel">
-          <div class="delta-trends-panel__header">
-            <div>
               <p class="delta-trends-panel__eyebrow">Press Detail</p>
-              <h2>Per-Press Defect Trends</h2>
+              <h2>Per-Press BST Trends</h2>
             </div>
             <p class="delta-trends-panel__subtitle" id="defectTrendsDetailSubtitle">Each selected press includes defect count, reel position, recurring-defect groups, and a pattern analyzer across reels.</p>
           </div>
@@ -982,7 +969,7 @@
       <div class="reference-check-page" id="referenceCheckPage">
         <section class="reference-check-hero">
           <div>
-            <p class="kpi-section__title">Reference Check</p>
+            <p class="kpi-section__title">Compare References</p>
             <small>Compare one baseline reference image against every other reference captured for the current job to spot likely template changes and defect-related shifts.</small>
           </div>
           <div class="reference-check-hero__meta" id="referenceCheckJobMeta">

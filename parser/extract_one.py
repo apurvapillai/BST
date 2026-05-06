@@ -23,6 +23,7 @@ STATIC_ROOT = os.path.join("dashboard", "static")
 # Images live under: dashboard/static/images/<machine_name>/<YYYY-MM-DD>/{defects,reference}/...
 DASHBOARD_IMG_DIR = os.path.join(STATIC_ROOT, "images")
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png")
+_MACHINE_ID_CACHE: Dict[str, int] = {}
 
 
 def _ensure_day_dirs(
@@ -284,12 +285,16 @@ def extract_one(
             time_end = parse_datetime(end_node.attrib["date"], end_node.attrib["time"])
 
         with Session(engine) as session:
-            machine = session.query(Machine).filter_by(name=machine_name).first()
-            if not machine:
+            machine_id = _MACHINE_ID_CACHE.get(machine_name)
+            if machine_id is None:
+                machine_id = session.query(Machine.machine_id).filter_by(name=machine_name).scalar()
+                if machine_id is not None:
+                    _MACHINE_ID_CACHE[machine_name] = int(machine_id)
+            if machine_id is None:
                 raise ValueError(f"Machine {machine_name} not found in DB")
 
             exists = session.query(Reel).filter_by(
-                machine_id=machine.machine_id,
+                machine_id=machine_id,
                 order_number=order_number,
                 job_name=job_name,
                 reel_start=reel_start,
@@ -304,7 +309,7 @@ def extract_one(
                 return
 
             reel = Reel(
-                machine_id=machine.machine_id,
+                machine_id=machine_id,
                 reel_code=reel_code,
                 order_number=order_number,
                 job_name=job_name,
@@ -353,8 +358,9 @@ def extract_one(
                 final_end_time=time_end,
                 final_end_format=reel_end,
             )
+            inspection_rows = []
             for iv in insp_intervals:
-                session.add(
+                inspection_rows.append(
                     InspectionPhase(
                         reel_id=reel.reel_id,
                         phase=iv["phase"],
@@ -365,6 +371,8 @@ def extract_one(
                         refimgid=iv.get("refimgid"),
                     )
                 )
+            if inspection_rows:
+                session.bulk_save_objects(inspection_rows)
 
             # Minimal mode stops here
             if import_mode == "minimal":
@@ -379,6 +387,7 @@ def extract_one(
             # BST data modes below
             # -------------------------
 
+            sensitivity_rows = []
             for sset in root.findall("inspection/sensitivitysets/set"):
                 set_name = sset.attrib.get("id")
                 if set_name != "sId_mmx_stand":
@@ -390,7 +399,7 @@ def extract_one(
                     warn = float(val.attrib.get("warnthres", "0") or 0)
                     text = (val.text or "").strip()
                     threshold = None if text.upper() == "INF" else float(text or 0)
-                    session.add(
+                    sensitivity_rows.append(
                         SensitivitySet(
                             reel_id=reel.reel_id,
                             set_name=set_name,
@@ -400,7 +409,10 @@ def extract_one(
                             warn_threshold=warn,
                         )
                     )
+            if sensitivity_rows:
+                session.bulk_save_objects(sensitivity_rows)
 
+            defect_rows = []
             for defect in root.findall(".//defect"):
                 class_node = defect.find("class")
                 class_name = class_node.attrib.get("name") if class_node is not None else None
@@ -437,7 +449,7 @@ def extract_one(
                     coords_payload.append({"x": x_vals, "y": y_vals})
                 coords_value = coords_payload or None
 
-                session.add(
+                defect_rows.append(
                     Defect(
                         reel_id=reel.reel_id,
                         class_name=class_name,
@@ -449,6 +461,8 @@ def extract_one(
                         coords_json=coords_value,
                     )
                 )
+            if defect_rows:
+                session.bulk_save_objects(defect_rows)
 
             if effective_save_reference_images and reference_img_dir and image_zf is not None:
                 ref_entries: List[Dict[str, Optional[str]]] = []
@@ -485,6 +499,7 @@ def extract_one(
 
                 seen_ref_members = set()
                 used_ref_filenames = set()
+                reference_rows = []
                 for ref in ref_entries:
                     member = find_image_member(image_members, ref.get("path"))
                     if not member:
@@ -508,7 +523,7 @@ def extract_one(
                         continue
                     image_src_rel = safe_join_relpath(target_path)
 
-                    session.add(
+                    reference_rows.append(
                         ReferenceImage(
                             reel_id=reel.reel_id,
                             filename=basename,
@@ -516,7 +531,10 @@ def extract_one(
                             format=ref.get("format"),
                         )
                     )
+                if reference_rows:
+                    session.bulk_save_objects(reference_rows)
 
+            mask_rows = []
             for m in root.findall(".//masks//mask"):
                 props = dict(m.attrib)
                 prop_node = m.find(".//properties")
@@ -545,7 +563,7 @@ def extract_one(
                 except Exception:
                     fmt_val = None
 
-                session.add(
+                mask_rows.append(
                     Mask(
                         reel_id=reel.reel_id,
                         xml_id=props.get("id") or m.attrib.get("id"),
@@ -556,6 +574,8 @@ def extract_one(
                         format_value=fmt_val,
                     )
                 )
+            if mask_rows:
+                session.bulk_save_objects(mask_rows)
 
             session.commit()
             image_bits = []

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RLM Delta Trends</title>
+  <title>RLM Trends</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/rlm_delta_trends.css') }}">
   <script defer src="https://cdn.plot.ly/plotly-latest.min.js"></script>
@@ -14,7 +14,7 @@
     <div class="app-main">
       <div class="app-shell">
         {% set header_eyebrow = 'ProcessGuard AI - Five Star Management' %}
-        {% set header_title = 'RLM Delta Trends' %}
+        {% set header_title = 'RLM Trends' %}
         {% include 'partials/app_header.html' %}
 
         <main class="rlm-delta-trends-app"
@@ -172,7 +172,7 @@
             <div class="delta-trends-panel__header">
               <div>
                 <p class="delta-trends-panel__eyebrow">Press Detail</p>
-                <h2>Per-Press Delta Trends</h2>
+                <h2>Per-Press RLM Trends</h2>
               </div>
               <p class="delta-trends-panel__subtitle" id="deltaTrendsDetailSubtitle">Each selected press rendered with its own filtered delta view.</p>
             </div>
