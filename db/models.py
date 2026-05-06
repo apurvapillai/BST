@@ -211,7 +211,6 @@ class RLMMonitoring(Base):
     reel_id = Column(Integer, ForeignKey("reels.reel_id", ondelete="CASCADE"), index=True)
 
     timestamp = Column(DateTime, index=True)
-    format_value = Column(DECIMAL(10, 2))
     curlength = Column(DECIMAL(10, 3))
     webspeed = Column(DECIMAL(10, 3))
 
@@ -235,6 +234,27 @@ class ReelReview(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     reel = relationship("Reel", back_populates="reviews")
+
+
+# -----------------------
+# HeatmapRegion
+# -----------------------
+class HeatmapRegion(Base):
+    __tablename__ = "heatmap_regions"
+
+    region_id = Column(Integer, primary_key=True, autoincrement=True)
+    job_name = Column(String(100), nullable=False, index=True)
+    machine_id = Column(Integer, ForeignKey("machines.machine_id", ondelete="SET NULL"), nullable=True, index=True)
+    weight_pct = Column(Integer, nullable=False)
+    x0 = Column(DECIMAL(10, 6), nullable=False)
+    y0 = Column(DECIMAL(10, 6), nullable=False)
+    x1 = Column(DECIMAL(10, 6), nullable=False)
+    y1 = Column(DECIMAL(10, 6), nullable=False)
+    coords_json = Column(JSON)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    machine = relationship("Machine")
 
 
 # -----------------------
