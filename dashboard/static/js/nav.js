@@ -67,6 +67,8 @@
         isActive = path.startsWith("/rlm/delta-trends");
       } else if (route === "status-overview") {
         isActive = path.startsWith("/statusOverview");
+      } else if (route === "bst-change-flags") {
+        isActive = path.startsWith("/bst/change-flags");
       } else if (route === "assistant") {
         isActive = path.startsWith("/assistant");
       } else if (route === "insights") {

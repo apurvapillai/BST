@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BST Change Flags</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/bst_change_flags.css') }}">
+</head>
+<body>
+  <div class="app-layout">
+    {% include 'partials/sidebar.html' %}
+    <div class="app-main">
+      <div class="app-shell">
+        {% set header_eyebrow = 'ProcessGuard AI - Five Star Management' %}
+        {% set header_title = 'BST Change Flags' %}
+        {% include 'partials/app_header.html' %}
+
+        <main class="change-flags-shell" id="changeFlagsShell">
+          <section class="change-flags-toolbar">
+            <div class="change-flags-legend" aria-label="Flag legend">
+              <span><i class="legend-dot legend-dot--changed"></i>Changed</span>
+              <span><i class="legend-dot legend-dot--unchanged"></i>No change</span>
+              <span><i class="legend-dot legend-dot--missing"></i>No comparison</span>
+            </div>
+            <div class="change-flags-refresh" id="changeFlagsRefresh">Loading...</div>
+          </section>
+
+          <section class="change-flags-grid" id="changeFlagsGrid" aria-live="polite"></section>
+
+          <dialog class="change-ref-modal" id="changeRefModal">
+            <div class="change-ref-modal__header">
+              <div>
+                <h2 id="changeRefModalTitle">Reference Images</h2>
+                <p id="changeRefModalSubtitle"></p>
+              </div>
+              <button type="button" class="change-ref-modal__close" id="changeRefModalClose" aria-label="Close reference images">×</button>
+            </div>
+            <div class="change-ref-modal__body" id="changeRefModalBody"></div>
+          </dialog>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/nav.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/bst_change_flags.js') }}"></script>
+</body>
+</html>

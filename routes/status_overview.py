@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, render_template, request
 
+from services.bst_change_flags_service import BSTChangeFlagsService
 from services.status_overview_service import StatusOverviewService
 
 status_overview_bp = Blueprint("status_overview", __name__)
 service = StatusOverviewService()
+change_flags_service = BSTChangeFlagsService()
 
 
 def _request_actor(payload: dict) -> str:
@@ -23,9 +25,19 @@ def status_overview_home():
     return render_template("status_overview.html")
 
 
+@status_overview_bp.route("/bst/change-flags")
+def bst_change_flags_home():
+    return render_template("bst_change_flags.html")
+
+
 @status_overview_bp.route("/statusOverview/api/overview")
 def status_overview_api():
     return jsonify(service.get_board_payload())
+
+
+@status_overview_bp.route("/bst/change-flags/api")
+def bst_change_flags_api():
+    return jsonify(change_flags_service.get_payload())
 
 
 @status_overview_bp.route("/statusOverview/api/overview/refresh", methods=["POST"])
