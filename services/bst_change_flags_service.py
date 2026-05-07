@@ -73,7 +73,7 @@ class BSTChangeFlagsService:
             )
 
         return {
-            "generatedAt": datetime.utcnow().isoformat(),
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
             "rows": rows,
             "legend": [
                 {"key": "changed", "label": "Changed"},

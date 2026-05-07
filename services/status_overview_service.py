@@ -136,7 +136,7 @@ class StatusOverviewService:
             row.resolved_comment = comment
             row.is_active = False
             session.commit()
-        return True, "Marked as Make Ready."
+        return True, "Marked as Make Ready / Splice / Sample."
 
     def _ensure_tables(self) -> None:
         StatusOverviewAlert.__table__.create(bind=engine, checkfirst=True)
@@ -373,7 +373,7 @@ class StatusOverviewService:
             state = "healthy"
             is_alertable = False
             if auto_make_ready:
-                title = "Make Ready"
+                title = "Make Ready / Splice / Sample"
                 source = "SYSTEM"
                 state = "make-ready"
             elif minutes_since_activity is None or minutes_since_activity >= STALE_NO_REEL_MINUTES:
@@ -459,7 +459,7 @@ class StatusOverviewService:
                     if candidate_preview and self._should_suppress_reopen(existing_row, candidate_preview):
                         active_row = existing_row
                         if existing_row and existing_row.alert_state == "MAKE_READY":
-                            workflow_badge = "Make Ready"
+                            workflow_badge = "Make Ready / Splice / Sample"
                             workflow_rank = 2
                             state = "make-ready"
                             status_text = self._card_status_text(state)
@@ -540,7 +540,7 @@ class StatusOverviewService:
 
     def _card_status_text(self, state: str) -> str:
         if state == "make-ready":
-            return "Make Ready"
+            return "Make Ready / Splice / Sample"
         if state == "stale":
             return "Standby"
         if state == "critical":

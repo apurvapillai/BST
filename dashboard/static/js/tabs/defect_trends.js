@@ -5,7 +5,6 @@ const DefectTrendsTab = (() => {
   const REEL_CHANGE_ANNOTATION_Y = 0.78;
   const REFERENCE_CHANGE_ANNOTATION_Y = 0.62;
   const MASK_CHANGE_ANNOTATION_Y = 0.28;
-  const DEFAULT_SELECTED_PRESS_NUMBERS = new Set([5, 6]);
 
   const state = {
     initialized: false,
@@ -68,8 +67,7 @@ const DefectTrendsTab = (() => {
     state.initialized = true;
     state.defaultStart = elements.app.dataset.defaultStart || "";
     state.defaultEnd = elements.app.dataset.defaultEnd || "";
-    state.start = state.defaultStart;
-    state.end = state.defaultEnd;
+    syncTimeFromGlobalFilters();
     state.draftMinFeet = "";
     state.draftBinSize = "500";
     state.draftYMin = "0";
@@ -99,7 +97,32 @@ const DefectTrendsTab = (() => {
     state.active = false;
   }
 
-  function onFiltersUpdated() {}
+  function onFiltersUpdated() {
+    if (!state.active) return;
+    syncTimeFromGlobalFilters();
+    loadOptionsAndData();
+  }
+
+  function getDashboardFilters() {
+    if (typeof Filters === "undefined" || !Filters || typeof Filters.getState !== "function") {
+      return {};
+    }
+    const filters = Filters.getState() || {};
+    return {
+      start: filters.start || "",
+      end: filters.end || "",
+    };
+  }
+
+  function syncTimeFromGlobalFilters() {
+    const filters = getDashboardFilters();
+    const nextStart = filters.start || state.defaultStart || "";
+    const nextEnd = filters.end || state.defaultEnd || "";
+    state.start = nextStart;
+    state.end = nextEnd;
+    if (elements.start) elements.start.value = state.start;
+    if (elements.end) elements.end.value = state.end;
+  }
 
   function cacheDom() {
     elements.app = document.querySelector(".dashboard-defect-trends-app");
@@ -137,14 +160,24 @@ const DefectTrendsTab = (() => {
   function bindEvents() {
     if (elements.start) {
       elements.start.addEventListener("change", () => {
-        state.start = elements.start.value || state.defaultStart;
+        const nextStart = elements.start.value || state.defaultStart;
+        state.start = nextStart;
+        if (typeof Filters !== "undefined" && Filters && typeof Filters.set === "function") {
+          Filters.set("start", nextStart, { emit: true, updateUrl: true });
+          return;
+        }
         renderGlobalFilterChips();
         loadOptionsAndData();
       });
     }
     if (elements.end) {
       elements.end.addEventListener("change", () => {
-        state.end = elements.end.value || state.defaultEnd;
+        const nextEnd = elements.end.value || state.defaultEnd;
+        state.end = nextEnd;
+        if (typeof Filters !== "undefined" && Filters && typeof Filters.set === "function") {
+          Filters.set("end", nextEnd, { emit: true, updateUrl: true });
+          return;
+        }
         renderGlobalFilterChips();
         loadOptionsAndData();
       });
@@ -323,6 +356,18 @@ const DefectTrendsTab = (() => {
 
   function buildOptionsQuery() {
     const params = new URLSearchParams();
+    const filters = getDashboardFilters();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === "") return;
+      if (Array.isArray(value)) {
+        value.forEach((item) => {
+          if (item === undefined || item === null || item === "") return;
+          params.append(key, item);
+        });
+        return;
+      }
+      params.append(key, value);
+    });
     if (state.start) params.set("start", state.start);
     if (state.end) params.set("end", state.end);
     if (state.minFeet !== null) params.set("min_feet", String(state.minFeet));
@@ -375,7 +420,6 @@ const DefectTrendsTab = (() => {
 
   function syncSelectionsFromOptions() {
     const validMachineIds = new Set(state.machineOptions.map((machine) => String(machine.machineId)));
-    const hasPriorSelections = state.selections.size > 0;
     Array.from(state.selections.keys()).forEach((machineId) => {
       if (!validMachineIds.has(machineId)) {
         state.selections.delete(machineId);
@@ -387,22 +431,18 @@ const DefectTrendsTab = (() => {
       const validJobKeys = new Set((machine.jobOptions || []).map((job) => job.value));
       if (!current) {
         state.selections.set(machineId, {
-          enabled: hasPriorSelections ? false : isDefaultSelectedPress(machine),
+          enabled: true,
           expanded: false,
           jobKeys: [],
         });
         return;
       }
       current.jobKeys = (current.jobKeys || []).filter((jobKey) => validJobKeys.has(jobKey));
+      if (current.enabled === undefined) {
+        current.enabled = true;
+      }
       state.selections.set(machineId, current);
     });
-  }
-
-  function isDefaultSelectedPress(machine) {
-    const name = String((machine && machine.machineName) || "");
-    const match = name.match(/(?:press|machine)\s*0*(\d+)/i) || name.match(/\b0*(\d+)\b/);
-    if (!match) return false;
-    return DEFAULT_SELECTED_PRESS_NUMBERS.has(Number(match[1]));
   }
 
   function buildSelectionsPayload() {
@@ -496,6 +536,7 @@ const DefectTrendsTab = (() => {
         },
         signal: dataAbortController.signal,
         body: JSON.stringify({
+          ...getDashboardFilters(),
           start: state.start,
           end: state.end,
           min_feet: state.minFeet,
@@ -606,6 +647,7 @@ const DefectTrendsTab = (() => {
         },
         signal: patternAbortController.signal,
         body: JSON.stringify({
+          ...getDashboardFilters(),
           start: state.start,
           end: state.end,
           min_feet: state.minFeet,
@@ -958,6 +1000,10 @@ const DefectTrendsTab = (() => {
     if (!removeButton) return;
     const key = removeButton.dataset.chipKey || "";
     if (key === "start") {
+      if (typeof Filters !== "undefined" && Filters && typeof Filters.set === "function") {
+        Filters.set("start", "", { emit: true, updateUrl: true });
+        return;
+      }
       state.start = state.defaultStart;
       if (elements.start) elements.start.value = state.start;
       renderGlobalFilterChips();
@@ -965,6 +1011,10 @@ const DefectTrendsTab = (() => {
       return;
     }
     if (key === "end") {
+      if (typeof Filters !== "undefined" && Filters && typeof Filters.set === "function") {
+        Filters.set("end", "", { emit: true, updateUrl: true });
+        return;
+      }
       state.end = state.defaultEnd;
       if (elements.end) elements.end.value = state.end;
       renderGlobalFilterChips();

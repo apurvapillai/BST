@@ -558,8 +558,8 @@
     const card = cards.find((item) => Number(item.alertId) === Number(alertId));
     if (!card) return;
     card.state = "make-ready";
-    card.statusText = "Make Ready";
-    card.workflowBadge = "Make Ready";
+    card.statusText = "Make Ready / Splice / Sample";
+    card.workflowBadge = "Make Ready / Splice / Sample";
     card.alertId = null;
     markCurrentReelChip(card, "make-ready");
     render();

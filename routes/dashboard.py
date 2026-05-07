@@ -7791,6 +7791,89 @@ def _defect_trends_parse_window(source: Optional[Dict[str, object]] = None) -> T
     return start, end
 
 
+def _defect_trends_source_get(source: object, key: str) -> Optional[object]:
+    if source is None:
+        return None
+    if hasattr(source, "getlist"):
+        values = source.getlist(key)
+        if values:
+            return values[0]
+    if hasattr(source, "get"):
+        try:
+            return source.get(key)
+        except TypeError:
+            pass
+    if isinstance(source, dict):
+        return source.get(key)
+    return None
+
+
+def _defect_trends_source_list(source: object, key: str) -> List[object]:
+    values: List[object] = []
+    if source is None:
+        return values
+    if hasattr(source, "getlist"):
+        values.extend(source.getlist(key) or [])
+    elif isinstance(source, dict):
+        raw_value = source.get(key)
+        if isinstance(raw_value, (list, tuple)):
+            values.extend(list(raw_value))
+        elif raw_value is not None:
+            values.append(raw_value)
+    else:
+        raw_value = _defect_trends_source_get(source, key)
+        if raw_value is not None:
+            values.append(raw_value)
+    if len(values) == 1 and isinstance(values[0], str) and "," in values[0]:
+        return [value.strip() for value in values[0].split(",") if value.strip()]
+    return values
+
+
+def _defect_trends_parse_filters(
+    source: Optional[object] = None,
+    session: Optional[Session] = None,
+) -> Dict[str, Any]:
+    raw_source = source if source is not None else request.args
+    window_start, window_end = _defect_trends_parse_window(raw_source if isinstance(raw_source, dict) else None)
+    machine_id = _normalize_int(_defect_trends_source_get(raw_source, "machine_id"))
+    if not machine_id and session is not None:
+        first_machine = session.query(Machine).order_by(Machine.machine_id.asc()).first()
+        if first_machine:
+            machine_id = first_machine.machine_id
+    if not machine_id:
+        raise ValueError("machine_id is required")
+
+    order_arg = _defect_trends_source_get(raw_source, "order")
+    if order_arg == SENTINEL_NONE:
+        order_value = SENTINEL_NONE
+    elif order_arg:
+        order_value = order_arg
+    else:
+        order_value = None
+
+    reel_codes = [str(code).strip() for code in _defect_trends_source_list(raw_source, "reel_code") if str(code).strip()]
+    if not reel_codes:
+        reel_code = _defect_trends_source_get(raw_source, "reel_code")
+        if reel_code:
+            reel_codes = [str(reel_code).strip()]
+    reel_ids: List[int] = []
+    for raw_id in _defect_trends_source_list(raw_source, "reel_id"):
+        parsed_id = _normalize_int(raw_id)
+        if parsed_id is not None and parsed_id not in reel_ids:
+            reel_ids.append(parsed_id)
+
+    return {
+        "machine_id": machine_id,
+        "start": window_start,
+        "end": window_end,
+        "job": _defect_trends_source_get(raw_source, "job") or None,
+        "order": order_value,
+        "reel_code": reel_codes[0] if reel_codes else None,
+        "reel_codes": reel_codes,
+        "reel_ids": reel_ids,
+    }
+
+
 def _defect_trends_parse_min_feet(value: Optional[object]) -> Optional[float]:
     try:
         parsed = float(value) if value not in {None, ""} else None
@@ -7892,7 +7975,13 @@ def _defect_trends_selection_clause(selections: List[Dict[str, object]]):
     return or_(*machine_clauses) if machine_clauses else None
 
 
-def _build_defect_trend_options(session: Session, start: datetime, end: datetime, min_feet: Optional[float] = None):
+def _build_defect_trend_options(
+    session: Session,
+    start: datetime,
+    end: datetime,
+    min_feet: Optional[float] = None,
+    filters: Optional[Dict[str, Any]] = None,
+):
     defect_reels_subq = (
         session.query(
             Defect.reel_id.label("reel_id"),
@@ -7920,6 +8009,8 @@ def _build_defect_trend_options(session: Session, start: datetime, end: datetime
         .filter(Reel.time_start <= end)
         .filter(Reel.time_end >= start)
     )
+    if filters:
+        query = _apply_reel_filters(query, filters)
     if min_feet is not None:
         query = query.filter(_defect_trends_reel_feet_expr() >= min_feet)
     rows = (
@@ -8717,6 +8808,7 @@ def _build_defect_pattern_analyzer_payload(
     end: datetime,
     min_feet: Optional[float],
     selections: List[Dict[str, object]],
+    filters: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, object]:
     selection_clause = _defect_trends_selection_clause(selections)
     if selection_clause is None:
@@ -8736,6 +8828,8 @@ def _build_defect_pattern_analyzer_payload(
         .filter(selection_clause)
         .filter(defect_exists)
     )
+    if filters:
+        reel_query = _apply_reel_filters(reel_query, filters)
     if min_feet is not None:
         reel_query = reel_query.filter(_defect_trends_reel_feet_expr() >= min_feet)
     reels = reel_query.order_by(Reel.machine_id.asc(), Reel.time_start.asc(), Reel.reel_id.asc()).all()
@@ -9152,6 +9246,7 @@ def _build_defect_trend_payload(
     end: datetime,
     min_feet: Optional[float],
     selections: List[Dict[str, object]],
+    filters: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, object]:
     selection_clause = _defect_trends_selection_clause(selections)
     if selection_clause is None:
@@ -9172,6 +9267,8 @@ def _build_defect_trend_payload(
         .filter(selection_clause)
         .filter(defect_exists)
     )
+    if filters:
+        reel_query = _apply_reel_filters(reel_query, filters)
     if min_feet is not None:
         reel_query = reel_query.filter(_defect_trends_reel_feet_expr() >= min_feet)
     reels = reel_query.order_by(Reel.machine_id.asc(), Reel.time_start.asc(), Reel.reel_id.asc()).all()
@@ -9625,9 +9722,10 @@ def _histogram_from_subquery(session: Session, subquery, column, bins: List[Tupl
 def api_defect_trend_options():
     with SessionLocal() as session:
         try:
-            start, end = _defect_trends_parse_window()
+            filters = _defect_trends_parse_filters(request.args, session)
+            start, end = filters["start"], filters["end"]
             min_feet = _defect_trends_parse_min_feet(request.args.get("min_feet"))
-            return jsonify(_build_defect_trend_options(session, start, end, min_feet))
+            return jsonify(_build_defect_trend_options(session, start, end, min_feet, filters))
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
@@ -9642,10 +9740,11 @@ def api_defect_trend_data():
         return jsonify({"error": "Invalid JSON payload."}), 400
     with SessionLocal() as session:
         try:
-            start, end = _defect_trends_parse_window(payload)
+            filters = _defect_trends_parse_filters(payload, session)
+            start, end = filters["start"], filters["end"]
             min_feet = _defect_trends_parse_min_feet(payload.get("min_feet"))
             selections = _normalize_defect_trend_selections(payload)
-            return jsonify(_build_defect_trend_payload(session, start, end, min_feet, selections))
+            return jsonify(_build_defect_trend_payload(session, start, end, min_feet, selections, filters))
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:
@@ -9660,10 +9759,11 @@ def api_defect_trend_pattern_analyzer():
         return jsonify({"error": "Invalid JSON payload."}), 400
     with SessionLocal() as session:
         try:
-            start, end = _defect_trends_parse_window(payload)
+            filters = _defect_trends_parse_filters(payload, session)
+            start, end = filters["start"], filters["end"]
             min_feet = _defect_trends_parse_min_feet(payload.get("min_feet"))
             selections = _normalize_defect_trend_selections(payload)
-            return jsonify(_build_defect_pattern_analyzer_payload(session, start, end, min_feet, selections))
+            return jsonify(_build_defect_pattern_analyzer_payload(session, start, end, min_feet, selections, filters))
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception as exc:

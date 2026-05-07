@@ -1,7 +1,14 @@
 (function () {
+  const REFRESH_MS = 5 * 60 * 1000;
+
   const galleries = new Map();
   const maskViews = new Map();
   const historyViews = new Map();
+  const state = {
+    refreshTimer: null,
+    refreshRequestSeq: 0,
+    refreshAbortController: null,
+  };
 
   const refs = {
     grid: document.getElementById("changeFlagsGrid"),
@@ -14,17 +21,38 @@
   };
 
   async function loadFlags() {
+    const requestSeq = state.refreshRequestSeq + 1;
+    state.refreshRequestSeq = requestSeq;
+    if (state.refreshAbortController) {
+      state.refreshAbortController.abort();
+    }
+    const controller = new AbortController();
+    state.refreshAbortController = controller;
     try {
-      const res = await fetch("/bst/change-flags/api");
+      const res = await fetch("/bst/change-flags/api", { signal: controller.signal });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const data = await res.json();
+      if (requestSeq !== state.refreshRequestSeq) return;
       render(data);
     } catch (err) {
+      if (err?.name === "AbortError") return;
       if (refs.grid) {
         refs.grid.innerHTML = `<div class="change-flags-empty">Unable to load BST change flags.</div>`;
       }
       if (refs.refresh) refs.refresh.textContent = "Refresh failed";
+    } finally {
+      if (state.refreshAbortController === controller) {
+        state.refreshAbortController = null;
+      }
+      scheduleRefresh();
     }
+  }
+
+  function scheduleRefresh() {
+    if (state.refreshTimer) clearTimeout(state.refreshTimer);
+    state.refreshTimer = window.setTimeout(() => {
+      loadFlags().catch((err) => console.error("Failed to refresh BST change flags", err));
+    }, REFRESH_MS);
   }
 
   function render(data) {

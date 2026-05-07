@@ -11,6 +11,7 @@
   const COLORS = ["#2563eb", "#f97316", "#10b981", "#e11d48", "#8b5cf6", "#14b8a6", "#f59e0b", "#0ea5e9"];
   const JOB_COLORS = ["#0ea5e9", "#f97316", "#34d399", "#f43f5e", "#a855f7", "#14b8a6", "#f59e0b", "#6366f1", "#ec4899", "#22d3ee"];
   const DEFAULT_SELECTED_PRESS_NUMBERS = new Set([5, 6]);
+  const RANGE_STORAGE_KEY = "rlmDeltaTrends.range";
   const state = {
     defaultStart: "",
     defaultEnd: "",
@@ -60,8 +61,9 @@
     cacheDom();
     state.defaultStart = elements.app.dataset.defaultStart || "";
     state.defaultEnd = elements.app.dataset.defaultEnd || "";
-    state.start = state.defaultStart;
-    state.end = state.defaultEnd;
+    const storedRange = loadStoredRange();
+    state.start = storedRange.start || state.defaultStart;
+    state.end = storedRange.end || state.defaultEnd;
     if (elements.start) elements.start.value = state.start;
     if (elements.end) elements.end.value = state.end;
     syncLocalFilterInputs();
@@ -327,8 +329,35 @@
     if (state.start === nextStart && state.end === nextEnd) return;
     state.start = nextStart;
     state.end = nextEnd;
+    persistRange();
     renderGlobalFilterChips();
     loadOptionsAndData();
+  }
+
+  function loadStoredRange() {
+    if (typeof sessionStorage === "undefined") {
+      return { start: "", end: "" };
+    }
+    try {
+      const raw = sessionStorage.getItem(RANGE_STORAGE_KEY);
+      if (!raw) return { start: "", end: "" };
+      const parsed = JSON.parse(raw);
+      return {
+        start: typeof parsed.start === "string" ? parsed.start : "",
+        end: typeof parsed.end === "string" ? parsed.end : "",
+      };
+    } catch (error) {
+      return { start: "", end: "" };
+    }
+  }
+
+  function persistRange() {
+    if (typeof sessionStorage === "undefined") return;
+    try {
+      sessionStorage.setItem(RANGE_STORAGE_KEY, JSON.stringify({ start: state.start, end: state.end }));
+    } catch (error) {
+      // ignore storage failures
+    }
   }
 
   function syncDetailLegendControls() {
