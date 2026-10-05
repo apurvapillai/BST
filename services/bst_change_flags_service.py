@@ -553,7 +553,16 @@ class BSTChangeFlagsService:
                 }
             )
 
-        mask_format = self._mask_format_for_key(current_map, changed_keys[-1]) or self._mask_format_for_key(previous_map, changed_keys[-1])
+        latest_current_mask = max(
+            current_map.values(),
+            key=lambda mask: str(mask.get("timestamp") or ""),
+            default=None,
+        )
+        mask_format = (
+            latest_current_mask.get("format")
+            if latest_current_mask
+            else self._mask_format_for_key(previous_map, changed_keys[-1])
+        )
         before_image = self._reference_for_mask(previous.reference_images, mask_format)
         after_image = self._reference_for_mask(current.reference_images, mask_format)
         return [
@@ -564,12 +573,16 @@ class BSTChangeFlagsService:
                     "before": {
                         "reel": previous.reel_code,
                         "image": self._serialize_reference_image(before_image),
-                        "masks": [self._serialize_mask(previous_map.get(key), key) for key in changed_keys if previous_map.get(key)],
+                        "format_width": _to_float(previous.format_width),
+                        "format_length": _to_float(previous.format_length),
+                        "masks": [self._serialize_mask(mask, key) for key, mask in sorted(previous_map.items())],
                     },
                     "after": {
                         "reel": current.reel_code,
                         "image": self._serialize_reference_image(after_image),
-                        "masks": [self._serialize_mask(current_map.get(key), key) for key in changed_keys if current_map.get(key)],
+                        "format_width": _to_float(current.format_width),
+                        "format_length": _to_float(current.format_length),
+                        "masks": [self._serialize_mask(mask, key) for key, mask in sorted(current_map.items())],
                     },
                     "sequence": sequence,
                 },
@@ -586,6 +599,7 @@ class BSTChangeFlagsService:
                 "sensitivityId": row.sensitivitysetid,
                 "coords": str(row.coords or "").strip(),
                 "format": _rounded(row.format_value),
+                "timestamp": row.timestamp.isoformat() if row.timestamp else None,
             }
         return out
 

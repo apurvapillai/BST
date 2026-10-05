@@ -447,6 +447,16 @@ def extract_one(
                     if not x_vals and not y_vals:
                         continue
                     coords_payload.append({"x": x_vals, "y": y_vals})
+                if not coords_payload:
+                    bounds = parse_float_list(defect.attrib.get("coords"))
+                    if bounds and len(bounds) == 4:
+                        x1, y1, x2, y2 = bounds
+                        coords_payload.append(
+                            {
+                                "x": [x1, x2, x2, x1],
+                                "y": [y1, y1, y2, y2],
+                            }
+                        )
                 coords_value = coords_payload or None
 
                 defect_rows.append(

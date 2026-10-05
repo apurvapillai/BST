@@ -258,22 +258,12 @@
     if (!view || !refs.refModal || !refs.refModalBody) return;
     const current = view.flag.currentReel || "--";
     if (refs.refModalTitle) refs.refModalTitle.textContent = `${view.title} · ${current}`;
-    if (refs.refModalSubtitle) refs.refModalSubtitle.textContent = view.detail.summary || "";
-    const sequence = Array.isArray(view.maskComparison.sequence) ? view.maskComparison.sequence : [];
-    if (sequence.length) {
-      refs.refModalBody.innerHTML = `
-        <div class="change-mask-sequence">
-          ${sequence.map((step) => renderMaskPanel(step.label || "Step", step)).join("")}
-        </div>
-      `;
-    } else {
-      refs.refModalBody.innerHTML = `
-        <div class="change-mask-compare">
-          ${renderMaskPanel("Before", view.maskComparison.before)}
-          ${renderMaskPanel("After", view.maskComparison.after)}
-        </div>
-      `;
-    }
+    if (refs.refModalSubtitle) refs.refModalSubtitle.textContent = "Current mask state on the latest reel";
+    refs.refModalBody.innerHTML = `
+      <div class="change-mask-compare">
+        ${renderMaskPanel("Current", view.maskComparison.after)}
+      </div>
+    `;
     refs.refModal.showModal();
   }
 
@@ -327,11 +317,16 @@
   function renderMaskPanel(title, payload) {
     const image = payload && payload.image;
     const masks = payload && Array.isArray(payload.masks) ? payload.masks : [];
+    const formatWidth = Number(payload && payload.format_width);
+    const formatLength = Number(payload && payload.format_length);
+    const stageStyle = Number.isFinite(formatWidth) && Number.isFinite(formatLength) && formatWidth > 0 && formatLength > 0
+      ? ` style="aspect-ratio:${formatWidth} / ${formatLength}"`
+      : "";
     return `
       <figure class="change-mask-panel">
-        <div class="change-mask-stage">
+        <div class="change-mask-stage"${stageStyle}>
           ${image && image.imageSrc ? `<img src="${escapeAttr(urlForStatic(image.imageSrc))}" alt="${escapeAttr(image.filename || title)}" loading="lazy" decoding="async">` : `<div class="change-mask-stage__blank">No reference image</div>`}
-          ${renderMaskSvg(masks)}
+          ${renderMaskSvg(masks, formatWidth, formatLength)}
         </div>
         <figcaption>
           <strong>${escapeHtml(title)} · ${escapeHtml((payload && payload.reel) || "--")}</strong>
@@ -352,10 +347,14 @@
     `;
   }
 
-  function renderMaskSvg(masks) {
+  function renderMaskSvg(masks, formatWidth, formatLength) {
     const rects = masks.map((mask) => ({ mask, rect: parseMaskRect(mask.coords) })).filter((item) => item.rect);
     if (!rects.length) return "";
-    const bounds = maskBounds(rects.map((item) => item.rect));
+    const hasFormatBounds = Number.isFinite(formatWidth) && Number.isFinite(formatLength)
+      && formatWidth > 0 && formatLength > 0;
+    const bounds = hasFormatBounds
+      ? { x: -formatWidth / 2, y: -formatLength / 2, width: formatWidth, height: formatLength }
+      : maskBounds(rects.map((item) => item.rect));
     return `
       <svg class="change-mask-overlay" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}" preserveAspectRatio="none" aria-hidden="true">
         ${rects.map(({ mask, rect }) => `

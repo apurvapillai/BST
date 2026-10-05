@@ -1405,7 +1405,7 @@
                     <div class="drivers-detail-image-meta">
                       <strong>${Utils.escapeHtml(image.filename || `Reference ${image.order_index || ""}`)}</strong>
                       <span>${Utils.escapeHtml(`Order ${formatNumber(image.order_index || 0)}`)}</span>
-                      <span>${Utils.escapeHtml(formatTime(image.captured_at))}</span>
+                      <span>${image.format !== null && image.format !== undefined ? Utils.escapeHtml(`Format ${formatNumber(image.format, 2)}`) : "Capture position unavailable"}</span>
                     </div>
                   </button>
                 `;
@@ -1428,7 +1428,7 @@
           <div class="drivers-detail-metrics">
             <span>${Utils.escapeHtml(`Reel ID ${formatNumber(detail.reel_id || 0)}`)}</span>
             <span>${Utils.escapeHtml(`${formatNumber(detail.reference_count || 0)} reference images`)}</span>
-            <span>${Utils.escapeHtml(`${formatNumber(detail.repeated_updates || 0)} repeated updates`)}</span>
+            <span>${Utils.escapeHtml(`${formatNumber(detail.repeated_updates || 0)} reference change${Number(detail.repeated_updates || 0) === 1 ? "" : "s"}`)}</span>
           </div>
           ${gallery}
         </div>
@@ -1732,7 +1732,7 @@
               <div class="drivers-reference-viewer__meta">
                 <strong>${Utils.escapeHtml(image.filename || `Reference ${image.order_index || index + 1}`)}</strong>
                 <span>${Utils.escapeHtml(`Order ${formatNumber(image.order_index || 0)}`)}</span>
-                <span>${Utils.escapeHtml(formatTime(image.captured_at))}</span>
+                <span>${image.format !== null && image.format !== undefined ? Utils.escapeHtml(`Format ${formatNumber(image.format, 2)}`) : "Capture position unavailable"}</span>
               </div>
             </article>
           `;

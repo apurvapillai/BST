@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,6 +22,12 @@ DEFAULT_MACHINE_CAPTURE = {
     "import_mode": "full",
     "save_reference_images": True,
     "save_defect_images": False,
+}
+
+Defect_CAPTURE = {
+    "import_mode": "full",
+    "save_reference_images": True,
+    "save_defect_images": True,
 }
 
 MACHINES = [
@@ -49,6 +56,8 @@ CUTOFF_DATE = datetime(2025, 10, 30)
 DEFAULT_COOKIE = "JSESSIONID=abc123xyz; othercookie=value"
 COOKIE_FROM_ENV = os.environ.get("PROTOCOL_COOKIE")
 DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+REVIEW_ARCHIVE_ROOT = DATA_ROOT / "review_archive"
+REVIEW_ARCHIVE_LIMIT = 2
 
 
 # --------------------------------------------------------------------------- #
@@ -89,6 +98,23 @@ def machine_dir(machine_name: str) -> Path:
     path = DATA_ROOT / machine_name
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def archive_review_zip(machine_name: str, zip_path: Path) -> Optional[Path]:
+    archive_path = REVIEW_ARCHIVE_ROOT / machine_name / zip_path.name
+    if archive_path.exists():
+        return archive_path
+
+    archived_count = sum(
+        1 for path in REVIEW_ARCHIVE_ROOT.rglob("*.zip") if path.is_file()
+    ) if REVIEW_ARCHIVE_ROOT.exists() else 0
+    if archived_count >= REVIEW_ARCHIVE_LIMIT:
+        return None
+
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(zip_path, archive_path)
+    print(f"📁 Saved review copy: {archive_path}")
+    return archive_path
 
 
 def state_path(machine_name: str) -> Path:
@@ -287,6 +313,8 @@ def sync_machine(
             else:
                 print(f"⬇️ Downloading {entry.filename} from {machine_name} ...")
                 download_zip(session, entry, target_path)
+
+            archive_review_zip(machine_name, target_path)
 
             print(f"📦 Importing {target_path} ...")
             extract_one(

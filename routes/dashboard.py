@@ -1872,10 +1872,20 @@ def api_overview():
         job_mask_presence: Dict[str, Dict[str, set]] = defaultdict(lambda: {"with": set(), "without": set()})
         job_mask_change_counts: Dict[str, int] = defaultdict(int)
         job_mask_reel_changes: Dict[str, Dict[int, int]] = defaultdict(lambda: defaultdict(int))
-        job_reference_summary_map: Dict[str, Dict[str, int]] = defaultdict(
+        job_reference_summary_map: Dict[Tuple[str, str], Dict[str, int]] = defaultdict(
             lambda: {
                 "reference_changes": 0,
                 "single_reference_reels": 0,
+                "single_reference_change_reels": 0,
+                "multi_reference_reels": 0,
+                "mask_changes": 0,
+                "total_reels": 0,
+            }
+        )
+        daily_reference_summary_map: Dict[Tuple[str, str, str], Dict[str, int]] = defaultdict(
+            lambda: {
+                "reference_changes": 0,
+                "single_reference_change_reels": 0,
                 "multi_reference_reels": 0,
                 "total_reels": 0,
             }
@@ -2116,14 +2126,37 @@ def api_overview():
 
             # Reference image changes
             ordered_refs = _ordered_reference_images(reel.reference_images)
-            reference_summary_entry = job_reference_summary_map[job_display]
+            reference_summary_key = (job_name or SENTINEL_NONE, reel.order_number or SENTINEL_NONE)
+            reference_summary_entry = job_reference_summary_map[reference_summary_key]
+            reel_date = reel.time_start.date().isoformat() if reel.time_start else ""
+            daily_in_range = bool(
+                reel.time_start
+                and window_start.date() <= reel.time_start.date() <= window_end.date()
+            )
+            daily_reference_entry = None
+            if daily_in_range:
+                daily_reference_key = (
+                    reel_date,
+                    job_name or SENTINEL_NONE,
+                    reel.order_number or SENTINEL_NONE,
+                )
+                daily_reference_entry = daily_reference_summary_map[daily_reference_key]
             reference_summary_entry["total_reels"] += 1
+            if daily_reference_entry is not None:
+                daily_reference_entry["total_reels"] += 1
             if ordered_refs:
                 ref_image_count = len(ordered_refs)
                 if ref_image_count == 1:
                     reference_summary_entry["single_reference_reels"] += 1
                 elif ref_image_count > 1:
                     reference_summary_entry["multi_reference_reels"] += 1
+                if ref_image_count == 2:
+                    reference_summary_entry["single_reference_change_reels"] += 1
+                    if daily_reference_entry is not None:
+                        daily_reference_entry["single_reference_change_reels"] += 1
+                if ref_image_count > 1:
+                    if daily_reference_entry is not None:
+                        daily_reference_entry["multi_reference_reels"] += 1
             ref_change_pairs = _reference_change_pairs(ordered_refs)
             reel_operation_counter: Counter = Counter()
             if ref_change_pairs:
@@ -2132,6 +2165,8 @@ def api_overview():
                 job_order_entry["reference_changes"] += change_count
                 job_summary_entry["reference_changes"] += change_count
                 reference_summary_entry["reference_changes"] += change_count
+                if daily_reference_entry is not None:
+                    daily_reference_entry["reference_changes"] += change_count
                 reel_operation_counter[EVENT_REFERENCE] += change_count
                 for previous_ref, new_ref in ref_change_pairs:
                     detail = _reference_change_detail(previous_ref, new_ref)
@@ -2191,6 +2226,7 @@ def api_overview():
                     job_mask_change_counts[job_display] += 1
                     if reel.reel_id is not None:
                         job_mask_reel_changes[job_display][reel.reel_id] += 1
+                    reference_summary_entry["mask_changes"] += 1
                     record_event(
                         job_name,
                         change_time,
@@ -2496,24 +2532,47 @@ def api_overview():
                 }
             )
         job_reference_summary: List[Dict[str, object]] = []
-        for job_display in sorted(job_reference_summary_map.keys()):
-            summary = job_reference_summary_map[job_display]
+        for reference_summary_key in sorted(job_reference_summary_map.keys()):
+            job_key, order_key = reference_summary_key
+            job_display = job_label(None if job_key == SENTINEL_NONE else job_key)
+            order_display = None if order_key == SENTINEL_NONE else order_key
+            summary = job_reference_summary_map[reference_summary_key]
             if not summary:
                 continue
             total_changes = int(summary.get("reference_changes", 0))
             single_reels = int(summary.get("single_reference_reels", 0))
+            single_change_reels = int(summary.get("single_reference_change_reels", 0))
             multi_reels = int(summary.get("multi_reference_reels", 0))
+            mask_changes = int(summary.get("mask_changes", 0))
             total_reels = int(summary.get("total_reels", 0))
-            if total_changes == 0 and single_reels == 0 and multi_reels == 0:
-                continue
             job_reference_summary.append(
                 {
                     "job": job_display,
-                    "job_value": job_value_map.get(job_display, ""),
+                    "job_value": None if job_key == SENTINEL_NONE else job_key,
+                    "order_number": order_display or "",
                     "reference_changes": total_changes,
                     "single_reference_reels": single_reels,
+                    "single_reference_change_reels": single_change_reels,
                     "multi_reference_reels": multi_reels,
+                    "mask_changes": mask_changes,
                     "total_reels": total_reels,
+                }
+            )
+
+        job_reference_daily_summary: List[Dict[str, object]] = []
+        for daily_reference_key in sorted(daily_reference_summary_map.keys()):
+            reel_date, job_key, order_key = daily_reference_key
+            summary = daily_reference_summary_map[daily_reference_key]
+            job_reference_daily_summary.append(
+                {
+                    "date": reel_date,
+                    "job": job_label(None if job_key == SENTINEL_NONE else job_key),
+                    "job_value": None if job_key == SENTINEL_NONE else job_key,
+                    "order_number": "" if order_key == SENTINEL_NONE else order_key,
+                    "reference_changes": int(summary.get("reference_changes", 0)),
+                    "single_reference_change_reels": int(summary.get("single_reference_change_reels", 0)),
+                    "multi_reference_reels": int(summary.get("multi_reference_reels", 0)),
+                    "total_reels": int(summary.get("total_reels", 0)),
                 }
             )
 
@@ -2562,6 +2621,7 @@ def api_overview():
             "job_sensitivity_summary": job_sensitivity_summary,
             "job_mask_summary": job_mask_summary,
             "job_reference_summary": job_reference_summary,
+            "job_reference_daily_summary": job_reference_daily_summary,
         }
         processing_duration = time.perf_counter() - processing_start
         serialize_start = time.perf_counter()
@@ -3166,6 +3226,7 @@ def _serialize_reference_detail(
         "filename": image.filename,
         "image_src": (image.image_src or "").replace("\\", "/"),
         "order_index": order_index,
+        "format": _to_float(image.format),
         "captured_at": reel_time,
     }
 
@@ -4878,7 +4939,8 @@ def api_defect_drivers():
                         "type": "reference_change",
                         "label": DRIVER_EVENT_LABELS["reference_change"],
                         "summary": (
-                            f"{int(record['reference_repeated_updates'] or 0)} repeated updates"
+                            f"{int(record['reference_repeated_updates'] or 0)} reference change"
+                            f"{'s' if int(record['reference_repeated_updates'] or 0) != 1 else ''}"
                             if record["reference_repeated_updates"]
                             else "reference updated within reel"
                         ),

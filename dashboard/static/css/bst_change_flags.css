@@ -716,7 +716,7 @@
 }
 
 .change-mask-stage img {
-  object-fit: contain;
+  object-fit: fill;
 }
 
 .change-mask-stage__blank {

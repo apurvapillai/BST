@@ -661,10 +661,7 @@
       }
 
       if (backgroundImage) {
-        ctx.save();
-        ctx.scale(1, -1);
         ctx.drawImage(backgroundImage, -drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
-        ctx.restore();
         ctx.fillStyle = "rgba(15, 23, 42, 0.03)";
         ctx.fillRect(-drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
       } else {
@@ -737,9 +734,9 @@
         const bucket = bucketForArea(agg.area || 0);
         if (state.disabledBuckets.has(bucket.key)) return;
         ctx.beginPath();
-        ctx.moveTo((agg.xs[0] - centerX) * scale, -(agg.ys[0] - centerY) * scale);
+        ctx.moveTo((agg.xs[0] - centerX) * scale, (agg.ys[0] - centerY) * scale);
         for (let i = 1; i < agg.xs.length; i += 1) {
-          ctx.lineTo((agg.xs[i] - centerX) * scale, -(agg.ys[i] - centerY) * scale);
+          ctx.lineTo((agg.xs[i] - centerX) * scale, (agg.ys[i] - centerY) * scale);
         }
         ctx.closePath();
         ctx.fillStyle = bucket.fill;
@@ -975,10 +972,7 @@
       }
 
       if (backgroundImage) {
-        ctx.save();
-        ctx.scale(1, -1);
         ctx.drawImage(backgroundImage, -drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
-        ctx.restore();
         ctx.fillStyle = "rgba(15, 23, 42, 0.03)";
         ctx.fillRect(-drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
       } else {
@@ -1000,14 +994,18 @@
       ctx.lineTo(0, drawLength / 2);
       ctx.stroke();
 
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(-drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
+      ctx.clip();
       parsed.shapes.forEach((shape) => {
         if (!shape.points.length) return;
         ctx.beginPath();
         const first = shape.points[0];
-        ctx.moveTo((first.x - centerX) * scale, -(first.y - centerY) * scale);
+        ctx.moveTo((first.x - centerX) * scale, (first.y - centerY) * scale);
         for (let i = 1; i < shape.points.length; i += 1) {
           const point = shape.points[i];
-          ctx.lineTo((point.x - centerX) * scale, -(point.y - centerY) * scale);
+          ctx.lineTo((point.x - centerX) * scale, (point.y - centerY) * scale);
         }
         ctx.closePath();
         ctx.fillStyle = MASK_COLOR.fill;
@@ -1016,6 +1014,7 @@
         ctx.lineWidth = 0.9;
         ctx.stroke();
       });
+      ctx.restore();
 
       ctx.restore();
       ctx.fillStyle = "#4a5a7a";

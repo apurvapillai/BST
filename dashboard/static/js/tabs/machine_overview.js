@@ -5,6 +5,8 @@
     let inflightOverviewKey = "";
     let lastRenderedOverviewKey = "";
     let hasRenderedOverview = false;
+    let latestReferenceSummary = [];
+    let latestReferenceExportRows = [];
 
     const pendingReelHydration = new Set();
     const MIN_LENGTH_STORAGE_KEY = "overview.minReelLength";
@@ -270,6 +272,10 @@
         kpiMap[key].push(node);
       });
       setupMinReelLengthControls();
+      const referenceCsvButton = document.getElementById("overviewReferenceCsvButton");
+      if (referenceCsvButton) {
+        referenceCsvButton.addEventListener("click", exportReferenceSummaryCsv);
+      }
       initialized = true;
     }
 
@@ -316,6 +322,9 @@
       const jobEvents = data.job_events || [];
       const jobMetrics = data.job_metrics || [];
       const jobSensitivity = data.job_sensitivity_summary || [];
+      latestReferenceExportRows = Array.isArray(data.job_reference_daily_summary)
+        ? data.job_reference_daily_summary
+        : [];
 
       const jobsTimePct = jobsTime.map((job) => {
         const lengthActive = Number.isFinite(job.length_active) ? job.length_active : 0;
@@ -559,17 +568,20 @@
 
     function renderReferenceLeaders(rankings = []) {
       const container = document.getElementById("overviewReferenceLeaders");
+      latestReferenceSummary = Array.isArray(rankings) ? rankings : [];
       if (!container) return;
       if (!Array.isArray(rankings) || !rankings.length) {
         container.innerHTML = "<div class=\"placeholder\">No reference image data in this window.</div>";
         return;
       }
       container.innerHTML = rankings
-        .map((group) => {
+          .map((group) => {
           const jobValue = group.job_value || "";
+          const orderNumber = group.order_number || "";
           const totalReels = Utils.formatNumber(Number(group.total_reels) || 0);
           const totalChanges = Utils.formatNumber(Number(group.reference_changes) || 0);
-          const singleReels = Utils.formatNumber(Number(group.single_reference_reels) || 0);
+          const maskChanges = Utils.formatNumber(Number(group.mask_changes) || 0);
+          const singleChangeReels = Utils.formatNumber(Number(group.single_reference_change_reels) || 0);
           const multiReels = Utils.formatNumber(Number(group.multi_reference_reels) || 0);
           const rows = `
             <div class="defect-leader__value-row">
@@ -581,8 +593,16 @@
               <strong>${totalChanges}</strong>
             </div>
             <div class="defect-leader__value-row">
-              <span>Reels with 1 reference image</span>
-              <strong>${singleReels}</strong>
+              <span>Order number</span>
+              <strong>${Utils.escapeHtml(orderNumber || "-")}</strong>
+            </div>
+            <div class="defect-leader__value-row">
+              <span>Mask changes</span>
+              <strong>${maskChanges}</strong>
+            </div>
+            <div class="defect-leader__value-row">
+              <span>Reels with 1 reference change</span>
+              <strong>${singleChangeReels}</strong>
             </div>
             <div class="defect-leader__value-row">
               <span>Reels with multiple images</span>
@@ -592,6 +612,50 @@
           return renderAggregateSection(group.job, jobValue, rows, "Reference Images");
         })
         .join("");
+    }
+
+    function csvCell(value) {
+      const text = value === null || value === undefined ? "" : String(value);
+      return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    }
+
+    function exportReferenceSummaryCsv() {
+      if (!latestReferenceExportRows.length) return;
+      const state = Filters && typeof Filters.getState === "function" ? Filters.getState() : {};
+      const machineSelect = document.getElementById("filterMachine");
+      const machine = machineSelect && machineSelect.selectedOptions.length
+        ? machineSelect.selectedOptions[0].textContent.trim()
+        : "";
+      const headers = [
+        "machine",
+        "date",
+        "job_number",
+        "order_number",
+        "total_reels",
+        "total_reference_image_changes",
+        "reels_with_1_reference_image_change",
+        "reels_with_multiple_reference_images",
+      ];
+      const rows = latestReferenceExportRows.map((group) => [
+        machine,
+        group.date || "",
+        group.job || "",
+        group.order_number || "",
+        Number(group.total_reels) || 0,
+        Number(group.reference_changes) || 0,
+        Number(group.single_reference_change_reels) || 0,
+        Number(group.multi_reference_reels) || 0,
+      ]);
+      const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
+      const blob = new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `reference-overview-${state.start || "all"}-to-${state.end || "dates"}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
     }
 
     function renderAggregateSection(jobName, jobValue, list, subtitle) {
