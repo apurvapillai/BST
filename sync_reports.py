@@ -59,6 +59,12 @@ DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 REVIEW_ARCHIVE_ROOT = DATA_ROOT / "review_archive"
 REVIEW_ARCHIVE_LIMIT = 2
 
+# Presses listed here keep a review copy of their next N reels, counted from the first
+# sync after the press is added. The count lives in <press folder>/.review_quota.json,
+# so it does not depend on how many ZIPs are already archived. Delete that file to
+# start a new batch. Presses not listed use REVIEW_ARCHIVE_LIMIT as before.
+REVIEW_ARCHIVE_NEXT = {"Press 5": 5, "Press 9": 5, "Press 7":5, "Press 12": 5,  "Press 14": 5}
+
 
 # --------------------------------------------------------------------------- #
 # Models
@@ -100,9 +106,43 @@ def machine_dir(machine_name: str) -> Path:
     return path
 
 
+def review_quota_path(machine_name: str) -> Path:
+    return REVIEW_ARCHIVE_ROOT / machine_name / ".review_quota.json"
+
+
+def save_review_quota(machine_name: str, remaining: int) -> None:
+    path = review_quota_path(machine_name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump({"remaining": remaining}, handle)
+
+
+def load_review_quota(machine_name: str, initial: int) -> int:
+    path = review_quota_path(machine_name)
+    if not path.exists():
+        save_review_quota(machine_name, initial)
+        return initial
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            return max(int(json.load(handle).get("remaining", 0)), 0)
+    except (ValueError, OSError, AttributeError):
+        return 0
+
+
 def archive_review_zip(machine_name: str, zip_path: Path) -> Optional[Path]:
     archive_path = REVIEW_ARCHIVE_ROOT / machine_name / zip_path.name
     if archive_path.exists():
+        return archive_path
+
+    next_count = REVIEW_ARCHIVE_NEXT.get(machine_name)
+    if next_count is not None:
+        remaining = load_review_quota(machine_name, next_count)
+        if remaining <= 0:
+            return None
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(zip_path, archive_path)
+        save_review_quota(machine_name, remaining - 1)
+        print(f"📁 Saved review copy: {archive_path} ({remaining - 1} left for {machine_name})")
         return archive_path
 
     archived_count = sum(

@@ -1,4 +1,4 @@
-  const Filters = (() => {
+const Filters = (() => {
     const root = document.getElementById("globalFilters");
     const elements = {
       machine: Utils.qs("#filterMachine"),
@@ -166,6 +166,17 @@
         }));
     }
 
+    // Order No. options, newest first, without the "None" placeholder.
+    function getJobNoOptions() {
+      if (!elements.order) return [];
+      return Array.from(elements.order.options || [])
+        .filter((option) => option.value && option.value !== ORDER_NONE)
+        .map((option) => ({
+          value: option.value,
+          label: option.textContent.trim() || option.value,
+        }));
+    }
+
     function hydratePendingReelIds() {
       if (!pendingReelCodes.length || state.reel_ids.length) return;
       const resolved = [];
@@ -300,8 +311,9 @@
       return Boolean(lastOptionsKey && lastOptionsKey === optionsKey());
     }
 
+    // A "job selection" is an Order No. or, for deep links, a Job No. (job name).
     function hasJobSelection() {
-      return Boolean((state.job || "").trim());
+      return Boolean((state.job || "").trim() || (state.order || "").trim());
     }
 
     function setDisabledState(el, disabled, fieldName) {
@@ -316,9 +328,13 @@
     }
 
     function updateDependentFilters() {
-      const disableSecondary = !hasJobSelection();
-      setDisabledState(elements.order, disableSecondary, "order");
-      setDisabledState(elements.reel, disableSecondary, "reel");
+      // Order No. comes first, so it is always available.
+      setDisabledState(elements.order, false, "order");
+      // Job No. lists the jobs in the selected Order No. (a job set by a deep link stays usable).
+      const hasOrderOrJob = Boolean((state.order || "").trim() || (state.job || "").trim());
+      setDisabledState(elements.job, !hasOrderOrJob, "job");
+      // Reel Code needs an Order No. (or a Job No.) first.
+      setDisabledState(elements.reel, !hasJobSelection(), "reel");
     }
 
     function init() {
@@ -380,9 +396,6 @@
       if (elements.start) elements.start.value = state.start || "";
       if (elements.end) elements.end.value = state.end || "";
       if (elements.job) elements.job.value = state.job || "";
-      if (!hasJobSelection()) {
-        state.order = "";
-      }
       if (state.order === ORDER_NONE) {
         ensureOrderOption(ORDER_NONE, "None");
         if (elements.order) elements.order.value = ORDER_NONE;
@@ -568,10 +581,25 @@
           break;
         }
         case "job":
+          // A Job No. is picked inside the selected Order No., so the order stays.
           state.job = value || "";
           if (elements.job) elements.job.value = state.job;
-          state.order = "";
-          if (elements.order) elements.order.value = "";
+          clearReelSelectionState();
+          renderChips();
+          persistFilters({
+            job: state.job,
+            reel_ids: state.reel_ids.slice(),
+          });
+          scheduleOptionsRefresh();
+          break;
+        case "order": {
+          const previousOrder = state.order;
+          state.order = value || "";
+          if (state.order !== previousOrder) {
+            // The job list belongs to the Order No., so start over on the jobs.
+            state.job = "";
+            if (elements.job) elements.job.value = "";
+          }
           clearReelSelectionState();
           renderChips();
           persistFilters({
@@ -581,13 +609,7 @@
           });
           scheduleOptionsRefresh();
           break;
-        case "order":
-          state.order = value || "";
-          clearReelSelectionState();
-          renderChips();
-          persistFilters({ order: state.order, reel_ids: state.reel_ids.slice() });
-          scheduleOptionsRefresh();
-          break;
+        }
         case "reel":
           if (Array.isArray(value)) {
             state.reel_ids = value.map((entry) => `${entry}`.trim()).filter((entry) => entry);
@@ -867,22 +889,23 @@
         case "job":
           state.job = "";
           if (elements.job) elements.job.value = "";
-          state.order = "";
-          if (elements.order) elements.order.value = "";
           clearReelSelectionState();
           renderChips();
           updateDependentFilters();
-          persistFilters({ job: state.job, order: state.order, reel_ids: state.reel_ids.slice() });
+          persistFilters({ job: state.job, reel_ids: state.reel_ids.slice() });
           await refreshOptions(true);
           emit(true);
           break;
         case "order":
           state.order = "";
           if (elements.order) elements.order.value = "";
+          // The job list belongs to the Order No., so it goes with it.
+          state.job = "";
+          if (elements.job) elements.job.value = "";
           clearReelSelectionState();
           renderChips();
           updateDependentFilters();
-          persistFilters({ order: state.order, reel_ids: state.reel_ids.slice() });
+          persistFilters({ job: state.job, order: state.order, reel_ids: state.reel_ids.slice() });
           await refreshOptions(true);
           emit(true);
           break;
@@ -934,12 +957,12 @@
         chips.push({ key: "machine_id", label: `Machine: ${machineText}`, removable: false, className: "machine" });
       }
       // Start/end chips removed per request – keep defaults in FilterState but don't render chips.
-     if (state.job) {
-       chips.push({ key: "job", label: `Job: ${state.job}`, removable: true });
-     }
       if (state.order) {
         const orderLabel = state.order === ORDER_NONE ? "None" : state.order;
-        chips.push({ key: "order", label: `Order: ${orderLabel}`, removable: true });
+        chips.push({ key: "order", label: `Order No.: ${orderLabel}`, removable: true });
+      }
+      if (state.job) {
+        chips.push({ key: "job", label: `Job No.: ${state.job}`, removable: true });
       }
       getSelectedReelEntries().forEach((entry) => {
         if (!entry.id) return;
@@ -980,26 +1003,32 @@
       let needsOptionsRefresh = false;
       switch (field) {
         case "job":
+          // A Job No. is picked inside the selected Order No., so the order stays.
           state.job = value || "";
           if (elements.job) elements.job.value = state.job;
-          state.order = "";
-          if (elements.order) elements.order.value = "";
+          clearReelSelectionState();
+          renderChips();
+          persistFilters({ job: state.job, reel_ids: state.reel_ids.slice() });
+          needsOptionsRefresh = true;
+          break;
+        case "order": {
+          const previousOrder = state.order;
+          state.order = value || "";
+          if (state.order === ORDER_NONE) {
+            ensureOrderOption(ORDER_NONE, "None");
+          }
+          if (state.order !== previousOrder) {
+            // The job list belongs to the Order No., so start over on the jobs.
+            state.job = "";
+            if (elements.job) elements.job.value = "";
+          }
+          if (elements.order) elements.order.value = state.order;
           clearReelSelectionState();
           renderChips();
           persistFilters({ job: state.job, order: state.order, reel_ids: state.reel_ids.slice() });
           needsOptionsRefresh = true;
           break;
-        case "order":
-          state.order = value || "";
-          if (state.order === ORDER_NONE) {
-            ensureOrderOption(ORDER_NONE, "None");
-          }
-          if (elements.order) elements.order.value = state.order;
-          clearReelSelectionState();
-          renderChips();
-          persistFilters({ order: state.order, reel_ids: state.reel_ids.slice() });
-          needsOptionsRefresh = true;
-          break;
+        }
         case "start":
           state.start = value || "";
           if (elements.start) elements.start.value = state.start || "";
@@ -1213,12 +1242,14 @@
         window.Router &&
         typeof window.Router.current === "function" &&
         window.Router.current() !== "overview";
+      // On tabs that need an order, keep the Order No. / Job No. the tab is showing.
       const jobChanged = !shouldKeepJob && Boolean(state.job);
+      const orderChanged = !shouldKeepJob && Boolean(state.order);
       const hadChanges =
         state.start !== nextStart ||
         state.end !== nextEnd ||
         jobChanged ||
-        state.order ||
+        orderChanged ||
         state.reel_ids.length ||
         pendingReelCodes.length;
       state.start = nextStart;
@@ -1226,13 +1257,13 @@
       if (!shouldKeepJob) {
         state.job = "";
         if (elements.job) elements.job.value = "";
+        state.order = "";
+        if (elements.order) elements.order.value = "";
       }
-      state.order = "";
       state.reel_ids = [];
       pendingReelCodes = [];
       if (elements.start) elements.start.value = state.start || "";
       if (elements.end) elements.end.value = state.end || "";
-      if (elements.order) elements.order.value = "";
       syncReelSelect();
       updateDependentFilters();
       renderChips();
@@ -1266,15 +1297,15 @@
     }
 
     function promptJobSelection(targetTab) {
-      const jobCard = elements.job ? elements.job.closest(".filter-card") : null;
+      const jobCard = elements.order ? elements.order.closest(".filter-card") : null;
       if (!jobCard) {
-        window.alert("Select a job before opening this dashboard tab.");
+        window.alert("Select an Order No. before opening this dashboard tab.");
         return;
       }
       const message =
         targetTab === "job"
-          ? "Select a job to access the Reel Explorer."
-          : "Select a job to access this tab.";
+          ? "Select an Order No. to access the Reel Explorer."
+          : "Select an Order No. to access this tab.";
       let hint = jobCard.querySelector(".job-required-hint");
       if (!hint) {
         hint = document.createElement("div");
@@ -1284,8 +1315,8 @@
       hint.textContent = message;
       hint.classList.add("visible");
       jobCard.classList.add("filter-card--attention");
-      if (elements.job) {
-        elements.job.focus();
+      if (elements.order) {
+        elements.order.focus();
       }
       window.requestAnimationFrame(() => {
         setTimeout(() => {
@@ -1309,9 +1340,10 @@
       if (!forcedDisabled.has(field)) return;
       forcedDisabled.delete(field);
       if (elements[field]) {
-        if (field === "order" || field === "reel") {
-          const disableSecondary = !hasJobSelection();
-          setDisabledState(elements[field], disableSecondary, field);
+        if (field === "reel") {
+          setDisabledState(elements[field], !hasJobSelection(), field);
+        } else if (field === "job") {
+          setDisabledState(elements[field], !((state.order || "").trim() || (state.job || "").trim()), field);
         } else {
           setDisabledState(elements[field], false, field);
         }
@@ -1346,5 +1378,6 @@
       clearFieldOverride,
       registerReelMetadata,
       getJobOptions,
+      getJobNoOptions,
     };
   })();

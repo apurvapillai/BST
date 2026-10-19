@@ -222,8 +222,13 @@
         LoadingOverlay.show();
       }
       try {
+        const selectedReelIds = Array.isArray(filtersState.reel_id) ? filtersState.reel_id : [];
+        const selectedReelCodes = Array.isArray(filtersState.reel_code) ? filtersState.reel_code : [];
+        const hasExplicitReelSelection = selectedReelIds.length > 0 || selectedReelCodes.length > 0;
         const extraParams =
-          minReelLengthFilter > 0 ? { min_reel_length: minReelLengthFilter } : {};
+          minReelLengthFilter > 0 && !hasExplicitReelSelection
+            ? { min_reel_length: minReelLengthFilter }
+            : {};
         const fetchPromise = reuseInFlight || Api.get("overview", extraParams, filtersState);
         if (!reuseInFlight) {
           inflightOverviewKey = requestKey;
@@ -1539,6 +1544,7 @@
           }
           break;
         case "mask_applied":
+        case "mask_removed":
           if (Array.isArray(event.details) && event.details.length) {
             const detail = event.details[0];
             const xml = detail.xml_id || "Mask";
@@ -1547,7 +1553,8 @@
               detail.format_value !== undefined && detail.format_value !== null
                 ? Utils.formatNumber(detail.format_value, 2)
                 : "—";
-            let maskLine = `${xml} · Format ${formatVal}`;
+            const action = event.event_type === "mask_removed" ? "Removed" : "Applied";
+            let maskLine = `${action}: ${xml} · Format ${formatVal}`;
             if (sens) maskLine += ` · Sens ${sens}`;
             lines.push(maskLine);
           }

@@ -1,4 +1,4 @@
-  const FETCH_DEBOUNCE_MS = 400;
+const FETCH_DEBOUNCE_MS = 400;
 
   const MM_TO_IN = 25.4;
   const METERS_TO_FEET = 3.28084;
@@ -843,9 +843,25 @@
     function attach(scope, summary) {
       if (!scope || !summary) return;
       const reel = summary.reel || {};
+      const snapshots = Array.isArray(summary.mask_snapshots) ? summary.mask_snapshots : [];
+      const snapshotContainers = scope.querySelectorAll("[data-mask-snapshot-index]");
+      if (snapshots.length && snapshotContainers.length) {
+        snapshotContainers.forEach((container) => {
+          const index = Number(container.dataset.maskSnapshotIndex);
+          const snapshot = snapshots[index];
+          if (snapshot) {
+            attachContainer(container, reel, snapshot.masks || [], summary);
+          }
+        });
+        return;
+      }
       const container = scope.querySelector(`#${domId(reel)}`);
-      if (!container) return;
-      const masks = Array.isArray(summary.masks) ? summary.masks : [];
+      if (container) {
+        attachContainer(container, reel, summary.masks || [], summary);
+      }
+    }
+
+    function attachContainer(container, reel, masks, summary) {
       const key = container.id || domId(reel);
       let state = heatmapState.get(key);
       if (!state) {
@@ -872,8 +888,10 @@
       window.requestAnimationFrame(() => render(container, reel, masks, state));
     }
 
-    function render(container, reel, masks, state) {
-      const parsed = collectMasks(masks);
+    function render(container, reel, masks, state, options = {}) {
+      // options.offscreen: draw a copy at options.width and return the canvas (used by click-to-enlarge)
+      const offscreen = Boolean(options.offscreen);
+      const parsed = collectMasks(masks, Number(reel?.format_length));
       const rawWidth = Number(reel?.format_width);
       const rawLength = Number(reel?.format_length);
       const hasDimensionsOriginal =
@@ -909,41 +927,66 @@
         workingLength = spanLength > 0 ? spanLength : FALLBACK_SIZE / 4;
       }
 
-      container.classList.remove("heatmap-empty");
-      container.innerHTML = "";
+      if (!offscreen) {
+        container.classList.remove("heatmap-empty");
+        container.innerHTML = "";
+      }
 
-      const dpr = window.devicePixelRatio || 1;
-      const availableWidth = container.clientWidth || FALLBACK_SIZE;
+      const dpr = offscreen ? 1 : window.devicePixelRatio || 1;
+      const availableWidth = options.width || container.clientWidth || FALLBACK_SIZE;
       const size = Math.max(PADDING * 4, availableWidth);
+      // padding, text and line widths grow with the canvas, so a large copy looks like the small one
+      const ui = offscreen ? size / 420 : 1;
+      const pad = PADDING * ui;
+
+      const bounds = parsed.bounds;
+      const frameCenterX = hasDimensionsOriginal ? 0 : (bounds.minX + bounds.maxX) / 2 || 0;
+      const frameCenterY = hasDimensionsOriginal ? 0 : (bounds.minY + bounds.maxY) / 2 || 0;
+      const frameMinX = frameCenterX - workingWidth / 2;
+      const frameMaxX = frameCenterX + workingWidth / 2;
+      const frameMinY = frameCenterY - workingLength / 2;
+      const frameMaxY = frameCenterY + workingLength / 2;
+      const viewMinX = hasMaskShapes ? Math.min(frameMinX, bounds.minX) : frameMinX;
+      const viewMaxX = hasMaskShapes ? Math.max(frameMaxX, bounds.maxX) : frameMaxX;
+      const viewMinY = hasMaskShapes ? Math.min(frameMinY, bounds.minY) : frameMinY;
+      const viewMaxY = hasMaskShapes ? Math.max(frameMaxY, bounds.maxY) : frameMaxY;
+      const viewWidth = Math.max(viewMaxX - viewMinX, 1);
+      const viewLength = Math.max(viewMaxY - viewMinY, 1);
+      const viewCenterX = (viewMinX + viewMaxX) / 2;
+      const viewCenterY = (viewMinY + viewMaxY) / 2;
+      // The canvas is only as tall as the picture needs, so it fits the card with no empty bands.
+      const maxCanvasHeight = Math.round(size * 1.25);
+      let scale = (size - pad * 2) / viewWidth;
+      let canvasHeight = Math.ceil(viewLength * scale + pad * 2);
+      if (canvasHeight > maxCanvasHeight) {
+        canvasHeight = maxCanvasHeight;
+        scale = (canvasHeight - pad * 2) / viewLength;
+      }
       const canvas = document.createElement("canvas");
-      canvas.width = size * dpr;
-      canvas.height = size * dpr;
+      canvas.width = Math.round(size * dpr);
+      canvas.height = Math.round(canvasHeight * dpr);
       canvas.style.width = `${size}px`;
-      canvas.style.height = `${size}px`;
+      canvas.style.height = `${canvasHeight}px`;
 
       const ctx = canvas.getContext("2d");
       ctx.scale(dpr, dpr);
 
       ctx.fillStyle = "#f0f4fb";
-      ctx.fillRect(0, 0, size, size);
+      ctx.fillRect(0, 0, size, canvasHeight);
 
-      ctx.save();
-      ctx.translate(size / 2, size / 2);
-
-      const scale = Math.max(workingWidth, workingLength)
-        ? (size - PADDING * 2) / Math.max(workingWidth, workingLength)
-        : 1;
       const drawWidth = workingWidth * scale;
       const drawLength = workingLength * scale;
-      const bounds = parsed.bounds;
-      const centerX = hasDimensionsOriginal ? 0 : (bounds.minX + bounds.maxX) / 2 || 0;
-      const centerY = hasDimensionsOriginal ? 0 : (bounds.minY + bounds.maxY) / 2 || 0;
+      const frameLeft = (frameMinX - viewCenterX) * scale;
+      const frameTop = (frameMinY - viewCenterY) * scale;
+
+      ctx.save();
+      ctx.translate(size / 2, canvasHeight / 2);
 
       let backgroundImage = null;
       if (referenceBackground) {
         if (state.backgroundImage) {
           backgroundImage = state.backgroundImage;
-        } else if (!state.backgroundImageLoading && !state.backgroundImageFailed) {
+        } else if (!offscreen && !state.backgroundImageLoading && !state.backgroundImageFailed) {
           state.backgroundImageLoading = true;
           requestBackgroundImage(referenceBackground, (img) => {
             state.backgroundImageLoading = false;
@@ -972,60 +1015,71 @@
       }
 
       if (backgroundImage) {
-        ctx.drawImage(backgroundImage, -drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
+        ctx.drawImage(backgroundImage, frameLeft, frameTop, drawWidth, drawLength);
         ctx.fillStyle = "rgba(15, 23, 42, 0.03)";
-        ctx.fillRect(-drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
+        ctx.fillRect(frameLeft, frameTop, drawWidth, drawLength);
       } else {
         ctx.fillStyle = "#e1e7f5";
-        ctx.fillRect(-drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
+        ctx.fillRect(frameLeft, frameTop, drawWidth, drawLength);
       }
 
       ctx.strokeStyle = "#4a5a7a";
-      ctx.lineWidth = 1;
-      ctx.strokeRect(-drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
+      ctx.lineWidth = ui;
+      ctx.strokeRect(frameLeft, frameTop, drawWidth, drawLength);
 
       ctx.strokeStyle = "rgba(74, 90, 122, 0.18)";
       ctx.beginPath();
-      ctx.moveTo(-drawWidth / 2, 0);
-      ctx.lineTo(drawWidth / 2, 0);
+      ctx.moveTo(frameLeft, -viewCenterY * scale);
+      ctx.lineTo(frameLeft + drawWidth, -viewCenterY * scale);
       ctx.stroke();
       ctx.beginPath();
-      ctx.moveTo(0, -drawLength / 2);
-      ctx.lineTo(0, drawLength / 2);
+      ctx.moveTo(-viewCenterX * scale, frameTop);
+      ctx.lineTo(-viewCenterX * scale, frameTop + drawLength);
       ctx.stroke();
 
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(-drawWidth / 2, -drawLength / 2, drawWidth, drawLength);
-      ctx.clip();
       parsed.shapes.forEach((shape) => {
         if (!shape.points.length) return;
         ctx.beginPath();
         const first = shape.points[0];
-        ctx.moveTo((first.x - centerX) * scale, (first.y - centerY) * scale);
+        ctx.moveTo((first.x - viewCenterX) * scale, (first.y - viewCenterY) * scale);
         for (let i = 1; i < shape.points.length; i += 1) {
           const point = shape.points[i];
-          ctx.lineTo((point.x - centerX) * scale, (point.y - centerY) * scale);
+          ctx.lineTo((point.x - viewCenterX) * scale, (point.y - viewCenterY) * scale);
         }
         ctx.closePath();
-        ctx.fillStyle = MASK_COLOR.fill;
+        ctx.fillStyle = shape.removed ? "rgba(100, 116, 139, 0.08)" : MASK_COLOR.fill;
         ctx.fill();
-        ctx.strokeStyle = MASK_COLOR.stroke;
-        ctx.lineWidth = 0.9;
+        ctx.strokeStyle = shape.removed ? "rgba(100, 116, 139, 0.9)" : MASK_COLOR.stroke;
+        ctx.lineWidth = 0.9 * ui;
+        ctx.setLineDash(shape.removed ? [4 * ui, 3 * ui] : []);
         ctx.stroke();
       });
-      ctx.restore();
+      ctx.setLineDash([]);
 
       ctx.restore();
       ctx.fillStyle = "#4a5a7a";
-      ctx.font = "12px sans-serif";
+      ctx.font = `${12 * ui}px sans-serif`;
       ctx.textBaseline = "bottom";
       ctx.textAlign = "left";
-      ctx.fillText(`X: ±${Utils.formatNumber(workingWidth / 2, 1)}`, 8, size - 8);
+      ctx.fillText(
+        `X: ${Utils.formatNumber(viewMinX, 1)} to ${Utils.formatNumber(viewMaxX, 1)}`,
+        8 * ui,
+        canvasHeight - 8 * ui
+      );
       ctx.textBaseline = "top";
       ctx.textAlign = "right";
-      ctx.fillText(`Y: ±${Utils.formatNumber(workingLength / 2, 1)}`, size - 8, 8);
+      ctx.fillText(
+        `Y: ${Utils.formatNumber(viewMinY, 1)} to ${Utils.formatNumber(viewMaxY, 1)}`,
+        size - 8 * ui,
+        8 * ui
+      );
 
+      if (offscreen) return canvas;
+
+      // click to enlarge, like the reference images
+      canvas.style.cursor = "zoom-in";
+      canvas.title = "Click to enlarge";
+      canvas.addEventListener("click", () => openLargeFootprint(container, reel, masks, state));
       container.appendChild(canvas);
       if (!hasMaskShapes) {
         const badge = document.createElement("span");
@@ -1041,26 +1095,94 @@
       }
     }
 
-    function collectMasks(masks) {
+    // Redraws the footprint wide (sharp when zoomed) and opens it in the same viewer the reference images use.
+    function openLargeFootprint(container, reel, masks, state) {
+      try {
+        const large = render(container, reel, masks, state, { offscreen: true, width: 1600 });
+        if (large && typeof window.showImageModal === "function") {
+          window.showImageModal(large.toDataURL("image/png"));
+        }
+      } catch (err) {
+        console.error("Could not enlarge the mask footprint", err);
+      }
+    }
+
+    // L = formatlength (mm). Returns the y-ranges of a rectangle once it is wrapped into the image frame [-L/2, L/2].
+    function wrapMaskY(y0, y1, L) {
+      const lo = Math.min(y0, y1), hi = Math.max(y0, y1);
+      const h = hi - lo, half = L / 2;
+      if (h >= L) return [[-half, half]];            // taller than one repeat: full-height strip
+      const start = ((lo + half) % L + L) % L - half;  // shift the start into [-L/2, L/2)
+      const end = start + h;
+      if (end <= half) return [[start, end]];
+      return [[start, half], [-half, end - L]];      // crosses the bottom edge: split in two
+    }
+
+    function isAxisAlignedRect(points) {
+      if (!Array.isArray(points) || points.length !== 4) return false;
+      const xs = new Set(points.map((p) => p.x));
+      const ys = new Set(points.map((p) => p.y));
+      return xs.size === 2 && ys.size === 2;
+    }
+
+    // BST stores some masks with y outside the image frame (a mask wraps around the repeat).
+    // Rectangles are wrapped into the frame so they are drawn where they really sit.
+    function wrapRectPoints(points, formatLength) {
+      const xs = points.map((p) => p.x);
+      const ys = points.map((p) => p.y);
+      const x0 = Math.min(...xs);
+      const x1 = Math.max(...xs);
+      return wrapMaskY(Math.min(...ys), Math.max(...ys), formatLength).map(([y0, y1]) => [
+        { x: x0, y: y0 },
+        { x: x1, y: y0 },
+        { x: x1, y: y1 },
+        { x: x0, y: y1 },
+      ]);
+    }
+
+    function collectMasks(masks, formatLength) {
+      const canWrap = Number.isFinite(formatLength) && formatLength > 0;
       const shapes = [];
       let minX = Infinity;
       let maxX = -Infinity;
       let minY = Infinity;
       let maxY = -Infinity;
+      const removedMasks = new Set(
+        masks
+          .filter((mask) => mask && (mask.event === "removed" || mask.noinspection === false))
+          .map((mask) =>
+            JSON.stringify([
+              mask.xml_id || "",
+              mask.sensitivitysetid || "",
+              mask.coords || "",
+            ])
+          )
+      );
 
       masks.forEach((mask) => {
+        const isRemoval = mask && (mask.event === "removed" || mask.noinspection === false);
+        const removed = Boolean(isRemoval) || removedMasks.has(
+          JSON.stringify([
+            mask?.xml_id || "",
+            mask?.sensitivitysetid || "",
+            mask?.coords || "",
+          ])
+        );
         const polygons = parseMaskCoords(mask?.coords);
         if (!polygons.length) return;
         polygons.forEach((points) => {
           const normalized = points.filter((pt) => Number.isFinite(pt.x) && Number.isFinite(pt.y));
           if (normalized.length < 3) return;
-          normalized.forEach((pt) => {
-            minX = Math.min(minX, pt.x);
-            maxX = Math.max(maxX, pt.x);
-            minY = Math.min(minY, pt.y);
-            maxY = Math.max(maxY, pt.y);
+          const pieces = canWrap && isAxisAlignedRect(normalized) ? wrapRectPoints(normalized, formatLength) : [normalized];
+          pieces.forEach((piece) => {
+            piece.forEach((pt) => {
+              minX = Math.min(minX, pt.x);
+              maxX = Math.max(maxX, pt.x);
+              minY = Math.min(minY, pt.y);
+              maxY = Math.max(maxY, pt.y);
+            });
+            shapes.push({ points: piece, removed });
           });
-          shapes.push({ points: normalized });
         });
       });
 

@@ -85,6 +85,7 @@
           <span>Job ${escapeHtml(reel.jobNumber || "--")}</span>
           <span>${escapeHtml(reel.feet || "--")}</span>
         </div>
+        ${renderReelExplorerLink(reel.reelContext, "Open in Reel Explorer", "change-press-card__reel-link")}
         <div class="change-flag-pair">
           ${renderFlag("RLM Tolerance", row.rlmTolerance)}
           ${renderFlag("BST Tolerance", row.bstSetup)}
@@ -169,10 +170,14 @@
         reelNumber: row.reelNumber || "--",
         summary: summary || "",
         details,
+        reelContext: row.reelContext || null,
       });
     }
-    const tag = hasHistoryView ? "button" : "span";
-    const attrs = hasHistoryView ? ` type="button" data-history-view="${escapeAttr(historyId)}"` : "";
+    const href = !hasHistoryView ? reelExplorerHref(row.reelContext) : "";
+    const tag = hasHistoryView ? "button" : (href ? "a" : "span");
+    const attrs = hasHistoryView
+      ? ` type="button" data-history-view="${escapeAttr(historyId)}"`
+      : (href ? ` href="${escapeAttr(href)}" aria-label="Open reel ${escapeAttr(row.reelNumber || "--")} in Reel Explorer"` : ` tabindex="0"`);
     return `
       <${tag} class="change-card-reel-chip ${escapeAttr(stateClass)}${hasHistoryView ? " change-card-reel-chip--interactive" : ""}"${attrs}>
         ${escapeHtml(row.reelNumber || "--")}
@@ -182,6 +187,7 @@
           <small>Job - ${escapeHtml(row.jobNumber || "--")}</small>
           <small>Feet - ${escapeHtml(row.feet || "--")}</small>
           <small>${escapeHtml(summary || "No tolerance changes")}</small>
+          ${href ? `<small class="change-card-reel-tooltip__action">Click to open in Reel Explorer</small>` : ""}
         </span>
       </${tag}>
     `;
@@ -249,7 +255,7 @@
           </figure>
         `
       )
-      .join("");
+      .join("") + renderDialogReelExplorerLink(gallery.flag.reelContext);
     refs.refModal.showModal();
   }
 
@@ -263,6 +269,7 @@
       <div class="change-mask-compare">
         ${renderMaskPanel("Current", view.maskComparison.after)}
       </div>
+      ${renderDialogReelExplorerLink(view.flag.reelContext)}
     `;
     refs.refModal.showModal();
   }
@@ -276,16 +283,29 @@
     if (refs.refModalSubtitle) refs.refModalSubtitle.textContent = history.summary || "";
     refs.refModalBody.innerHTML = `
       <div class="change-history-view">
-        ${actionable.map((detail, index) => renderHistoryDetail(detail, history.title, history.reelNumber, index)).join("")}
+        ${actionable.map((detail, index) => renderHistoryDetail(
+          detail,
+          history.title,
+          history.reelNumber,
+          index,
+          history.reelContext
+        )).join("")}
       </div>
+      ${renderDialogReelExplorerLink(history.reelContext)}
     `;
     refs.refModal.showModal();
   }
 
-  function renderHistoryDetail(detail, title, reelNumber, index) {
+  function renderHistoryDetail(detail, title, reelNumber, index, reelContext) {
     const images = Array.isArray(detail.images) ? detail.images.filter((image) => image && image.imageSrc) : [];
     const maskComparison = detail.maskComparison || null;
-    const action = renderDetailAction(detail, `${title} · Reel ${reelNumber}`, { currentReel: reelNumber }, `history-${index}`);
+    const action = renderDetailAction(
+      detail,
+      `${title} · Reel ${reelNumber}`,
+      { currentReel: reelNumber, reelContext },
+      `history-${index}`,
+      false
+    );
     return `
       <section class="change-history-view__item">
         <div class="change-history-view__meta">
@@ -298,7 +318,7 @@
     `;
   }
 
-  function renderDetailAction(detail, title, flag, keyPrefix = "") {
+  function renderDetailAction(detail, title, flag, keyPrefix = "", includeExplorerLink = true) {
     const images = Array.isArray(detail.images) ? detail.images.filter((image) => image && image.imageSrc) : [];
     const maskComparison = detail.maskComparison || null;
     let action = "";
@@ -311,7 +331,43 @@
       maskViews.set(maskId, { title, flag, detail, maskComparison });
       action = `<button type="button" class="change-ref-link" data-mask-view="${escapeAttr(maskId)}">View mask</button>`;
     }
-    return action;
+    const explorerLink = includeExplorerLink
+      ? renderReelExplorerLink(flag && flag.reelContext, "Open in Reel Explorer")
+      : "";
+    return `${action}${explorerLink}`;
+  }
+
+  function renderReelExplorerLink(context, label, className = "") {
+    const href = reelExplorerHref(context);
+    if (!href) return "";
+    const extraClass = className ? ` ${escapeAttr(className)}` : "";
+    return `<a class="change-open-reel-link${extraClass}" href="${escapeAttr(href)}">${escapeHtml(label)}</a>`;
+  }
+
+  function reelExplorerHref(context) {
+    if (!context?.reelId || !context?.machineId) return "";
+    const params = new URLSearchParams({
+      open_reel_explorer: "1",
+      machine_id: String(context.machineId),
+      reel_id: String(context.reelId),
+    });
+    if (context.orderNumber) params.set("order", context.orderNumber);
+    if (context.jobName) params.set("job", context.jobName);
+    const startDate = String(context.timeStart || context.timeEnd || "").split("T")[0];
+    const endDate = String(context.timeEnd || context.timeStart || "").split("T")[0];
+    if (startDate) params.set("start", startDate);
+    if (endDate) params.set("end", endDate);
+    return `/dashboard/?${params.toString()}#job-explorer`;
+  }
+
+  function renderDialogReelExplorerLink(context) {
+    const href = reelExplorerHref(context);
+    if (!href) return "";
+    return `
+      <div class="change-ref-modal__reel-action">
+        <a class="change-open-reel-link" href="${escapeAttr(href)}">Click to open in Reel Explorer</a>
+      </div>
+    `;
   }
 
   function renderMaskPanel(title, payload) {
@@ -355,9 +411,19 @@
     const bounds = hasFormatBounds
       ? { x: -formatWidth / 2, y: -formatLength / 2, width: formatWidth, height: formatLength }
       : maskBounds(rects.map((item) => item.rect));
+    // With the repeat length known, wrap each mask into the image frame (a mask crossing the
+    // edge is split in two, one outside the frame lands where it belongs).
+    const drawRects = hasFormatBounds
+      ? rects.flatMap(({ mask, rect }) =>
+          wrapMaskY(rect.y, rect.y + rect.height, formatLength).map(([y0, y1]) => ({
+            mask,
+            rect: { x: rect.x, y: y0, width: rect.width, height: Math.max(y1 - y0, 1) },
+          }))
+        )
+      : rects;
     return `
       <svg class="change-mask-overlay" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}" preserveAspectRatio="none" aria-hidden="true">
-        ${rects.map(({ mask, rect }) => `
+        ${drawRects.map(({ mask, rect }) => `
           <rect
             x="${rect.x}"
             y="${rect.y}"
@@ -370,6 +436,17 @@
         `).join("")}
       </svg>
     `;
+  }
+
+  // L = formatlength (mm). Returns rectangles clipped to the image frame [-L/2, L/2].
+  function wrapMaskY(y0, y1, L) {
+    const lo = Math.min(y0, y1), hi = Math.max(y0, y1);
+    const h = hi - lo, half = L / 2;
+    if (h >= L) return [[-half, half]];            // full-height strip
+    let start = ((lo + half) % L + L) % L - half;  // shift start into [-L/2, L/2)
+    const end = start + h;
+    if (end <= half) return [[start, end]];
+    return [[start, half], [-half, end - L]];      // crosses the bottom edge: split
   }
 
   function parseMaskRect(coords) {

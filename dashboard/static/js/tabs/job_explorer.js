@@ -1,4 +1,4 @@
-  const JobExplorerTab = (() => {
+const JobExplorerTab = (() => {
     let listEl;
     let detailEl;
     let paginationEl;
@@ -271,7 +271,7 @@
               <span>${item.job_name || "No Job"} · ${item.order_number || "No Order"}</span>
               <span>${formatRange(item.time_start, item.time_end)}</span>
             </div>
-            <span class="badge-pill">${Utils.formatMeters(item.meters || 0)}</span>
+            <span class="badge-pill">${Utils.formatMeters(listReelMeters(item))}</span>
           </div>
           <div class="thumb-strip">
             ${renderThumbs(item.ref_images || [])}
@@ -396,10 +396,45 @@
       if (totalNode) {
         totalNode.textContent = Utils.formatNumber(qualifyingCount, 0);
       }
+      renderDefectSummaryCard("jobDefectSummaryCard", insights.defect_summary || {});
       renderCoverageInsightCard("jobBstCoverageCard", insights.bst_coverage || {}, "BST >1% active");
       renderCoverageInsightCard("jobRlmCoverageCard", insights.rlm_coverage || {}, "RLM active");
       renderReferenceSummaryCard("jobReferenceSummaryCard", insights.reference_summary || {});
       renderSensitivitySummaryCard("jobSensitivitySummaryCard", insights.sensitivity_summary || {});
+    }
+
+    function renderDefectSummaryCard(cardId, payload = {}) {
+      const card = document.getElementById(cardId);
+      if (!card) return;
+      const body = card.querySelector(".job-insight-card__body");
+      if (!body) return;
+      const total = Number(payload.total_defects) || 0;
+      const average = Number(payload.average_per_reel) || 0;
+      const belowAverage = Number(payload.reels_below_average) || 0;
+      const aboveAverage = Number(payload.reels_above_average) || 0;
+      body.innerHTML = `
+        <div class="job-insight-kpi">
+          <strong>${Utils.formatNumber(average, 2)}</strong>
+          <span>Average defects per reel</span>
+        </div>
+        <div class="job-insight-breakdown job-insight-breakdown--total">
+          <div>
+            <strong>${Utils.formatNumber(total, 0)}</strong>
+            <span>Total defects</span>
+          </div>
+        </div>
+        <div class="job-insight-breakdown">
+          <div>
+            <strong>${Utils.formatNumber(belowAverage, 0)}</strong>
+            <span>Reels below average</span>
+          </div>
+          <div>
+            <strong>${Utils.formatNumber(aboveAverage, 0)}</strong>
+            <span>Reels above average</span>
+          </div>
+        </div>
+        
+      `;
     }
 
     function renderCoverageInsightCard(cardId, payload = {}, label) {
@@ -633,9 +668,11 @@
     function ensureReferenceBackground(summary) {
       if (!summary || summary.reference_background || summary.referenceBackground) return;
       const images = Array.isArray(summary.reference_images) ? summary.reference_images : [];
-      const first = images.find((img) => img && img.image_src);
-      if (!first) return;
-      const url = urlForStatic(first.image_src);
+      // Reference images arrive in capture order, so the last one is the latest in use.
+      const usable = images.filter((img) => img && img.image_src);
+      const latest = usable[usable.length - 1];
+      if (!latest) return;
+      const url = urlForStatic(latest.image_src);
       summary.reference_background = url;
       summary.referenceBackground = url;
     }
@@ -652,8 +689,11 @@
       const defectsSummary = data.defects_summary || { total: 0, types: 0 };
       const review = data.review || null;
       const classificationValue = normalizeClassification(reel.classification);
+      const reelFeetValue = reelLengthFeet(reel);
       const reelMeters =
-        typeof reel.reel_start === "number" && typeof reel.reel_end === "number"
+        reelFeetValue !== null
+          ? reelFeetValue / 3.28084
+          : typeof reel.reel_start === "number" && typeof reel.reel_end === "number"
           ? reel.reel_end - reel.reel_start
           : null;
       const inReview = Filters.hasReelSelection(reel.reel_id, reel.reel_code);
@@ -695,10 +735,13 @@
         `;
       })();
 
-      const phaseTimeline = renderTimeline(phases, "Inspection timeline");
+      const reelRange = { start: reel.time_start, end: reel.time_end };
+      const reelListItem = state.cachedItems.find((item) => item.reel_id === reel.reel_id);
+      const inactivePct = reelListItem?.phase_mix_pct?.inactive;
+      const defectPositionBar = renderDefectPositionBar(reel, defects, phases, inactivePct);
       const rlmPhaseTimeline =
         rlm.phases && rlm.phases.length
-          ? renderTimeline(rlm.phases, "RLM timeline")
+          ? renderTimeline(rlm.phases, "RLM timeline", reelRange)
           : "<span class='badge'>No RLM phases</span>";
 
       const rlmPoints = rlm.points || [];
@@ -749,25 +792,158 @@
            </table>`
         : "<span class='badge'>No standard sensitivities</span>";
 
+      const sortedMaskEvents = masks
+        .map((mask, index) => ({ mask, index }))
+        .sort((left, right) => {
+          const leftTime = String(left.mask.timestamp || "");
+          const rightTime = String(right.mask.timestamp || "");
+          if (leftTime !== rightTime) return leftTime.localeCompare(rightTime);
+          const leftFormat = Number(left.mask.format_value);
+          const rightFormat = Number(right.mask.format_value);
+          if (Number.isFinite(leftFormat) && Number.isFinite(rightFormat) && leftFormat !== rightFormat) {
+            return leftFormat - rightFormat;
+          }
+          return left.index - right.index;
+        });
+      const pendingMaskApplications = new Map();
+      const maskApplications = new Map();
+      sortedMaskEvents.forEach(({ mask }) => {
+        const signature = JSON.stringify([
+          mask.xml_id || "",
+          mask.sensitivitysetid || "",
+          mask.coords || "",
+        ]);
+        const event = mask.event || (mask.noinspection === false ? "removed" : "applied");
+        if (event === "applied") {
+          pendingMaskApplications.set(signature, mask);
+        } else {
+          const application = pendingMaskApplications.get(signature);
+          if (application) {
+            maskApplications.set(mask, application);
+            pendingMaskApplications.delete(signature);
+          }
+        }
+      });
+      pendingMaskApplications.forEach((application) => {
+        maskApplications.set(application, application);
+      });
+
       const masksTable = masks.length
         ? `<table class="data-table">
-             <thead><tr><th>Timestamp</th><th>XML ID</th><th>Sensitivity</th><th>Coords</th><th>Format</th></tr></thead>
+             <thead><tr><th>Event</th><th>Timestamp</th><th>XML ID</th><th>Sensitivity</th><th>Coords</th><th>Applied for</th><th>Format</th><th>Removed at</th></tr></thead>
              <tbody>
                ${masks
                  .map(
-                   (mask) =>
-                     `<tr>
-                        <td>${formatTime(mask.timestamp)}</td>
-                        <td>${mask.xml_id || ""}</td>
-                        <td>${mask.sensitivitysetid || ""}</td>
-                        <td>${truncateCoords(mask.coords)}</td>
-                        <td>${Utils.formatNumber(mask.format_value, 2)}</td>
-                      </tr>`
+                   (mask) => {
+                     const event = mask.event || (mask.noinspection === false ? "removed" : "applied");
+                     const eventLabel = event === "removed" ? "Removed" : "Applied";
+                     const sameMask = (candidate) =>
+                       candidate.xml_id === mask.xml_id &&
+                       candidate.sensitivitysetid === mask.sensitivitysetid &&
+                       candidate.coords === mask.coords;
+                     const application =
+                       event === "applied" ? mask : maskApplications.get(mask);
+                     const removal =
+                       event === "removed"
+                         ? mask
+                         : sortedMaskEvents
+                             .map(({ mask: candidate }) => candidate)
+                             .find(
+                               (candidate) =>
+                                 candidate.event === "removed" &&
+                                 sameMask(candidate) &&
+                                 maskApplications.get(candidate) === mask
+                             );
+                     const appliedForFeet = application
+                       ? maskFeetBetweenFormats(
+                           reel,
+                           application.format_value,
+                           removal ? removal.format_value : reel.reel_end
+                         )
+                       : null;
+                     const removedAtFeet = removal
+                       ? maskFeetFromFormat(reel, removal.format_value)
+                       : null;
+                     return `
+                       <tr>
+                         <td>${eventLabel}</td>
+                         <td>${formatTime(mask.timestamp)}</td>
+                         <td>${mask.xml_id || ""}</td>
+                         <td>${mask.sensitivitysetid || ""}</td>
+                         <td>${truncateCoords(mask.coords)}</td>
+                         <td>${appliedForFeet === null ? "—" : `${Utils.formatNumber(appliedForFeet, 1)} ft`}</td>
+                         <td>${Utils.formatNumber(mask.format_value, 2)}</td>
+                         <td>${removedAtFeet === null ? "—" : `${Utils.formatNumber(removedAtFeet, 1)} ft`}</td>
+                       </tr>`;
+                   }
                  )
                  .join("")}
              </tbody>
            </table>`
         : "<span class='badge'>No masks</span>";
+      const hasRemovedMasks = masks.some(
+        (mask) => mask.event === "removed" || mask.noinspection === false
+      );
+      const maskSnapshots = Array.isArray(data.mask_snapshots) ? data.mask_snapshots : [];
+      const maskSnapshotCards = maskSnapshots.length
+        ? [...maskSnapshots]
+            .map((snapshot, index) => ({ snapshot, index }))
+            .reverse()
+            .map(({ snapshot, index }, reverseIndex) => {
+              const heatmapIdForSnapshot = `${MaskHeatmap.domId(reel)}-${index}`;
+              const marker = reverseIndex === 0 ? "Latest" : `State ${index + 1}`;
+              const timeLabel = snapshot.timestamp ? formatTime(snapshot.timestamp) : "Time unavailable";
+              const feet = snapshot.feet_from_reel_start;
+              const positionLabel =
+                feet === null || feet === undefined
+                  ? ""
+                  : ` · ${Utils.formatNumber(feet, 1)} ft`;
+              const count = Number(snapshot.active_mask_count) || 0;
+              const maskDetails = (snapshot.mask_history || snapshot.masks || [])
+                .map((mask) => {
+                  const label = Utils.escapeHtml(mask.xml_id || mask.sensitivitysetid || "Mask");
+                  const coords = Utils.escapeHtml(truncateCoords(mask.coords));
+                  const appliedFor =
+                    mask.applied_for_feet === null || mask.applied_for_feet === undefined
+                      ? "duration unavailable"
+                      : `applied for ${Utils.formatNumber(mask.applied_for_feet, 1)} ft`;
+                  const removedAt =
+                    mask.removed_at_feet === null || mask.removed_at_feet === undefined
+                      ? ""
+                      : ` · removed at ${Utils.formatNumber(mask.removed_at_feet, 1)} ft`;
+                  return `
+                    <div class="mask-snapshot-card__mask">
+                      <strong>${label}</strong>
+                      <span>${coords} · ${appliedFor}${removedAt}</span>
+                    </div>
+                  `;
+                })
+                .join("");
+              return `
+                <article class="mask-snapshot-card">
+                  <div class="mask-snapshot-card__header">
+                    <strong>${marker}</strong>
+                    <span>${count} active mask${count === 1 ? "" : "s"}</span>
+                  </div>
+                  <div class="summary-metadata">
+                    <span>${timeLabel}${positionLabel}</span>
+                  </div>
+                  <div class="mask-snapshot-footprint heatmap-wrapper" id="${heatmapIdForSnapshot}" data-mask-snapshot-index="${index}"></div>
+                  ${maskDetails ? `<div class="mask-snapshot-card__mask-list">${maskDetails}</div>` : ""}
+                </article>
+              `;
+            })
+            .join("")
+        : "";
+           const maskPlaceholder =
+     Number(reel.format_width) > 0 && Number(reel.format_length) > 0
+       ? "Loading mask footprints…"
+       : "Format dimensions unavailable";
+      const maskFootprintsMarkup = maskSnapshotCards
+        ? `<div class="mask-snapshot-gallery">${maskSnapshotCards}</div>`
+        : `<div class="mask-snapshot-footprint heatmap-wrapper heatmap-empty" id="${MaskHeatmap.domId(reel)}">
+             <span class='badge'>${maskPlaceholder}</span>
+           </div>`;
 
       const formatWidth = Number(reel.format_width);
       const formatLength = Number(reel.format_length);
@@ -787,14 +963,11 @@
           <div class="heatmap-legend heatmap-legend-job" id="${heatmapId}-legend"></div>
         </div>
       `;
-      const maskHeatmapId = MaskHeatmap.domId(reel);
-      const maskPlaceholder = hasDimensions ? "Loading mask footprints…" : "Format dimensions unavailable";
-      const maskSection = `
+       const maskSection = `
         <div class="summary-section">
           <h4>Mask Footprints</h4>
-          <div class="heatmap-wrapper heatmap-empty" id="${maskHeatmapId}">
-            <span class='badge'>${maskPlaceholder}</span>
-          </div>
+          ${maskFootprintsMarkup}
+          ${hasRemovedMasks ? "<div class='summary-metadata'><span>Red fill shows masks active in each snapshot; the details below include masks later removed.</span></div>" : ""}
         </div>
       `;
 
@@ -896,8 +1069,8 @@
         </div>
 
         <div class="summary-section">
-          <h4>Inspection Phases</h4>
-          ${phaseTimeline}
+          <h4>Defect Positions</h4>
+          ${defectPositionBar || "<span class='badge'>No position data</span>"}
         </div>
         ${heatmapSection}
 
@@ -1050,32 +1223,205 @@ function extractRlmMetrics(config) {
       return value;
     }
 
-    function renderTimeline(phases, ariaLabel) {
+    // <reel-overview>
+    const MM_PER_FOOT = 304.8;
+    const DEFECT_BAR_COLUMNS = 2000;
+
+    function reelRepeatCount(reel) {
+      const start = Number(reel && reel.reel_start);
+      const end = Number(reel && reel.reel_end);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+      return end - start;
+    }
+
+    // reel_start / reel_end are repeat (format) counts, so length = repeats x repeat length.
+    function reelLengthFeet(reel) {
+      const repeats = reelRepeatCount(reel);
+      const formatLength = Number(reel && reel.format_length);
+      if (repeats === null || !Number.isFinite(formatLength) || formatLength <= 0) return null;
+      return (repeats * formatLength) / MM_PER_FOOT;
+    }
+
+    function listReelMeters(item) {
+      const repeats = Number(item && item.meters) || 0;
+      const formatLength = Number(item && item.format_length);
+      if (Number.isFinite(formatLength) && formatLength > 0) {
+        return (repeats * formatLength) / 1000;
+      }
+      return repeats;
+    }
+
+    function maskFeetFromFormat(reel, rawFormat) {
+      const reelStart = Number(reel && reel.reel_start);
+      const reelEnd = Number(reel && reel.reel_end);
+      const formatLength = Number(reel && reel.format_length);
+      const format = Number(rawFormat);
+      if (
+        !Number.isFinite(reelStart) ||
+        !Number.isFinite(reelEnd) ||
+        reelEnd <= reelStart ||
+        !Number.isFinite(formatLength) ||
+        formatLength <= 0 ||
+        !Number.isFinite(format)
+      ) {
+        return null;
+      }
+      const feet = ((format - reelStart) * formatLength) / MM_PER_FOOT;
+      const totalFeet = ((reelEnd - reelStart) * formatLength) / MM_PER_FOOT;
+      return Math.min(Math.max(feet, 0), totalFeet);
+    }
+
+    function maskFeetBetweenFormats(reel, startFormat, endFormat) {
+      const formatLength = Number(reel && reel.format_length);
+      const start = Number(startFormat);
+      const end = Number(endFormat);
+      if (
+        !Number.isFinite(formatLength) ||
+        formatLength <= 0 ||
+        !Number.isFinite(start) ||
+        !Number.isFinite(end)
+      ) {
+        return null;
+      }
+      return Math.max(((end - start) * formatLength) / MM_PER_FOOT, 0);
+    }
+
+    function niceFeetStep(totalFeet) {
+      const steps = [50, 100, 250, 500, 1000, 2000, 5000, 10000, 20000];
+      return steps.find((step) => totalFeet / step <= 10) || 50000;
+    }
+
+    // One green bar for the whole reel with a black line at every detection in the XML.
+    // Repeated detections sit next to each other and merge into a solid black block.
+    function renderDefectPositionBar(reel, defects, phases, inactivePct) {
+      const repeats = reelRepeatCount(reel);
+      const totalFeet = reelLengthFeet(reel);
+      if (repeats === null || totalFeet === null) return "";
+      const reelStart = Number(reel.reel_start);
+      const formatLength = Number(reel.format_length);
+
+      const columns = new Map();
+      let counted = 0;
+      (defects || []).forEach((defect) => {
+        const format = Number(defect.format_position);
+        if (!Number.isFinite(format)) return;
+        const fraction = Math.min(Math.max((format - reelStart) / repeats, 0), 1);
+        const column = Math.min(Math.floor(fraction * DEFECT_BAR_COLUMNS), DEFECT_BAR_COLUMNS - 1);
+        const entry = columns.get(column) || { count: 0, firstFormat: format };
+        entry.count += 1;
+        entry.firstFormat = Math.min(entry.firstFormat, format);
+        columns.set(column, entry);
+        counted += 1;
+      });
+
+      const feetAt = (format) => ((format - reelStart) * formatLength) / MM_PER_FOOT;
+      const sortedColumns = Array.from(columns.keys()).sort((x, y) => x - y);
+      const runs = [];
+      sortedColumns.forEach((column) => {
+        const last = runs[runs.length - 1];
+        if (last && column === last.to + 1) {
+          last.to = column;
+          last.count += columns.get(column).count;
+        } else {
+          runs.push({
+            from: column,
+            to: column,
+            count: columns.get(column).count,
+            firstFormat: columns.get(column).firstFormat,
+          });
+        }
+      });
+
+      // Stretches where the XML says inspection was inactive (make ready, splice, ...).
+      const timeStart = reel.time_start ? new Date(reel.time_start).getTime() : NaN;
+      const timeEnd = reel.time_end ? new Date(reel.time_end).getTime() : NaN;
+      const fractionFromTime = (iso) => {
+        const t = iso ? new Date(iso).getTime() : NaN;
+        if (!Number.isFinite(t) || !Number.isFinite(timeStart) || !Number.isFinite(timeEnd) || timeEnd <= timeStart) {
+          return null;
+        }
+        return (t - timeStart) / (timeEnd - timeStart);
+      };
+      const fractionFromFormat = (format) => {
+        if (format === null || format === undefined || format === "") return null;
+        const n = Number(format);
+        return Number.isFinite(n) ? (n - reelStart) / repeats : null;
+      };
+      const inactiveBands = (phases || [])
+        .filter((phase) => String(phase.phase || "").toLowerCase() === "inactive")
+        .map((phase) => {
+          let a = fractionFromFormat(phase.start_format);
+          let b = fractionFromFormat(phase.end_format);
+          if (a === null) a = fractionFromTime(phase.start_time);
+          if (b === null) b = fractionFromTime(phase.end_time);
+          if (a === null || b === null) return "";
+          a = Math.max(a, 0);
+          b = Math.min(b, 1);
+          if (b <= a) return "";
+          const title = `Inspection inactive: ${Utils.formatNumber(a * totalFeet, 0)} – ${Utils.formatNumber(b * totalFeet, 0)} ft`;
+          return `<div title="${title}" style="position:absolute;top:0;bottom:0;left:${(a * 100).toFixed(3)}%;width:${((b - a) * 100).toFixed(3)}%;background:#ef4444;"></div>`;
+        })
+        .join("");
+
+      const lines = runs
+        .map((run) => {
+          const left = (run.from / DEFECT_BAR_COLUMNS) * 100;
+          const width = ((run.to - run.from + 1) / DEFECT_BAR_COLUMNS) * 100;
+          const title = `${Utils.formatNumber(Math.max(feetAt(run.firstFormat), 0), 0)} ft — ${run.count} detection${run.count === 1 ? "" : "s"}`;
+          return `<div title="${title}" style="position:absolute;top:0;bottom:0;left:${left.toFixed(3)}%;width:${width.toFixed(3)}%;min-width:2px;background:#111827;"></div>`;
+        })
+        .join("");
+
+      const step = niceFeetStep(totalFeet);
+      let ticks = "";
+      for (let ft = 0; ft <= totalFeet; ft += step) {
+        if (ft > 0 && (totalFeet - ft) / totalFeet < 0.12) continue;
+        ticks += `<span style="position:absolute;top:0;left:${((ft / totalFeet) * 100).toFixed(3)}%;padding:2px 0 0 3px;border-left:1px solid #94a3b8;">${Utils.formatNumber(ft, 0)}</span>`;
+      }
+      ticks += `<span style="position:absolute;right:0;top:0;padding-top:2px;font-weight:600;">${Utils.formatNumber(totalFeet, 0)} ft</span>`;
+
+      const inactiveSummary = Number.isFinite(inactivePct)
+        ? ` · inspection inactive by time: ${Utils.formatNumber(inactivePct, 1)}%`
+        : "";
+      return `
+        <div aria-label="Defect positions along the reel" style="position:relative;height:36px;background:#4ade80;border-radius:6px;overflow:hidden;">${inactiveBands}${lines}</div>
+        <div style="position:relative;height:20px;margin-top:4px;font-size:11px;color:#64748b;">${ticks}</div>
+        <div style="font-size:12px;color:#64748b;margin-top:2px;">${counted} detection${counted === 1 ? "" : "s"} along ${Utils.formatNumber(totalFeet, 0)} ft${inactiveSummary}</div>
+        ${inactiveBands ? `<div style="font-size:12px;color:#64748b;margin-top:4px;"><span style="display:inline-block;width:10px;height:10px;background:#4ade80;border-radius:2px;margin-right:5px;"></span>inspecting <span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:2px;margin:0 5px 0 14px;"></span>inspection inactive</div>` : ""}`;
+    }
+    // </reel-overview>
+
+    function renderTimeline(phases, ariaLabel, range) {
       if (!phases || !phases.length) return "<span class='badge'>No phase data</span>";
+      const rangeStart = range && range.start ? new Date(range.start).getTime() : null;
+      const rangeEnd = range && range.end ? new Date(range.end).getTime() : null;
+      const hasRange =
+        Number.isFinite(rangeStart) && Number.isFinite(rangeEnd) && rangeEnd > rangeStart;
+
       const validPhases = phases
-        .map((phase) => ({
-          ...phase,
-          start: phase.start_time ? new Date(phase.start_time).getTime() : null,
-          end: phase.end_time ? new Date(phase.end_time).getTime() : null,
-        }))
-        .filter(
-          (p) =>
-            p.start !== null &&
-            p.end !== null &&
-            p.end > p.start &&
-            (p.phase || "").toLowerCase() !== "inactive"
-        );
+        .map((phase) => {
+          let start = phase.start_time ? new Date(phase.start_time).getTime() : null;
+          let end = phase.end_time ? new Date(phase.end_time).getTime() : null;
+          if (hasRange && start !== null && end !== null) {
+            start = Math.max(start, rangeStart);
+            end = Math.min(end, rangeEnd);
+          }
+          return { ...phase, start, end };
+        })
+        .filter((p) => p.start !== null && p.end !== null && p.end > p.start);
       if (!validPhases.length) return "<span class='badge'>No phase data</span>";
-      const minStart = Math.min(...validPhases.map((p) => p.start));
-      const maxEnd = Math.max(...validPhases.map((p) => p.end));
+
+      const minStart = hasRange ? rangeStart : Math.min(...validPhases.map((p) => p.start));
+      const maxEnd = hasRange ? rangeEnd : Math.max(...validPhases.map((p) => p.end));
       const total = maxEnd - minStart || 1;
 
       const bands = validPhases
         .map((phase) => {
           const width = ((phase.end - phase.start) / total) * 100;
           const left = ((phase.start - minStart) / total) * 100;
-          const cls = `timeline-band ${phase.phase || "unknown"}`;
-          return `<div class="${cls}" style="left:${left}%;width:${width}%" title="${phase.phase || ""}"></div>`;
+          const name = phase.phase || "unknown";
+          const cls = `timeline-band ${name}`;
+          return `<div class="${cls}" style="left:${left}%;width:${width}%" title="${name}"></div>`;
         })
         .join("");
 

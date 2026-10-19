@@ -43,6 +43,7 @@ DAYS_DEFAULT_RANGE = 2
 MAX_PAGE_SIZE = 500
 SENTINEL_NONE = "__NONE__"
 SIZE_BUCKET_SENTINEL_NONE = "__none__"
+MASK_EVENT_GROUP_SECONDS = 5
 
 HEATMAP_BUCKETS = [
     {"key": "A1", "min": 0.0, "max": 100.0},
@@ -1492,6 +1493,9 @@ def api_filters():
         status_filters["reel_code"] = None
         status_filters["reel_codes"] = []
         status_filters["reel_ids"] = []
+        # Status ticks cover every order and job in the window, whichever one is selected.
+        status_filters["job"] = None
+        status_filters["order"] = None
         status_query = _apply_reel_filters(
             session.query(Reel), status_filters, include_reel_code=True
         )
@@ -1516,16 +1520,17 @@ def api_filters():
             .all()
         )
 
+        # Order No. comes first: list every order run on this machine in the window,
+        # no matter which job is selected.
         order_filters = dict(filters)
         order_filters["order"] = None
+        order_filters["job"] = None
         order_filters["reel_code"] = None
         order_filters["reel_codes"] = []
         order_filters["reel_ids"] = []
         order_query = _apply_reel_filters(
             session.query(Reel), order_filters, include_reel_code=False
         )
-        if filters.get("job"):
-            order_query = order_query.filter(Reel.job_name == filters["job"])
         order_rows = (
             order_query.with_entities(
                 Reel.order_number,
@@ -1582,6 +1587,15 @@ def api_filters():
                 )
             }
 
+        selected_order = filters.get("order")
+
+        def _in_selected_order(order_value: Optional[str]) -> bool:
+            if not selected_order:
+                return True
+            if selected_order == SENTINEL_NONE:
+                return not order_value
+            return order_value == selected_order
+
         reel_status_map: Dict[int, Dict[str, object]] = {}
         job_stats: Dict[Optional[str], Dict[str, int]] = defaultdict(lambda: {"defect_total": 0, "defect_completed": 0})
         order_stats: Dict[str, Dict[str, int]] = defaultdict(lambda: {"defect_total": 0, "defect_completed": 0})
@@ -1604,9 +1618,10 @@ def api_filters():
                 "order_number": row.order_number,
             }
             if defect_total > 0:
-                job_stats[row.job_name]["defect_total"] += 1
-                if status in {"pass", "fail"}:
-                    job_stats[row.job_name]["defect_completed"] += 1
+                if _in_selected_order(row.order_number):
+                    job_stats[row.job_name]["defect_total"] += 1
+                    if status in {"pass", "fail"}:
+                        job_stats[row.job_name]["defect_completed"] += 1
                 order_key = row.order_number if row.order_number else SENTINEL_NONE
                 order_stats[order_key]["defect_total"] += 1
                 if status in {"pass", "fail"}:
@@ -1667,17 +1682,18 @@ def api_filters():
                 },
             )
 
-        reel_query = order_query
-        order_filter = filters.get("order")
-        if order_filter:
-            if order_filter == SENTINEL_NONE:
-                reel_query = reel_query.filter(or_(Reel.order_number.is_(None), Reel.order_number == ""))
-            else:
-                reel_query = reel_query.filter(Reel.order_number == order_filter)
+        reel_filters = dict(filters)
+        reel_filters["reel_code"] = None
+        reel_filters["reel_codes"] = []
+        reel_filters["reel_ids"] = []
+        reel_query = _apply_reel_filters(
+            session.query(Reel), reel_filters, include_reel_code=False
+        )
         reel_rows = (
             reel_query.with_entities(
                 Reel.reel_id,
                 Reel.reel_code,
+                Reel.job_name,
                 Reel.order_number,
                 Reel.time_end,
             )
@@ -1685,12 +1701,19 @@ def api_filters():
             .all()
         )
 
-        def _reel_label(code: Optional[str], order_value: Optional[str], time_end: Optional[datetime]) -> str:
+        def _reel_label(
+            code: Optional[str],
+            job_value: Optional[str],
+            order_value: Optional[str],
+            time_end: Optional[datetime],
+        ) -> str:
             label_parts: List[str] = []
             if code:
                 label_parts.append(code)
-            if order_value:
-                label_parts.append(str(order_value))
+            # The Order No. is already selected, so show which job the reel belongs to.
+            job_or_order = job_value or order_value
+            if job_or_order:
+                label_parts.append(str(job_or_order))
             if time_end:
                 label_parts.append(time_end.strftime("%Y-%m-%d %H:%M"))
             return " · ".join(label_parts) or "Reel"
@@ -1699,10 +1722,10 @@ def api_filters():
             {
                 "reel_id": reel_id,
                 "reel_code": reel_code,
-                "label": _reel_label(reel_code, order_number, time_end),
+                "label": _reel_label(reel_code, job_name, order_number, time_end),
                 "status": reel_status_map.get(reel_id, {}).get("status", "pending"),
             }
-            for reel_id, reel_code, order_number, time_end in reel_rows
+            for reel_id, reel_code, job_name, order_number, time_end in reel_rows
             if reel_id is not None
         ]
 
@@ -1849,9 +1872,16 @@ def api_overview():
         EVENT_DEFECT = "defect"
         EVENT_REFERENCE = "reference_change"
         EVENT_MASK = "mask_applied"
+        EVENT_MASK_REMOVED = "mask_removed"
         EVENT_SENSITIVITY = "sensitivity_change"
         EVENT_RLM = "rlm_config_change"
-        TIMELINE_EVENT_TYPES = {EVENT_MASK, EVENT_SENSITIVITY, EVENT_RLM, EVENT_REFERENCE}
+        TIMELINE_EVENT_TYPES = {
+            EVENT_MASK,
+            EVENT_MASK_REMOVED,
+            EVENT_SENSITIVITY,
+            EVENT_RLM,
+            EVENT_REFERENCE,
+        }
 
         event_aggregates: Dict[Tuple[str, datetime, str], Dict[str, object]] = {}
         summary_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
@@ -1897,12 +1927,10 @@ def api_overview():
             return name or "Unassigned"
 
         def mask_signature(masks: Iterable[Mask]) -> List[Tuple[str, str, str]]:
-            signature: List[Tuple[str, str, str]] = []
-            for m in masks or []:
-                coords = (m.coords or "").strip() if m.coords else ""
-                signature.append(((m.xml_id or "").strip(), (m.sensitivitysetid or "").strip(), coords))
-            signature.sort()
-            return signature
+            return [
+                (xml_id, sensitivity_id, coords)
+                for xml_id, sensitivity_id, coords, _ in _mask_signature_entries(masks)
+            ]
 
         def normalize_event_time(ts: Optional[datetime]) -> Optional[datetime]:
             if ts is None:
@@ -2183,27 +2211,30 @@ def api_overview():
                 mask for mask in (reel.masks or []) if mask.timestamp and window_start <= mask.timestamp <= window_end
             ]
             for mask in masks_in_window:
+                is_applied = _mask_noinspection_enabled(mask.noinspection)
                 detail = {
                     "xml_id": mask.xml_id,
                     "sensitivity_id": mask.sensitivitysetid,
                     "format_value": _to_float(mask.format_value),
+                    "event": "applied" if is_applied else "removed",
                 }
                 mask_label = (
                     (mask.xml_id or "").strip()
                     or (mask.sensitivitysetid or "").strip()
                     or "Mask"
                 )
-                job_order_entry["mask_count"] += 1
-                job_summary_entry["mask_count"] += 1
-                job_mask_counts_map[job_display][reel_key] += 1
-                job_mask_presence[job_display]["with"].add(reel.reel_id)
-                if mask_label:
-                    job_order_entry["mask_counter"][mask_label] += 1
-                    job_summary_entry["mask_counter"][mask_label] += 1
+                if is_applied:
+                    job_order_entry["mask_count"] += 1
+                    job_summary_entry["mask_count"] += 1
+                    job_mask_counts_map[job_display][reel_key] += 1
+                    job_mask_presence[job_display]["with"].add(reel.reel_id)
+                    if mask_label:
+                        job_order_entry["mask_counter"][mask_label] += 1
+                        job_summary_entry["mask_counter"][mask_label] += 1
                 record_event(
                     job_name,
                     mask.timestamp,
-                    EVENT_MASK,
+                    EVENT_MASK if is_applied else EVENT_MASK_REMOVED,
                     detail=detail,
                     reel_code=reel.reel_code,
                 )
@@ -2912,18 +2943,17 @@ def _mask_noinspection_enabled(value: object) -> bool:
 
 
 def _mask_signature_entries(masks: Iterable[Mask]) -> List[Tuple[str, str, str, str]]:
-    entries: List[Tuple[str, str, str, str]] = []
-    for mask in masks or []:
-        entries.append(
-            (
-                (mask.xml_id or "").strip(),
-                (mask.sensitivitysetid or "").strip(),
-                (mask.coords or "").strip() if mask.coords else "",
-                "1" if _mask_noinspection_enabled(getattr(mask, "noinspection", False)) else "0",
-            )
+    serialized = [_serialize_mask_detail(mask) for mask in masks or []]
+    active_masks = _active_mask_details(serialized)
+    return sorted(
+        (
+            (mask.get("xml_id") or "").strip(),
+            (mask.get("sensitivitysetid") or "").strip(),
+            (mask.get("coords") or "").strip(),
+            "1" if _mask_noinspection_enabled(mask.get("noinspection")) else "0",
         )
-    entries.sort()
-    return entries
+        for mask in active_masks
+    )
 
 
 def _reference_signature(images: Iterable[ReferenceImage]) -> Tuple[str, ...]:
@@ -2943,19 +2973,7 @@ def _reference_signature(images: Iterable[ReferenceImage]) -> Tuple[str, ...]:
 
 
 def _active_mask_count(masks: Iterable[Dict[str, object]]) -> int:
-    count = 0
-    for mask in masks or []:
-        has_definition = bool(
-            (mask.get("coords") or "").strip()
-            or (mask.get("xml_id") or "").strip()
-            or (mask.get("sensitivitysetid") or "").strip()
-        )
-        # In this codebase, persisted mask rows often represent real applied mask regions
-        # through the noinspection path. Treat any defined mask as active unless there is
-        # some separate explicit disabled/off field, which we do not currently store.
-        if has_definition:
-            count += 1
-    return count
+    return len(_active_mask_details(masks))
 
 
 def _mask_segment_validity_label(active_pct: Optional[float]) -> str:
@@ -2975,7 +2993,7 @@ def _mask_state_label(active_mask_count: int) -> str:
 
 def _active_mask_signature(masks: Iterable[Dict[str, object]]) -> Set[Tuple[str, str, str]]:
     signature: Set[Tuple[str, str, str]] = set()
-    for mask in masks or []:
+    for mask in _active_mask_details(masks):
         xml_id = (mask.get("xml_id") or "").strip()
         sensitivitysetid = (mask.get("sensitivitysetid") or "").strip()
         coords = (mask.get("coords") or "").strip()
@@ -2987,15 +3005,183 @@ def _active_mask_signature(masks: Iterable[Dict[str, object]]) -> Set[Tuple[str,
 
 
 def _active_mask_details(masks: Iterable[Dict[str, object]]) -> List[Dict[str, object]]:
-    return [
-        mask
-        for mask in (masks or [])
-        if bool(
+    ordered: List[Tuple[int, Dict[str, object]]] = []
+    for index, mask in enumerate(masks or []):
+        if not (
             (mask.get("coords") or "").strip()
             or (mask.get("xml_id") or "").strip()
             or (mask.get("sensitivitysetid") or "").strip()
+        ):
+            continue
+        ordered.append((index, mask))
+
+    def event_order(item: Tuple[int, Dict[str, object]]) -> Tuple[str, float, int]:
+        index, mask = item
+        format_value = _to_float(mask.get("format_value"))
+        return (
+            str(mask.get("timestamp") or ""),
+            format_value if format_value is not None else float("inf"),
+            index,
         )
+
+    latest_by_mask: Dict[Tuple[str, str, str], Tuple[str, Dict[str, object]]] = {}
+    for _, mask in sorted(ordered, key=event_order):
+        signature = _mask_detail_signature(mask)
+        event = mask.get("event")
+        if event not in {"applied", "removed"}:
+            event = "applied" if (
+                "noinspection" not in mask
+                or _mask_noinspection_enabled(mask.get("noinspection"))
+            ) else "removed"
+        latest_by_mask[signature] = (str(event), mask)
+    return [
+        mask
+        for event, mask in latest_by_mask.values()
+        if event == "applied"
     ]
+
+
+def _mask_local_feet(mask: Dict[str, object], reel: Reel) -> Optional[float]:
+    reel_start = _to_float(reel.reel_start)
+    format_length = _to_float(reel.format_length)
+    format_value = _to_float(mask.get("format_value"))
+    if reel_start is None or format_length is None or format_value is None:
+        return None
+    feet = ((format_value - reel_start) * format_length) / MM_PER_FOOT
+    if feet < 0:
+        return 0.0
+    reel_length = _reel_length_feet(reel)
+    return min(feet, reel_length) if reel_length is not None else feet
+
+
+def _mask_feet_between(
+    start_format: object,
+    end_format: object,
+    reel: Reel,
+) -> Optional[float]:
+    start = _to_float(start_format)
+    end = _to_float(end_format)
+    format_length = _to_float(reel.format_length)
+    if start is None or end is None or format_length is None or format_length <= 0:
+        return None
+    return max((end - start) * format_length / MM_PER_FOOT, 0.0)
+
+
+def _mask_lifecycle_snapshots(
+    masks: Iterable[Dict[str, object]],
+    reel: Reel,
+) -> List[Dict[str, object]]:
+    events = [
+        (index, mask)
+        for index, mask in enumerate(masks or [])
+        if mask.get("event") in {"applied", "removed"}
+    ]
+
+    def event_order(item: Tuple[int, Dict[str, object]]) -> Tuple[str, float, int]:
+        index, mask = item
+        format_value = _to_float(mask.get("format_value"))
+        return (
+            str(mask.get("timestamp") or ""),
+            format_value if format_value is not None else float("inf"),
+            index,
+        )
+
+    ordered = sorted(events, key=event_order)
+    applied_events: Dict[Tuple[str, str, str], Dict[str, object]] = {}
+    lifetime_details: Dict[int, Dict[str, Optional[float]]] = {}
+    for _, mask in ordered:
+        signature = _mask_detail_signature(mask)
+        if mask.get("event") == "applied":
+            applied_events[signature] = mask
+            continue
+        applied = applied_events.pop(signature, None)
+        if applied is None:
+            continue
+        duration = _mask_feet_between(
+            applied.get("format_value"),
+            mask.get("format_value"),
+            reel,
+        )
+        applied_feet = _mask_local_feet(applied, reel)
+        removed_feet = _mask_local_feet(mask, reel)
+        lifetime = {
+            "applied_at_feet": applied_feet,
+            "applied_for_feet": duration,
+            "removed_at_feet": removed_feet,
+        }
+        lifetime_details[id(applied)] = lifetime
+        lifetime_details[id(mask)] = lifetime
+
+    for signature, applied in applied_events.items():
+        lifetime_details[id(applied)] = {
+            "applied_at_feet": _mask_local_feet(applied, reel),
+            "applied_for_feet": _mask_feet_between(
+                applied.get("format_value"),
+                reel.reel_end,
+                reel,
+            ),
+            "removed_at_feet": None,
+        }
+
+    groups: List[List[Dict[str, object]]] = []
+    group_end: Optional[datetime] = None
+    for _, mask in ordered:
+        raw_time = mask.get("timestamp")
+        try:
+            event_time = datetime.fromisoformat(str(raw_time)) if raw_time else None
+        except ValueError:
+            event_time = None
+        if (
+            not groups
+            or event_time is None
+            or group_end is None
+            or (event_time - group_end).total_seconds() > MASK_EVENT_GROUP_SECONDS
+        ):
+            groups.append([])
+        groups[-1].append(mask)
+        group_end = event_time
+
+    active: Dict[Tuple[str, str, str], Dict[str, object]] = {}
+    removed: Dict[Tuple[str, str, str], Dict[str, object]] = {}
+    snapshots: List[Dict[str, object]] = []
+    for group in groups:
+        for mask in group:
+            signature = _mask_detail_signature(mask)
+            lifecycle = lifetime_details.get(id(mask), {})
+            if mask.get("event") == "removed":
+                active.pop(signature, None)
+                removed[signature] = {
+                    **mask,
+                    **lifecycle,
+                }
+            else:
+                active[signature] = {
+                    **mask,
+                    **lifecycle,
+                    "event": "applied",
+                }
+                removed.pop(signature, None)
+
+        group_time = group[-1].get("timestamp")
+        group_formats = [
+            value
+            for value in (_to_float(mask.get("format_value")) for mask in group)
+            if value is not None
+        ]
+        format_value = max(group_formats) if group_formats else None
+        group_anchor = {"format_value": format_value}
+        snapshots.append(
+            {
+                "timestamp": group_time,
+                "format_value": format_value,
+                "feet_from_reel_start": _mask_local_feet(group_anchor, reel),
+                "active_mask_count": len(active),
+                "event_count": len(group),
+                "masks": list(active.values()),
+                "mask_history": [*active.values(), *removed.values()],
+            }
+        )
+    return snapshots
 
 
 def _mask_detail_signature(mask: Dict[str, object]) -> Tuple[str, str, str]:
@@ -3205,13 +3391,15 @@ def _resolve_size_metric(
 
 
 def _serialize_mask_detail(mask: Mask) -> Dict[str, object]:
+    noinspection = _mask_noinspection_enabled(getattr(mask, "noinspection", False))
     return {
         "xml_id": (mask.xml_id or "").strip() or None,
         "sensitivitysetid": (mask.sensitivitysetid or "").strip() or None,
         "coords": (mask.coords or "").strip() if mask.coords else "",
         "timestamp": _iso(mask.timestamp),
         "format_value": _to_float(mask.format_value),
-        "noinspection": _mask_noinspection_enabled(getattr(mask, "noinspection", False)),
+        "noinspection": noinspection,
+        "event": "applied" if noinspection else "removed",
     }
 
 
@@ -3282,6 +3470,23 @@ def _resolve_reference_check_job(session: Session, filters: Dict[str, Any]) -> O
     normalized = _reference_check_base_filters(filters)
     if normalized.get("job"):
         return normalized["job"]
+
+    # A Job No. (order number) without an item: use the item that Job No. is running.
+    order_value = filters.get("order")
+    if order_value and order_value != SENTINEL_NONE:
+        order_filters = dict(normalized)
+        order_filters["order"] = order_value
+        order_job = (
+            _apply_reel_filters(session.query(Reel), order_filters, include_reel_code=False)
+            .filter(Reel.job_name.isnot(None))
+            .filter(Reel.job_name != "")
+            .order_by(Reel.time_end.desc(), Reel.reel_id.desc())
+            .with_entities(Reel.job_name)
+            .limit(1)
+            .scalar()
+        )
+        if order_job:
+            return order_job
 
     query = (
         _apply_reel_filters(session.query(Reel), normalized, include_reel_code=False)
@@ -6881,21 +7086,20 @@ def api_job_explorer():
                 }
             )
 
-        mask_count_rows = (
-            session.query(
-                Mask.reel_id,
-                func.count(Mask.mask_id).label("mask_count"),
-            )
+        page_mask_rows = (
+            session.query(Mask)
             .filter(Mask.reel_id.in_(page_reel_ids))
-            .group_by(Mask.reel_id)
             .all()
             if page_reel_ids
             else []
         )
+        masks_by_reel: Dict[int, List[Dict[str, object]]] = defaultdict(list)
+        for mask in page_mask_rows:
+            if mask.reel_id is not None:
+                masks_by_reel[mask.reel_id].append(_serialize_mask_detail(mask))
         page_mask_counts = {
-            row.reel_id: int(row.mask_count or 0)
-            for row in mask_count_rows
-            if getattr(row, "reel_id", None) is not None
+            reel_id: _active_mask_count(reel_masks)
+            for reel_id, reel_masks in masks_by_reel.items()
         }
 
         defect_rows = (
@@ -6920,6 +7124,25 @@ def api_job_explorer():
             for row in defect_rows
             if getattr(row, "reel_id", None) is not None
         }
+        filtered_defect_rows = (
+            session.query(
+                Defect.reel_id,
+                func.count(Defect.defect_id).label("defect_count"),
+            )
+            .filter(Defect.reel_id.in_(qualifying_reel_ids))
+            .filter(Defect.defect_time >= filters["start"])
+            .filter(Defect.defect_time <= filters["end"])
+            .group_by(Defect.reel_id)
+            .all()
+            if qualifying_reel_ids
+            else []
+        )
+        filtered_defect_counts = {
+            row.reel_id: int(row.defect_count or 0)
+            for row in filtered_defect_rows
+            if getattr(row, "reel_id", None) is not None
+        }
+        total_filtered_defects = sum(filtered_defect_counts.values())
 
         config_needed_ids = set(page_reel_ids)
         for reel in page_reels:
@@ -7026,6 +7249,19 @@ def api_job_explorer():
             items.append(item)
 
         qualifying_count = len(all_reel_rows)
+        average_defects_per_reel = (
+            total_filtered_defects / qualifying_count if qualifying_count else 0.0
+        )
+        reels_below_average = sum(
+            1
+            for reel_id in qualifying_reel_ids
+            if filtered_defect_counts.get(reel_id, 0) < average_defects_per_reel
+        )
+        reels_above_average = sum(
+            1
+            for reel_id in qualifying_reel_ids
+            if filtered_defect_counts.get(reel_id, 0) > average_defects_per_reel
+        )
         bst_active_count = 0
         rlm_active_count = 0
         reels_with_reference_changes = 0
@@ -7062,6 +7298,12 @@ def api_job_explorer():
         insights = {
             "qualifying_reel_count": qualifying_count,
             "min_reel_length": filters.get("min_reel_length") or 0.0,
+            "defect_summary": {
+                "total_defects": int(total_filtered_defects),
+                "average_per_reel": round(average_defects_per_reel, 2),
+                "reels_below_average": reels_below_average,
+                "reels_above_average": reels_above_average,
+            },
             "bst_coverage": {
                 "qualifying_reel_count": qualifying_count,
                 "active_count": bst_active_count,
@@ -7621,15 +7863,20 @@ def api_reel_summary(reel_id: int):
                 "format_value": _to_float(mask.format_value),
                 "xml_id": mask.xml_id,
                 "sensitivitysetid": mask.sensitivitysetid,
+                "noinspection": _mask_noinspection_enabled(mask.noinspection),
+                "event": "applied" if _mask_noinspection_enabled(mask.noinspection) else "removed",
             }
             for mask in sorted(reel.masks or [], key=lambda x: x.timestamp or datetime.min)
         ]
+        mask_snapshots = _mask_lifecycle_snapshots(masks, reel)
 
         inspection_phases = [
             {
                 "phase": phase.phase,
                 "start_time": _iso(phase.start_time),
                 "end_time": _iso(phase.end_time),
+                "start_format": _to_float(phase.start_format),
+                "end_format": _to_float(phase.end_format),
                 "refimgid": phase.refimgid,
             }
             for phase in sorted(reel.inspection_phases or [], key=lambda x: x.start_time or datetime.min)
@@ -7695,6 +7942,7 @@ def api_reel_summary(reel_id: int):
             "reference_images": reference_images,
             "sensitivities": sensitivities,
             "masks": masks,
+            "mask_snapshots": mask_snapshots,
             "inspection_phases": inspection_phases,
             "rlm": {
                 "config": reel.rlm_config.config_json if reel.rlm_config else None,

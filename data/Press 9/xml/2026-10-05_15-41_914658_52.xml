@@ -1,0 +1,1432 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<reel id="r52" protversion="23">
+	<order number="914658">
+		<job name="1000-MIS01-E726" customer="">
+			<lengthunit>mm</lengthunit>
+			<formatlength>641.3499999999999</formatlength>
+			<formatwidth>1244.6</formatwidth>
+			<usedescription enumeration="lefttoright">
+				<grid>
+					<bounds left="0.00" right="0.00" top="0.00" bottom="0.00"/>
+					<uses nbX="1" nbY="1" offsetX="0.00" offsetY="0.00"/>
+				</grid>
+			</usedescription>
+		</job>
+	</order>
+
+	<production operator="" machine="">
+		<reelstart format="391099.70"/>
+		<reelend format="406553.61"/>
+		<productiontime>
+			<start date="2026-10-05" time="15:18:15"/>
+			<end date="2026-10-05" time="15:41:29"/>
+			<comment></comment>
+		</productiontime>
+	</production>
+	<inspection>
+		<lanes>
+			<lane id="jl1" widthcoord="-622.30,622.30"/>
+		</lanes>
+		<statusprotocol>
+			<active format="391100" date="2026-10-05" time="14:32:01" refimgid="rId_391100"/>
+			<learn format="391126" date="2026-10-05" time="15:18:16"/>
+			<active format="391212" date="2026-10-05" time="15:18:25" refimgid="rId_391212"/>
+		</statusprotocol>
+		<reference_images>
+			<reference_image id="rId_391100">../image/reference/reference_360342.jpg</reference_image>
+			<reference_image id="rId_391212">../image/reference/reference_391212.jpg</reference_image>
+		</reference_images>
+		<defectclassdefinition>
+			<class name="register" viscolour="0,147,221" valuetype="continuousunit" orientation="positive" values="0,INF"/>
+			<class name="colour" viscolour="95,25,118" valuetype="continuous" orientation="positive" values="0,INF"/>
+			<class name="streak" viscolour="232,178,31" valuetype="continuousunit" orientation="positive" values="0,INF"/>
+			<class name="sporadicstreak" viscolour="33,165,99" valuetype="continuousunit" orientation="positive" values="0,INF"/>
+			<class name="flaw" viscolour="211,0,145" valuetype="continuousunitsquare" orientation="positive" values="0,INF"/>
+			<class name="sporadicflaw" viscolour="33,165,99" valuetype="continuousunitsquare" orientation="positive" values="0,INF"/>
+			<class name="register_ext" viscolour="0,147,221" valuetype="continuous" orientation="positive"/>
+			<class name="extern2" viscolour="0,147,221" valuetype="continuous" orientation="positive"/>
+			<class name="extern3" viscolour="0,147,221" valuetype="continuous" orientation="positive"/>
+			<class name="extern4" viscolour="0,147,221" valuetype="continuous" orientation="positive"/>
+		</defectclassdefinition>
+		<sensitivitysets unit="mm">
+			<set id="sId_mmx_stand" standard="true">
+				<value name="register" format="391100" date="2026-10-05" time="14:26:47" warnthres="0.2">0.3</value>
+				<value name="colour" format="391100" date="2026-10-05" time="14:26:47" warnthres="0.2">2.0</value>
+				<value name="streak" format="391100" date="2026-10-05" time="14:26:47" warnthres="0.2">1.5</value>
+				<value name="sporadicstreak" format="391100" date="2026-10-05" time="14:26:47" warnthres="0.2">1.5</value>
+				<value name="flaw" format="391100" date="2026-10-05" time="14:26:47" warnthres="0.2">2.0</value>
+				<value name="sporadicflaw" format="391100" date="2026-10-05" time="14:26:47" warnthres="0.2">4.0</value>
+			</set>
+			<set id="sId_mmx_noinsp">
+				<value name="register" format="391100" date="2026-10-05" time="14:26:47" warnthres="0.2">INF</value>
+				<value name="colour" format="391100" date="2026-10-05" time="14:26:47" warnthres="0.2">INF</value>
+				<value name="streak" format="391100" date="2026-10-05" time="14:26:47" warnthres="0.2">INF</value>
+				<value name="sporadicstreak" format="391100" date="2026-10-05" time="14:26:47" warnthres="0.2">INF</value>
+				<value name="flaw" format="391100" date="2026-10-05" time="14:26:47" warnthres="0.2">INF</value>
+				<value name="sporadicflaw" format="391100" date="2026-10-05" time="14:26:47" warnthres="0.2">INF</value>
+			</set>
+		</sensitivitysets>
+		<masks>
+			<mask id="mId_RightBorder" type="rectangular">
+				<properties format="391100" date="2026-10-05" time="14:26:47" coords="610.69,-320.67,622.30,320.67" zorder="0" sensitivitysetid="sId_mmx_noinsp" noinspection="true"/>
+			</mask>
+			<mask id="mId_LeftBorder" type="rectangular">
+				<properties format="391100" date="2026-10-05" time="14:26:47" coords="-622.30,-320.67,-608.75,320.67" zorder="0" sensitivitysetid="sId_mmx_noinsp" noinspection="true"/>
+			</mask>
+			<mask id="mId_mm_rect_3" type="rectangular">
+				<properties format="396384" date="2026-10-05" time="15:26:10" coords="23.94,-492.96,96.53,-472.96" zorder="0" sensitivitysetid="sId_mmx_noinsp" noinspection="true"/>
+				<end format="396441" date="2026-10-05" time="15:26:16"/>
+			</mask>
+			<mask id="mId_mmx_rect_0" type="rectangular">
+				<properties format="391100" date="2026-10-05" time="14:26:47" coords="-622.30,-320.67,622.30,320.67" zorder="1" sensitivitysetid="sId_mmx_stand"/>
+			</mask>
+		</masks>
+	</inspection>
+   <defects>
+		<group id="dGid_3313044">
+			<defect id="d3313044_1" format="391780" date="2026-10-05" time="15:19:15" coords="-112.49,281.83,-110.04,307.57">
+				<class name="sporadicflaw" magnitude="0.57" value="7.16"/>
+				<image src="../image/defect/3313044_391780_def.jpg" clipcoords="-127.49,266.83,-95.04,320.67"/>
+				<pds>
+					<pd>
+						<x>-112.49,-112.49,-110.04,-110.04</x>
+						<y>281.83,307.57,307.57,281.83</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3313175">
+			<defect id="d3313175_1" format="391866" date="2026-10-05" time="15:19:23" coords="494.40,183.06,496.41,188.12">
+				<class name="sporadicflaw" magnitude="0.53" value="5.50"/>
+				<image src="../image/defect/3313175_391866_def.jpg" clipcoords="479.40,168.06,511.41,203.12"/>
+				<pds>
+					<pd>
+						<x>494.40,494.40,496.41,496.41</x>
+						<y>183.06,188.12,188.12,183.06</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3313179">
+			<defect id="d3313179_1" format="391872" date="2026-10-05" time="15:19:24" coords="-309.83,-191.77,-307.82,-123.80">
+				<class name="sporadicstreak" magnitude="0.66" value="2.00"/>
+				<image src="../image/defect/3313179_391872_def.jpg" clipcoords="-324.83,-206.77,-292.82,-108.80"/>
+				<pds>
+					<pd>
+						<x>-309.83,-309.83,-307.82,-307.82</x>
+						<y>-191.77,-123.80,-123.80,-191.77</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3314286">
+			<defect id="d3314286_1" format="392719" date="2026-10-05" time="15:20:40" coords="378.65,8.41,380.89,42.94">
+				<class name="sporadicstreak" magnitude="0.61" value="1.56"/>
+				<image src="../image/defect/3314286_392719_def.jpg" clipcoords="363.65,-6.59,395.89,57.94"/>
+				<pds>
+					<pd>
+						<x>378.65,378.65,380.89,380.89</x>
+						<y>8.41,42.94,42.94,8.41</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3314413">
+			<defect id="d3314413_1" format="392808" date="2026-10-05" time="15:20:48" coords="310.28,148.09,313.18,150.73">
+				<class name="sporadicflaw" magnitude="0.55" value="5.99"/>
+				<image src="../image/defect/3314413_392808_def.jpg" clipcoords="295.28,133.09,328.18,165.73"/>
+				<pds>
+					<pd>
+						<x>310.28,310.28,313.18,313.18</x>
+						<y>148.09,150.73,150.73,148.09</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3314415">
+			<defect id="d3314415_1" format="392809" date="2026-10-05" time="15:20:48" coords="312.07,-261.28,314.08,-256.22">
+				<class name="sporadicflaw" magnitude="0.54" value="5.70"/>
+				<image src="../image/defect/3314415_392809_def.jpg" clipcoords="297.07,-276.28,329.08,-241.22"/>
+				<pds>
+					<pd>
+						<x>312.07,312.07,314.08,314.08</x>
+						<y>-261.28,-256.22,-256.22,-261.28</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3314435">
+			<defect id="d3314435_1" format="392823" date="2026-10-05" time="15:20:49" coords="110.51,-57.59,113.64,-55.61">
+				<class name="sporadicflaw" magnitude="0.50" value="4.17"/>
+				<image src="../image/defect/3314435_392823_def.jpg" clipcoords="95.51,-72.59,128.64,-40.61"/>
+				<pds>
+					<pd>
+						<x>110.51,110.51,113.64,113.64</x>
+						<y>-57.59,-55.61,-55.61,-57.59</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3315016">
+			<defect id="d3315016_1" format="393299" date="2026-10-05" time="15:21:32" coords="-520.56,306.25,-514.75,310.87">
+				<class name="sporadicflaw" magnitude="0.66" value="15.76"/>
+				<image src="../image/defect/3315016_393299_def.jpg" clipcoords="-535.56,291.25,-499.75,320.67"/>
+				<pds>
+					<pd>
+						<x>-520.56,-520.56,-514.75,-514.75</x>
+						<y>306.25,310.87,310.87,306.25</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3315329">
+			<defect id="d3315329_1" format="393431" date="2026-10-05" time="15:21:44" coords="153.19,62.30,154.98,64.28">
+				<class name="sporadicflaw" magnitude="0.51" value="4.52"/>
+				<image src="../image/defect/3315329_393431_def.jpg" clipcoords="138.19,47.30,169.98,79.28"/>
+				<pds>
+					<pd>
+						<x>153.19,153.19,154.98,154.98</x>
+						<y>62.30,64.28,64.28,62.30</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3315796">
+			<defect id="d3315796_1" format="393748" date="2026-10-05" time="15:22:13" coords="606.35,231.90,608.59,233.66">
+				<class name="sporadicflaw" magnitude="0.52" value="4.76"/>
+				<image src="../image/defect/3315796_393748_def.jpg" clipcoords="591.35,216.90,622.30,248.66"/>
+				<pds>
+					<pd>
+						<x>606.35,606.35,608.59,608.59</x>
+						<y>231.90,233.66,233.66,231.90</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3316015">
+			<defect id="d3316015_1" format="393913" date="2026-10-05" time="15:22:28" coords="487.47,206.60,488.82,208.58">
+				<class name="flaw" magnitude="0.43" value="2.40"/>
+				<image src="../image/defect/3316015_393913_def.jpg" clipcoords="472.47,191.60,503.82,223.58"/>
+				<pds>
+					<pd>
+						<x>487.47,487.47,488.82,488.82</x>
+						<y>206.60,208.58,208.58,206.60</y>
+					</pd>
+				</pds>
+			</defect>
+			<defect id="d3316015_2" format="393914" date="2026-10-05" time="15:22:28" coords="392.06,188.78,394.30,190.98">
+				<class name="flaw" magnitude="0.43" value="2.40"/>
+				<pds>
+					<pd>
+						<x>392.06,392.06,394.30,394.30</x>
+						<y>188.78,190.98,190.98,188.78</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3316400">
+			<defect id="d3316400_1" format="394181" date="2026-10-05" time="15:22:52" coords="63.81,-253.58,65.82,-248.52">
+				<class name="sporadicflaw" magnitude="0.55" value="5.99"/>
+				<image src="../image/defect/3316400_394181_def.jpg" clipcoords="48.81,-268.58,80.82,-233.52"/>
+				<pds>
+					<pd>
+						<x>63.81,63.81,65.82,65.82</x>
+						<y>-253.58,-248.52,-248.52,-253.58</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3316823">
+			<defect id="d3316823_1" format="394529" date="2026-10-05" time="15:23:23" coords="72.75,168.77,74.31,171.19">
+				<class name="flaw" magnitude="0.42" value="2.16"/>
+				<image src="../image/defect/3316823_394529_def.jpg" clipcoords="57.75,153.77,89.31,186.19"/>
+				<pds>
+					<pd>
+						<x>72.75,72.75,74.31,74.31</x>
+						<y>168.77,171.19,171.19,168.77</y>
+					</pd>
+				</pds>
+			</defect>
+			<defect id="d3316823_2" format="394530" date="2026-10-05" time="15:23:23" coords="77.67,172.73,80.35,174.71">
+				<class name="flaw" magnitude="0.48" value="3.48"/>
+				<image src="../image/defect/3316823_394530_def.jpg" clipcoords="62.67,157.73,95.35,189.71"/>
+				<pds>
+					<pd>
+						<x>77.67,77.67,80.35,80.35</x>
+						<y>172.73,174.71,174.71,172.73</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3316926">
+			<defect id="d3316926_1" format="394628" date="2026-10-05" time="15:23:32" coords="-176.78,185.48,-174.77,190.76">
+				<class name="sporadicflaw" magnitude="0.54" value="5.74"/>
+				<image src="../image/defect/3316926_394628_def.jpg" clipcoords="-191.78,170.48,-159.77,205.76"/>
+				<pds>
+					<pd>
+						<x>-176.78,-176.78,-174.77,-174.77</x>
+						<y>185.48,190.76,190.76,185.48</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3317019">
+			<defect id="d3317019_1" format="394709" date="2026-10-05" time="15:23:40" coords="87.72,-33.17,90.40,-28.11">
+				<class name="sporadicflaw" magnitude="0.56" value="6.48"/>
+				<image src="../image/defect/3317019_394709_def.jpg" clipcoords="72.72,-48.17,105.40,-13.11"/>
+				<pds>
+					<pd>
+						<x>87.72,87.72,90.40,90.40</x>
+						<y>-33.17,-28.11,-28.11,-33.17</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3317431">
+			<defect id="d3317431_1" format="395031" date="2026-10-05" time="15:24:09" coords="108.28,-45.93,110.29,-39.99">
+				<class name="sporadicflaw" magnitude="0.55" value="6.29"/>
+				<image src="../image/defect/3317431_395031_def.jpg" clipcoords="93.28,-60.93,125.29,-24.99"/>
+				<pds>
+					<pd>
+						<x>108.28,108.28,110.29,110.29</x>
+						<y>-45.93,-39.99,-39.99,-45.93</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3317559">
+			<defect id="d3317559_1" format="395147" date="2026-10-05" time="15:24:19" coords="438.32,241.14,440.10,242.90">
+				<class name="sporadicflaw" magnitude="0.51" value="4.47"/>
+				<image src="../image/defect/3317559_395147_def.jpg" clipcoords="423.32,226.14,455.10,257.90"/>
+				<pds>
+					<pd>
+						<x>438.32,438.32,440.10,440.10</x>
+						<y>241.14,242.90,242.90,241.14</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3317958">
+			<defect id="d3317958_1" format="395436" date="2026-10-05" time="15:24:45" coords="566.35,-193.53,568.59,-189.35">
+				<class name="sporadicflaw" magnitude="0.55" value="6.29"/>
+				<image src="../image/defect/3317958_395436_def.jpg" clipcoords="551.35,-208.53,583.59,-174.35"/>
+				<pds>
+					<pd>
+						<x>566.35,566.35,568.59,568.59</x>
+						<y>-193.53,-189.35,-189.35,-193.53</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3318220">
+			<defect id="d3318220_1" format="395647" date="2026-10-05" time="15:25:04" coords="-348.22,-293.62,-345.99,-290.54">
+				<class name="sporadicflaw" magnitude="0.52" value="5.05"/>
+				<image src="../image/defect/3318220_395647_def.jpg" clipcoords="-363.22,-308.62,-330.99,-275.54"/>
+				<pds>
+					<pd>
+						<x>-348.22,-348.22,-345.99,-345.99</x>
+						<y>-293.62,-290.54,-290.54,-293.62</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3318548">
+			<defect id="d3318548_1" format="395916" date="2026-10-05" time="15:25:28" coords="-183.26,-28.99,-181.25,-21.95">
+				<class name="sporadicflaw" magnitude="0.58" value="8.15"/>
+				<image src="../image/defect/3318548_395916_def.jpg" clipcoords="-198.26,-43.99,-166.25,-6.95"/>
+				<pds>
+					<pd>
+						<x>-183.26,-183.26,-181.25,-181.25</x>
+						<y>-28.99,-21.95,-21.95,-28.99</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3318574">
+			<defect id="d3318574_1" format="395939" date="2026-10-05" time="15:25:30" coords="68.73,-172.41,70.74,-167.79">
+				<class name="sporadicflaw" magnitude="0.54" value="5.89"/>
+				<image src="../image/defect/3318574_395939_def.jpg" clipcoords="53.73,-187.41,85.74,-152.79"/>
+				<pds>
+					<pd>
+						<x>68.73,68.73,70.74,70.74</x>
+						<y>-172.41,-167.79,-167.79,-172.41</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3318657">
+			<defect id="d3318657_1" format="396001" date="2026-10-05" time="15:25:36" coords="30.96,175.37,33.20,178.45">
+				<class name="sporadicflaw" magnitude="0.52" value="5.06"/>
+				<image src="../image/defect/3318657_396001_def.jpg" clipcoords="15.96,160.37,48.20,193.45"/>
+				<pds>
+					<pd>
+						<x>30.96,30.96,33.20,33.20</x>
+						<y>175.37,178.45,178.45,175.37</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3319421">
+			<defect id="d3319421_1" format="396591" date="2026-10-05" time="15:26:29" coords="293.52,18.08,295.75,19.84">
+				<class name="sporadicflaw" magnitude="0.51" value="4.66"/>
+				<image src="../image/defect/3319421_396591_def.jpg" clipcoords="278.52,3.08,310.75,34.84"/>
+				<pds>
+					<pd>
+						<x>293.52,293.52,295.75,295.75</x>
+						<y>18.08,19.84,19.84,18.08</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3319435">
+			<defect id="d3319435_1" format="396600" date="2026-10-05" time="15:26:30" coords="438.76,33.04,440.55,35.24">
+				<class name="sporadicflaw" magnitude="0.51" value="4.42"/>
+				<image src="../image/defect/3319435_396600_def.jpg" clipcoords="423.76,18.04,455.55,50.24"/>
+				<pds>
+					<pd>
+						<x>438.76,438.76,440.55,440.55</x>
+						<y>33.04,35.24,35.24,33.04</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3319927">
+			<defect id="d3319927_1" format="396998" date="2026-10-05" time="15:27:06" coords="310.50,82.76,311.84,85.40">
+				<class name="sporadicflaw" magnitude="0.52" value="4.76"/>
+				<image src="../image/defect/3319927_396998_def.jpg" clipcoords="295.50,67.76,326.84,100.40"/>
+				<pds>
+					<pd>
+						<x>310.50,310.50,311.84,311.84</x>
+						<y>82.76,85.40,85.40,82.76</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3320054">
+			<defect id="d3320054_1" format="397095" date="2026-10-05" time="15:27:15" coords="5.27,240.70,7.50,242.90">
+				<class name="sporadicflaw" magnitude="0.51" value="4.57"/>
+				<image src="../image/defect/3320054_397095_def.jpg" clipcoords="-9.73,225.70,22.50,257.90"/>
+				<pds>
+					<pd>
+						<x>5.27,5.27,7.50,7.50</x>
+						<y>240.70,242.90,242.90,240.70</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3320221">
+			<defect id="d3320221_1" format="397242" date="2026-10-05" time="15:27:28" coords="393.63,-195.73,396.98,-191.99">
+				<class name="sporadicflaw" magnitude="0.60" value="9.14"/>
+				<image src="../image/defect/3320221_397242_def.jpg" clipcoords="378.63,-210.73,411.98,-176.99"/>
+				<pds>
+					<pd>
+						<x>393.63,393.63,396.98,396.98</x>
+						<y>-195.73,-191.99,-191.99,-195.73</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3320917">
+			<defect id="d3320917_1" format="397757" date="2026-10-05" time="15:28:14" coords="281.01,-24.59,282.79,-22.39">
+				<class name="sporadicflaw" magnitude="0.50" value="4.03"/>
+				<image src="../image/defect/3320917_397757_def.jpg" clipcoords="266.01,-39.59,297.79,-7.39"/>
+				<pds>
+					<pd>
+						<x>281.01,281.01,282.79,282.79</x>
+						<y>-24.59,-22.39,-22.39,-24.59</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3320947">
+			<defect id="d3320947_1" format="397784" date="2026-10-05" time="15:28:17" coords="395.86,-231.15,397.65,-185.17">
+				<class name="sporadicstreak" magnitude="0.64" value="1.78"/>
+				<image src="../image/defect/3320947_397784_def.jpg" clipcoords="380.86,-246.15,412.65,-170.17"/>
+				<pds>
+					<pd>
+						<x>395.86,395.86,397.65,397.65</x>
+						<y>-231.15,-185.17,-185.17,-231.15</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3321108">
+			<defect id="d3321108_1" format="397926" date="2026-10-05" time="15:28:30" coords="-466.09,-147.34,-461.18,-145.36">
+				<class name="sporadicflaw" magnitude="0.51" value="4.56"/>
+				<image src="../image/defect/3321108_397926_def.jpg" clipcoords="-481.09,-162.34,-446.18,-130.36"/>
+				<pds>
+					<pd>
+						<x>-466.09,-466.09,-461.18,-461.18</x>
+						<y>-147.34,-145.36,-145.36,-147.34</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3321670">
+			<defect id="d3321670_1" format="398344" date="2026-10-05" time="15:29:07" coords="278.77,304.05,281.90,316.37">
+				<class name="sporadicflaw" magnitude="0.52" value="5.06"/>
+				<image src="../image/defect/3321670_398344_def.jpg" clipcoords="263.77,289.05,296.90,320.67"/>
+				<pds>
+					<pd>
+						<x>278.77,278.77,281.90,281.90</x>
+						<y>304.05,316.37,316.37,304.05</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3321714">
+			<defect id="d3321714_1" format="398367" date="2026-10-05" time="15:29:09" coords="-254.24,302.95,-252.23,306.03">
+				<class name="sporadicflaw" magnitude="0.52" value="4.91"/>
+				<image src="../image/defect/3321714_398367_def.jpg" clipcoords="-269.24,287.95,-237.23,320.67"/>
+				<pds>
+					<pd>
+						<x>-254.24,-254.24,-252.23,-252.23</x>
+						<y>302.95,306.03,306.03,302.95</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3321768">
+			<defect id="d3321768_1" format="398382" date="2026-10-05" time="15:29:11" coords="269.61,45.36,271.40,48.44">
+				<class name="sporadicflaw" magnitude="0.53" value="5.11"/>
+				<image src="../image/defect/3321768_398382_def.jpg" clipcoords="254.61,30.36,286.40,63.44"/>
+				<pds>
+					<pd>
+						<x>269.61,269.61,271.40,271.40</x>
+						<y>45.36,48.44,48.44,45.36</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3321813">
+			<defect id="d3321813_1" format="398398" date="2026-10-05" time="15:29:12" coords="-388.41,-183.19,-386.17,-179.23">
+				<class name="sporadicflaw" magnitude="0.56" value="6.72"/>
+				<image src="../image/defect/3321813_398398_def.jpg" clipcoords="-403.41,-198.19,-371.17,-164.23"/>
+				<pds>
+					<pd>
+						<x>-388.41,-388.41,-386.17,-386.17</x>
+						<y>-183.19,-179.23,-179.23,-183.19</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3321827">
+			<defect id="d3321827_1" format="398404" date="2026-10-05" time="15:29:13" coords="73.20,274.35,79.01,279.63">
+				<class name="sporadicflaw" magnitude="0.67" value="17.74"/>
+				<image src="../image/defect/3321827_398404_def.jpg" clipcoords="58.20,259.35,94.01,294.63"/>
+				<pds>
+					<pd>
+						<x>73.20,73.20,79.01,79.01</x>
+						<y>274.35,279.63,279.63,274.35</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3322912">
+			<defect id="d3322912_1" format="399252" date="2026-10-05" time="15:30:29" coords="-576.37,202.20,-573.69,206.16">
+				<class name="sporadicflaw" magnitude="0.57" value="7.31"/>
+				<image src="../image/defect/3322912_399252_def.jpg" clipcoords="-591.37,187.20,-558.69,221.16"/>
+				<pds>
+					<pd>
+						<x>-576.37,-576.37,-573.69,-573.69</x>
+						<y>202.20,206.16,206.16,202.20</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3323084">
+			<defect id="d3323084_1" format="399404" date="2026-10-05" time="15:30:43" coords="-545.11,73.52,-541.76,227.94">
+				<class name="sporadicstreak" magnitude="0.69" value="2.23"/>
+				<image src="../image/defect/3323084_399404_def.jpg" clipcoords="-560.11,58.52,-526.76,242.94"/>
+				<pds>
+					<pd>
+						<x>-545.11,-545.11,-541.76,-541.76</x>
+						<y>108.23,227.94,227.94,108.23</y>
+					</pd>
+					<pd>
+						<x>-545.11,-545.11,-541.76,-541.76</x>
+						<y>73.52,98.42,98.42,73.52</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3323296">
+			<defect id="d3323296_1" format="399577" date="2026-10-05" time="15:30:59" coords="541.10,288.65,542.89,292.83">
+				<class name="sporadicflaw" magnitude="0.51" value="4.62"/>
+				<image src="../image/defect/3323296_399577_def.jpg" clipcoords="526.10,273.65,557.89,307.83"/>
+				<pds>
+					<pd>
+						<x>541.10,541.10,542.89,542.89</x>
+						<y>288.65,292.83,292.83,288.65</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3323667">
+			<defect id="d3323667_1" format="399880" date="2026-10-05" time="15:31:26" coords="-345.32,246.20,-341.75,252.36">
+				<class name="sporadicflaw" magnitude="0.64" value="13.65"/>
+				<image src="../image/defect/3323667_399880_def.jpg" clipcoords="-360.32,231.20,-326.75,267.36"/>
+				<pds>
+					<pd>
+						<x>-345.32,-345.32,-341.75,-341.75</x>
+						<y>246.20,252.36,252.36,246.20</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3324255">
+			<defect id="d3324255_1" format="400401" date="2026-10-05" time="15:32:13" coords="506.24,90.68,508.48,93.32">
+				<class name="sporadicflaw" magnitude="0.56" value="6.53"/>
+				<image src="../image/defect/3324255_400401_def.jpg" clipcoords="491.24,75.68,523.48,108.32"/>
+				<pds>
+					<pd>
+						<x>506.24,506.24,508.48,508.48</x>
+						<y>90.68,93.32,93.32,90.68</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3324830">
+			<defect id="d3324830_1" format="400837" date="2026-10-05" time="15:32:52" coords="-349.34,261.60,-347.33,264.89">
+				<class name="sporadicflaw" magnitude="0.50" value="4.17"/>
+				<image src="../image/defect/3324830_400837_def.jpg" clipcoords="-364.34,246.60,-332.33,279.89"/>
+				<pds>
+					<pd>
+						<x>-349.34,-349.34,-347.33,-347.33</x>
+						<y>261.60,264.89,264.89,261.60</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3324910">
+			<defect id="d3324910_1" format="400920" date="2026-10-05" time="15:33:00" coords="-554.71,-41.09,-551.81,-38.45">
+				<class name="sporadicflaw" magnitude="0.50" value="4.22"/>
+				<image src="../image/defect/3324910_400920_def.jpg" clipcoords="-569.71,-56.09,-536.81,-23.45"/>
+				<pds>
+					<pd>
+						<x>-554.71,-554.71,-551.81,-551.81</x>
+						<y>-41.09,-38.45,-38.45,-41.09</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3325116">
+			<defect id="d3325116_1" format="401073" date="2026-10-05" time="15:33:13" coords="335.53,256.98,338.21,259.62">
+				<class name="sporadicflaw" magnitude="0.51" value="4.57"/>
+				<image src="../image/defect/3325116_401073_def.jpg" clipcoords="320.53,241.98,353.21,274.62"/>
+				<pds>
+					<pd>
+						<x>335.53,335.53,338.21,338.21</x>
+						<y>256.98,259.62,259.62,256.98</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3326406">
+			<defect id="d3326406_1" format="402047" date="2026-10-05" time="15:34:41" coords="61.13,34.80,62.92,40.08">
+				<class name="sporadicflaw" magnitude="0.53" value="5.21"/>
+				<image src="../image/defect/3326406_402047_def.jpg" clipcoords="46.13,19.80,77.92,55.08"/>
+				<pds>
+					<pd>
+						<x>61.13,61.13,62.92,62.92</x>
+						<y>34.80,40.08,40.08,34.80</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3327035">
+			<defect id="d3327035_1" format="402337" date="2026-10-05" time="15:35:07" coords="508.48,189.22,510.27,191.42">
+				<class name="sporadicflaw" magnitude="0.51" value="4.52"/>
+				<image src="../image/defect/3327035_402337_def.jpg" clipcoords="493.48,174.22,525.27,206.42"/>
+				<pds>
+					<pd>
+						<x>508.48,508.48,510.27,510.27</x>
+						<y>189.22,191.42,191.42,189.22</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3328224">
+			<defect id="d3328224_1" format="403104" date="2026-10-05" time="15:36:17" coords="132.41,-142.50,134.20,-137.88">
+				<class name="sporadicflaw" magnitude="0.53" value="5.16"/>
+				<image src="../image/defect/3328224_403104_def.jpg" clipcoords="117.41,-157.50,149.20,-122.88"/>
+				<pds>
+					<pd>
+						<x>132.41,132.41,134.20,134.20</x>
+						<y>-142.50,-137.88,-137.88,-142.50</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3328565">
+			<defect id="d3328565_1" format="403406" date="2026-10-05" time="15:36:44" coords="-452.25,2.25,-449.57,6.65">
+				<class name="sporadicflaw" magnitude="0.50" value="4.07"/>
+				<image src="../image/defect/3328565_403406_def.jpg" clipcoords="-467.25,-12.75,-434.57,21.65"/>
+				<pds>
+					<pd>
+						<x>-452.25,-452.25,-449.57,-449.57</x>
+						<y>2.25,6.65,6.65,2.25</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3328901">
+			<defect id="d3328901_1" format="403706" date="2026-10-05" time="15:37:11" coords="18.90,23.80,22.70,29.52">
+				<class name="sporadicflaw" magnitude="0.62" value="11.40"/>
+				<image src="../image/defect/3328901_403706_def.jpg" clipcoords="3.90,8.80,37.70,44.52"/>
+				<pds>
+					<pd>
+						<x>18.90,18.90,22.70,22.70</x>
+						<y>23.80,29.52,29.52,23.80</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3328916">
+			<defect id="d3328916_1" format="403717" date="2026-10-05" time="15:37:12" coords="35.43,-51.43,40.80,-49.23">
+				<class name="sporadicflaw" magnitude="0.53" value="5.25"/>
+				<image src="../image/defect/3328916_403717_def.jpg" clipcoords="20.43,-66.43,55.80,-34.23"/>
+				<pds>
+					<pd>
+						<x>35.43,35.43,40.80,40.80</x>
+						<y>-51.43,-49.23,-49.23,-51.43</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3329043">
+			<defect id="d3329043_1" format="403823" date="2026-10-05" time="15:37:21" coords="98.89,-59.57,104.70,-56.27">
+				<class name="sporadicflaw" magnitude="0.62" value="11.01"/>
+				<image src="../image/defect/3329043_403823_def.jpg" clipcoords="83.89,-74.57,119.70,-41.27"/>
+				<pds>
+					<pd>
+						<x>98.89,98.89,104.70,104.70</x>
+						<y>-59.57,-56.27,-56.27,-59.57</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3329056">
+			<defect id="d3329056_1" format="403835" date="2026-10-05" time="15:37:23" coords="96.66,210.34,101.13,213.42">
+				<class name="sporadicflaw" magnitude="0.58" value="7.66"/>
+				<image src="../image/defect/3329056_403835_def.jpg" clipcoords="81.66,195.34,116.13,228.42"/>
+				<pds>
+					<pd>
+						<x>96.66,96.66,101.13,101.13</x>
+						<y>210.34,213.42,213.42,210.34</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3329253">
+			<defect id="d3329253_1" format="403998" date="2026-10-05" time="15:37:37" coords="-117.40,143.91,-113.83,146.77">
+				<class name="sporadicflaw" magnitude="0.52" value="5.00"/>
+				<image src="../image/defect/3329253_403998_def.jpg" clipcoords="-132.40,128.91,-98.83,161.77"/>
+				<pds>
+					<pd>
+						<x>-117.40,-117.40,-113.83,-113.83</x>
+						<y>143.91,146.77,146.77,143.91</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3329373">
+			<defect id="d3329373_1" format="404107" date="2026-10-05" time="15:37:47" coords="-288.40,142.15,-286.17,144.79">
+				<class name="sporadicflaw" magnitude="0.53" value="5.20"/>
+				<image src="../image/defect/3329373_404107_def.jpg" clipcoords="-303.40,127.15,-271.17,159.79"/>
+				<pds>
+					<pd>
+						<x>-288.40,-288.40,-286.17,-286.17</x>
+						<y>142.15,144.79,144.79,142.15</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3329416">
+			<defect id="d3329416_1" format="404141" date="2026-10-05" time="15:37:50" coords="-344.88,232.78,-340.41,235.64">
+				<class name="sporadicflaw" magnitude="0.51" value="4.66"/>
+				<image src="../image/defect/3329416_404141_def.jpg" clipcoords="-359.88,217.78,-325.41,250.64"/>
+				<pds>
+					<pd>
+						<x>-344.88,-344.88,-340.41,-340.41</x>
+						<y>232.78,235.64,235.64,232.78</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3329490">
+			<defect id="d3329490_1" format="404204" date="2026-10-05" time="15:37:56" coords="-443.77,-197.71,-438.63,-194.41">
+				<class name="sporadicflaw" magnitude="0.61" value="9.91"/>
+				<image src="../image/defect/3329490_404204_def.jpg" clipcoords="-458.77,-212.71,-423.63,-179.41"/>
+				<pds>
+					<pd>
+						<x>-443.77,-443.77,-438.63,-438.63</x>
+						<y>-197.71,-194.41,-194.41,-197.71</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3330000">
+			<defect id="d3330000_1" format="404637" date="2026-10-05" time="15:38:35" coords="-153.57,236.96,-151.11,240.04">
+				<class name="sporadicflaw" magnitude="0.53" value="5.40"/>
+				<image src="../image/defect/3330000_404637_def.jpg" clipcoords="-168.57,221.96,-136.11,255.04"/>
+				<pds>
+					<pd>
+						<x>-153.57,-153.57,-151.11,-151.11</x>
+						<y>236.96,240.04,240.04,236.96</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3330499">
+			<defect id="d3330499_1" format="405007" date="2026-10-05" time="15:39:08" coords="474.29,251.70,475.86,254.78">
+				<class name="sporadicflaw" magnitude="0.52" value="5.01"/>
+				<image src="../image/defect/3330499_405007_def.jpg" clipcoords="459.29,236.70,490.86,269.78"/>
+				<pds>
+					<pd>
+						<x>474.29,474.29,475.86,475.86</x>
+						<y>251.70,254.78,254.78,251.70</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3331015">
+			<defect id="d3331015_1" format="405406" date="2026-10-05" time="15:39:44" coords="354.07,-43.29,374.41,-14.47">
+				<class name="sporadicflaw" magnitude="0.52" value="5.06"/>
+				<image src="../image/defect/3331015_405406_def.jpg" clipcoords="339.07,-58.29,389.41,0.53"/>
+				<pds>
+					<pd>
+						<x>354.10,354.10,374.41,374.41</x>
+						<y>-36.07,-14.47,-14.47,-36.07</y>
+					</pd>
+					<pd>
+						<x>354.07,354.07,358.74,358.74</x>
+						<y>-43.29,-38.85,-38.85,-43.29</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3331053">
+			<defect id="d3331053_1" format="405410" date="2026-10-05" time="15:39:45" coords="346.48,199.12,359.88,221.78">
+				<class name="sporadicflaw" magnitude="0.53" value="5.45"/>
+				<image src="../image/defect/3331053_405410_def.jpg" clipcoords="331.48,184.12,374.88,236.78"/>
+				<pds>
+					<pd>
+						<x>346.48,346.48,359.88,359.88</x>
+						<y>199.12,221.78,221.78,199.12</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3331040">
+			<defect id="d3331040_1" format="405409" date="2026-10-05" time="15:39:44" coords="350.95,6.87,359.66,65.60">
+				<class name="flaw" magnitude="0.47" value="3.19"/>
+				<image src="../image/defect/3331040_405409_def.jpg" clipcoords="335.95,-8.13,374.66,80.60"/>
+				<pds>
+					<pd>
+						<x>350.95,350.95,359.66,359.66</x>
+						<y>6.87,35.72,35.72,6.87</y>
+					</pd>
+					<pd>
+						<x>350.95,350.95,359.19,359.19</x>
+						<y>54.12,65.60,65.60,54.12</y>
+					</pd>
+				</pds>
+			</defect>
+			<defect id="d3331040_2" format="405410" date="2026-10-05" time="15:39:45" coords="349.83,-17.11,361.45,37.88">
+				<class name="flaw" magnitude="0.49" value="3.78"/>
+				<image src="../image/defect/3331040_405410_def.jpg" clipcoords="334.83,-32.11,376.45,52.88"/>
+				<pds>
+					<pd>
+						<x>349.83,349.83,361.45,361.45</x>
+						<y>-17.11,0.75,0.75,-17.11</y>
+					</pd>
+					<pd>
+						<x>349.83,349.83,358.97,358.97</x>
+						<y>24.64,37.88,37.88,24.64</y>
+					</pd>
+				</pds>
+			</defect>
+			<defect id="d3331040_3" format="405411" date="2026-10-05" time="15:39:45" coords="345.36,-38.23,358.10,73.52">
+				<class name="flaw" magnitude="0.49" value="3.78"/>
+				<pds>
+					<pd>
+						<x>345.36,345.36,358.10,358.10</x>
+						<y>-38.23,-19.71,-19.71,-38.23</y>
+					</pd>
+					<pd>
+						<x>345.36,345.36,358.10,358.10</x>
+						<y>58.30,73.52,73.52,58.30</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3331117">
+			<defect id="d3331117_1" format="405427" date="2026-10-05" time="15:39:46" coords="-37.71,-164.93,-35.70,-153.28">
+				<class name="sporadicflaw" magnitude="0.51" value="4.41"/>
+				<image src="../image/defect/3331117_405427_def.jpg" clipcoords="-52.71,-179.93,-20.70,-138.28"/>
+				<pds>
+					<pd>
+						<x>-37.71,-37.71,-35.70,-35.70</x>
+						<y>-164.93,-153.28,-153.28,-164.93</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+		<group id="dGid_3331611">
+			<defect id="d3331611_1" format="405822" date="2026-10-05" time="15:40:22" coords="222.46,-70.78,224.47,-67.05">
+				<class name="sporadicflaw" magnitude="0.50" value="4.17"/>
+				<image src="../image/defect/3331611_405822_def.jpg" clipcoords="207.46,-85.78,239.47,-52.05"/>
+				<pds>
+					<pd>
+						<x>222.46,222.46,224.47,224.47</x>
+						<y>-70.78,-67.05,-67.05,-70.78</y>
+					</pd>
+				</pds>
+			</defect>
+		</group>
+   </defects>
+	<sampleinspection>
+		<barcodemodule>
+			<statusprotocol>
+				<inactive format="391100" date="2026-10-05" time="15:18:15"/>
+			</statusprotocol>
+
+			<parameter>
+				<param format="391100" warnlevel="3.5" errlevel="3.5"/>
+			</parameter>
+
+
+
+
+		</barcodemodule>
+		<rlmmodule>
+			<statusprotocol>
+				<inactive format="391100" date="2026-10-05" time="15:18:15"/>
+			</statusprotocol>
+
+			<tolerances>
+				<tol format="391100" tolid="52459" errshrink="5.08" errexpand="5.08" wrnshrink="5.08" wrnexpand="5.08" nomlength="655.63873"/>
+			</tolerances>
+
+			<monitorings>
+				<monpoint id="rlm_55762" format="391113" date="2026-10-05" time="15:18:15" curlength="653.20461" webspeed="433.60000"/>
+				<monpoint id="rlm_55763" format="391143" date="2026-10-05" time="15:18:18" curlength="653.42978" webspeed="433.66667"/>
+				<monpoint id="rlm_55764" format="391173" date="2026-10-05" time="15:18:20" curlength="653.64947" webspeed="433.46667"/>
+				<monpoint id="rlm_55765" format="391203" date="2026-10-05" time="15:18:23" curlength="653.53048" webspeed="434.36667"/>
+				<monpoint id="rlm_55766" format="391233" date="2026-10-05" time="15:18:26" curlength="653.52858" webspeed="434.70000"/>
+				<monpoint id="rlm_55767" format="391263" date="2026-10-05" time="15:18:29" curlength="653.66539" webspeed="434.03333"/>
+				<monpoint id="rlm_55768" format="391293" date="2026-10-05" time="15:18:31" curlength="653.64590" webspeed="434.73333"/>
+				<monpoint id="rlm_55769" format="391323" date="2026-10-05" time="15:18:34" curlength="653.61207" webspeed="434.30000"/>
+				<monpoint id="rlm_55770" format="391353" date="2026-10-05" time="15:18:37" curlength="653.51341" webspeed="434.63333"/>
+				<monpoint id="rlm_55771" format="391383" date="2026-10-05" time="15:18:39" curlength="653.65565" webspeed="435.50000"/>
+				<monpoint id="rlm_55772" format="391413" date="2026-10-05" time="15:18:42" curlength="653.56682" webspeed="433.46667"/>
+				<monpoint id="rlm_55773" format="391443" date="2026-10-05" time="15:18:45" curlength="653.54325" webspeed="434.16667"/>
+				<monpoint id="rlm_55774" format="391473" date="2026-10-05" time="15:18:47" curlength="653.63931" webspeed="434.06667"/>
+				<monpoint id="rlm_55775" format="391503" date="2026-10-05" time="15:18:50" curlength="653.64015" webspeed="433.10000"/>
+				<monpoint id="rlm_55776" format="391533" date="2026-10-05" time="15:18:53" curlength="653.51475" webspeed="434.20000"/>
+				<monpoint id="rlm_55777" format="391563" date="2026-10-05" time="15:18:56" curlength="653.65073" webspeed="433.76667"/>
+				<monpoint id="rlm_55778" format="391593" date="2026-10-05" time="15:18:58" curlength="653.48125" webspeed="433.03333"/>
+				<monpoint id="rlm_55779" format="391623" date="2026-10-05" time="15:19:01" curlength="653.54816" webspeed="433.76667"/>
+				<monpoint id="rlm_55780" format="391653" date="2026-10-05" time="15:19:04" curlength="653.47308" webspeed="433.60000"/>
+				<monpoint id="rlm_55781" format="391683" date="2026-10-05" time="15:19:06" curlength="653.47233" webspeed="433.76667"/>
+				<monpoint id="rlm_55782" format="391713" date="2026-10-05" time="15:19:09" curlength="653.46742" webspeed="433.80000"/>
+				<monpoint id="rlm_55783" format="391743" date="2026-10-05" time="15:19:12" curlength="653.67439" webspeed="434.36667"/>
+				<monpoint id="rlm_55784" format="391773" date="2026-10-05" time="15:19:15" curlength="653.62140" webspeed="433.43333"/>
+				<monpoint id="rlm_55785" format="391803" date="2026-10-05" time="15:19:17" curlength="653.58882" webspeed="433.33333"/>
+				<monpoint id="rlm_55786" format="391833" date="2026-10-05" time="15:19:20" curlength="653.59290" webspeed="433.53333"/>
+				<monpoint id="rlm_55787" format="391863" date="2026-10-05" time="15:19:23" curlength="653.51758" webspeed="435.06667"/>
+				<monpoint id="rlm_55788" format="391893" date="2026-10-05" time="15:19:25" curlength="653.60715" webspeed="434.26667"/>
+				<monpoint id="rlm_55789" format="391923" date="2026-10-05" time="15:19:28" curlength="653.70939" webspeed="434.23333"/>
+				<monpoint id="rlm_55790" format="391953" date="2026-10-05" time="15:19:31" curlength="653.42593" webspeed="434.83333"/>
+				<monpoint id="rlm_55791" format="391983" date="2026-10-05" time="15:19:33" curlength="653.39451" webspeed="433.80000"/>
+				<monpoint id="rlm_55792" format="392013" date="2026-10-05" time="15:19:36" curlength="653.32285" webspeed="433.13333"/>
+				<monpoint id="rlm_55793" format="392043" date="2026-10-05" time="15:19:39" curlength="653.27594" webspeed="433.50000"/>
+				<monpoint id="rlm_55794" format="392073" date="2026-10-05" time="15:19:42" curlength="653.29227" webspeed="434.06667"/>
+				<monpoint id="rlm_55795" format="392103" date="2026-10-05" time="15:19:44" curlength="653.60631" webspeed="432.80000"/>
+				<monpoint id="rlm_55796" format="392133" date="2026-10-05" time="15:19:47" curlength="653.43326" webspeed="434.76667"/>
+				<monpoint id="rlm_55797" format="392163" date="2026-10-05" time="15:19:50" curlength="653.53382" webspeed="434.33333"/>
+				<monpoint id="rlm_55798" format="392193" date="2026-10-05" time="15:19:52" curlength="653.33710" webspeed="433.63333"/>
+				<monpoint id="rlm_55799" format="392223" date="2026-10-05" time="15:19:55" curlength="653.60998" webspeed="434.43333"/>
+				<monpoint id="rlm_55800" format="392253" date="2026-10-05" time="15:19:58" curlength="653.47725" webspeed="434.63333"/>
+				<monpoint id="rlm_55801" format="392283" date="2026-10-05" time="15:20:01" curlength="653.67597" webspeed="434.26667"/>
+				<monpoint id="rlm_55802" format="392313" date="2026-10-05" time="15:20:03" curlength="653.62956" webspeed="434.40000"/>
+				<monpoint id="rlm_55803" format="392343" date="2026-10-05" time="15:20:06" curlength="653.68006" webspeed="433.93333"/>
+				<monpoint id="rlm_55804" format="392373" date="2026-10-05" time="15:20:09" curlength="653.54482" webspeed="434.73333"/>
+				<monpoint id="rlm_55805" format="392403" date="2026-10-05" time="15:20:11" curlength="653.67031" webspeed="434.43333"/>
+				<monpoint id="rlm_55806" format="392433" date="2026-10-05" time="15:20:14" curlength="653.55708" webspeed="434.33333"/>
+				<monpoint id="rlm_55807" format="392463" date="2026-10-05" time="15:20:17" curlength="653.54724" webspeed="433.33333"/>
+				<monpoint id="rlm_55808" format="392493" date="2026-10-05" time="15:20:19" curlength="653.57299" webspeed="434.16667"/>
+				<monpoint id="rlm_55809" format="392523" date="2026-10-05" time="15:20:22" curlength="653.61532" webspeed="433.86667"/>
+				<monpoint id="rlm_55810" format="392553" date="2026-10-05" time="15:20:25" curlength="653.61323" webspeed="434.53333"/>
+				<monpoint id="rlm_55811" format="392583" date="2026-10-05" time="15:20:28" curlength="653.67764" webspeed="433.96667"/>
+				<monpoint id="rlm_55812" format="392613" date="2026-10-05" time="15:20:30" curlength="653.64015" webspeed="433.43333"/>
+				<monpoint id="rlm_55813" format="392643" date="2026-10-05" time="15:20:33" curlength="653.62474" webspeed="434.10000"/>
+				<monpoint id="rlm_55814" format="392673" date="2026-10-05" time="15:20:36" curlength="653.58306" webspeed="433.33333"/>
+				<monpoint id="rlm_55815" format="392703" date="2026-10-05" time="15:20:38" curlength="653.52366" webspeed="433.36667"/>
+				<monpoint id="rlm_55816" format="392733" date="2026-10-05" time="15:20:41" curlength="653.55216" webspeed="434.26667"/>
+				<monpoint id="rlm_55817" format="392763" date="2026-10-05" time="15:20:44" curlength="653.74039" webspeed="433.86667"/>
+				<monpoint id="rlm_55818" format="392793" date="2026-10-05" time="15:20:47" curlength="653.48292" webspeed="434.63333"/>
+				<monpoint id="rlm_55819" format="392823" date="2026-10-05" time="15:20:49" curlength="653.60882" webspeed="433.36667"/>
+				<monpoint id="rlm_55820" format="392853" date="2026-10-05" time="15:20:52" curlength="653.59332" webspeed="433.60000"/>
+				<monpoint id="rlm_55821" format="392883" date="2026-10-05" time="15:20:55" curlength="653.49108" webspeed="434.56667"/>
+				<monpoint id="rlm_55822" format="392913" date="2026-10-05" time="15:20:57" curlength="653.73705" webspeed="434.70000"/>
+				<monpoint id="rlm_55823" format="392943" date="2026-10-05" time="15:21:00" curlength="653.70897" webspeed="434.03333"/>
+				<monpoint id="rlm_55824" format="392973" date="2026-10-05" time="15:21:03" curlength="653.62998" webspeed="434.73333"/>
+				<monpoint id="rlm_55825" format="393003" date="2026-10-05" time="15:21:05" curlength="653.55624" webspeed="434.16667"/>
+				<monpoint id="rlm_55826" format="393033" date="2026-10-05" time="15:21:08" curlength="653.49108" webspeed="434.33333"/>
+				<monpoint id="rlm_55827" format="393063" date="2026-10-05" time="15:21:11" curlength="653.57090" webspeed="435.26667"/>
+				<monpoint id="rlm_55828" format="393093" date="2026-10-05" time="15:21:14" curlength="653.63690" webspeed="433.80000"/>
+				<monpoint id="rlm_55829" format="393123" date="2026-10-05" time="15:21:16" curlength="653.41776" webspeed="434.23333"/>
+				<monpoint id="rlm_55830" format="393153" date="2026-10-05" time="15:21:19" curlength="653.63198" webspeed="433.36667"/>
+				<monpoint id="rlm_55831" format="393183" date="2026-10-05" time="15:21:22" curlength="653.61249" webspeed="433.60000"/>
+				<monpoint id="rlm_55832" format="393213" date="2026-10-05" time="15:21:24" curlength="653.49266" webspeed="433.93333"/>
+				<monpoint id="rlm_55833" format="393243" date="2026-10-05" time="15:21:27" curlength="653.56682" webspeed="433.36667"/>
+				<monpoint id="rlm_55834" format="393273" date="2026-10-05" time="15:21:30" curlength="653.45484" webspeed="432.96667"/>
+				<monpoint id="rlm_55835" format="393303" date="2026-10-05" time="15:21:32" curlength="653.38718" webspeed="434.26667"/>
+				<monpoint id="rlm_55836" format="393333" date="2026-10-05" time="15:21:35" curlength="653.47233" webspeed="433.43333"/>
+				<monpoint id="rlm_55837" format="393363" date="2026-10-05" time="15:21:38" curlength="653.49999" webspeed="434.20000"/>
+				<monpoint id="rlm_55838" format="393393" date="2026-10-05" time="15:21:41" curlength="653.53591" webspeed="434.36667"/>
+				<monpoint id="rlm_55839" format="393423" date="2026-10-05" time="15:21:43" curlength="653.34610" webspeed="433.70000"/>
+				<monpoint id="rlm_55840" format="393453" date="2026-10-05" time="15:21:46" curlength="653.59931" webspeed="433.80000"/>
+				<monpoint id="rlm_55841" format="393483" date="2026-10-05" time="15:21:49" curlength="653.40801" webspeed="434.96667"/>
+				<monpoint id="rlm_55842" format="393513" date="2026-10-05" time="15:21:51" curlength="653.38718" webspeed="434.66667"/>
+				<monpoint id="rlm_55843" format="393543" date="2026-10-05" time="15:21:54" curlength="653.38068" webspeed="434.60000"/>
+				<monpoint id="rlm_55844" format="393573" date="2026-10-05" time="15:21:57" curlength="653.23612" webspeed="434.30000"/>
+				<monpoint id="rlm_55845" format="393603" date="2026-10-05" time="15:22:00" curlength="653.38342" webspeed="433.16667"/>
+				<monpoint id="rlm_55846" format="393633" date="2026-10-05" time="15:22:02" curlength="653.38685" webspeed="433.76667"/>
+				<monpoint id="rlm_55847" format="393663" date="2026-10-05" time="15:22:05" curlength="653.44133" webspeed="434.40000"/>
+				<monpoint id="rlm_55848" format="393693" date="2026-10-05" time="15:22:08" curlength="653.53424" webspeed="433.00000"/>
+				<monpoint id="rlm_55849" format="393723" date="2026-10-05" time="15:22:10" curlength="653.43326" webspeed="433.70000"/>
+				<monpoint id="rlm_55850" format="393753" date="2026-10-05" time="15:22:13" curlength="653.55373" webspeed="434.16667"/>
+				<monpoint id="rlm_55851" format="393783" date="2026-10-05" time="15:22:16" curlength="653.50408" webspeed="434.43333"/>
+				<monpoint id="rlm_55852" format="393813" date="2026-10-05" time="15:22:18" curlength="653.38476" webspeed="434.16667"/>
+				<monpoint id="rlm_55853" format="393843" date="2026-10-05" time="15:22:21" curlength="653.42834" webspeed="434.93333"/>
+				<monpoint id="rlm_55854" format="393873" date="2026-10-05" time="15:22:24" curlength="653.32285" webspeed="434.33333"/>
+				<monpoint id="rlm_55855" format="393903" date="2026-10-05" time="15:22:27" curlength="653.39326" webspeed="433.33333"/>
+				<monpoint id="rlm_55856" format="393933" date="2026-10-05" time="15:22:29" curlength="653.21203" webspeed="434.43333"/>
+				<monpoint id="rlm_55857" format="393963" date="2026-10-05" time="15:22:32" curlength="653.40184" webspeed="433.56667"/>
+				<monpoint id="rlm_55858" format="393993" date="2026-10-05" time="15:22:35" curlength="653.38926" webspeed="433.96667"/>
+				<monpoint id="rlm_55859" format="394023" date="2026-10-05" time="15:22:37" curlength="653.42426" webspeed="434.53333"/>
+				<monpoint id="rlm_55860" format="394053" date="2026-10-05" time="15:22:40" curlength="653.38592" webspeed="435.30000"/>
+				<monpoint id="rlm_55861" format="394083" date="2026-10-05" time="15:22:43" curlength="653.26703" webspeed="434.00000"/>
+				<monpoint id="rlm_55862" format="394113" date="2026-10-05" time="15:22:46" curlength="653.42959" webspeed="434.03333"/>
+				<monpoint id="rlm_55863" format="394143" date="2026-10-05" time="15:22:48" curlength="653.40750" webspeed="434.10000"/>
+				<monpoint id="rlm_55864" format="394173" date="2026-10-05" time="15:22:51" curlength="653.38026" webspeed="433.13333"/>
+				<monpoint id="rlm_55865" format="394203" date="2026-10-05" time="15:22:54" curlength="653.28577" webspeed="433.63333"/>
+				<monpoint id="rlm_55866" format="394233" date="2026-10-05" time="15:22:56" curlength="653.35334" webspeed="434.46667"/>
+				<monpoint id="rlm_55867" format="394263" date="2026-10-05" time="15:22:59" curlength="653.46500" webspeed="432.60000"/>
+				<monpoint id="rlm_55868" format="394293" date="2026-10-05" time="15:23:02" curlength="653.41043" webspeed="434.50000"/>
+				<monpoint id="rlm_55869" format="394323" date="2026-10-05" time="15:23:04" curlength="653.44542" webspeed="433.73333"/>
+				<monpoint id="rlm_55870" format="394353" date="2026-10-05" time="15:23:07" curlength="653.35910" webspeed="434.40000"/>
+				<monpoint id="rlm_55871" format="394383" date="2026-10-05" time="15:23:10" curlength="653.46500" webspeed="434.10000"/>
+				<monpoint id="rlm_55872" format="394413" date="2026-10-05" time="15:23:13" curlength="653.46092" webspeed="435.16667"/>
+				<monpoint id="rlm_55873" format="394443" date="2026-10-05" time="15:23:15" curlength="653.34035" webspeed="434.16667"/>
+				<monpoint id="rlm_55874" format="394473" date="2026-10-05" time="15:23:18" curlength="653.46166" webspeed="434.13333"/>
+				<monpoint id="rlm_55875" format="394503" date="2026-10-05" time="15:23:21" curlength="653.46667" webspeed="434.06667"/>
+				<monpoint id="rlm_55876" format="394533" date="2026-10-05" time="15:23:23" curlength="653.48941" webspeed="433.33333"/>
+				<monpoint id="rlm_55877" format="394563" date="2026-10-05" time="15:23:26" curlength="653.50408" webspeed="433.10000"/>
+				<monpoint id="rlm_55878" format="394593" date="2026-10-05" time="15:23:29" curlength="653.36643" webspeed="433.16667"/>
+				<monpoint id="rlm_55879" format="394623" date="2026-10-05" time="15:23:32" curlength="653.52190" webspeed="432.66667"/>
+				<monpoint id="rlm_55880" format="394653" date="2026-10-05" time="15:23:34" curlength="653.45535" webspeed="433.16667"/>
+				<monpoint id="rlm_55881" format="394683" date="2026-10-05" time="15:23:37" curlength="653.53791" webspeed="434.00000"/>
+				<monpoint id="rlm_55882" format="394713" date="2026-10-05" time="15:23:40" curlength="653.55174" webspeed="434.16667"/>
+				<monpoint id="rlm_55883" format="394743" date="2026-10-05" time="15:23:42" curlength="653.54733" webspeed="433.83333"/>
+				<monpoint id="rlm_55884" format="394773" date="2026-10-05" time="15:23:45" curlength="653.62622" webspeed="434.00000"/>
+				<monpoint id="rlm_55885" format="394803" date="2026-10-05" time="15:23:48" curlength="653.60432" webspeed="433.70000"/>
+				<monpoint id="rlm_55886" format="394833" date="2026-10-05" time="15:23:50" curlength="653.52942" webspeed="434.30000"/>
+				<monpoint id="rlm_55887" format="394863" date="2026-10-05" time="15:23:53" curlength="653.59165" webspeed="434.06667"/>
+				<monpoint id="rlm_55888" format="394893" date="2026-10-05" time="15:23:56" curlength="653.51633" webspeed="433.40000"/>
+				<monpoint id="rlm_55889" format="394923" date="2026-10-05" time="15:23:59" curlength="653.65031" webspeed="434.36667"/>
+				<monpoint id="rlm_55890" format="394953" date="2026-10-05" time="15:24:01" curlength="653.58682" webspeed="433.43333"/>
+				<monpoint id="rlm_55891" format="394983" date="2026-10-05" time="15:24:04" curlength="653.52649" webspeed="434.73333"/>
+				<monpoint id="rlm_55892" format="395013" date="2026-10-05" time="15:24:07" curlength="653.58557" webspeed="434.56667"/>
+				<monpoint id="rlm_55893" format="395043" date="2026-10-05" time="15:24:09" curlength="653.65323" webspeed="433.90000"/>
+				<monpoint id="rlm_55894" format="395073" date="2026-10-05" time="15:24:12" curlength="653.63523" webspeed="433.70000"/>
+				<monpoint id="rlm_55895" format="395103" date="2026-10-05" time="15:24:15" curlength="653.66131" webspeed="434.23333"/>
+				<monpoint id="rlm_55896" format="395133" date="2026-10-05" time="15:24:18" curlength="653.69964" webspeed="432.66667"/>
+				<monpoint id="rlm_55897" format="395163" date="2026-10-05" time="15:24:20" curlength="653.59824" webspeed="433.66667"/>
+				<monpoint id="rlm_55898" format="395193" date="2026-10-05" time="15:24:23" curlength="653.67556" webspeed="434.03333"/>
+				<monpoint id="rlm_55899" format="395223" date="2026-10-05" time="15:24:26" curlength="653.73547" webspeed="433.76667"/>
+				<monpoint id="rlm_55900" format="395253" date="2026-10-05" time="15:24:28" curlength="653.56032" webspeed="433.43333"/>
+				<monpoint id="rlm_55901" format="395283" date="2026-10-05" time="15:24:31" curlength="653.49925" webspeed="433.06667"/>
+				<monpoint id="rlm_55902" format="395313" date="2026-10-05" time="15:24:34" curlength="653.59856" webspeed="433.40000"/>
+				<monpoint id="rlm_55903" format="395343" date="2026-10-05" time="15:24:36" curlength="653.41043" webspeed="433.93333"/>
+				<monpoint id="rlm_55904" format="395373" date="2026-10-05" time="15:24:39" curlength="653.52607" webspeed="433.73333"/>
+				<monpoint id="rlm_55905" format="395403" date="2026-10-05" time="15:24:42" curlength="653.41534" webspeed="433.70000"/>
+				<monpoint id="rlm_55906" format="395433" date="2026-10-05" time="15:24:45" curlength="653.41326" webspeed="434.30000"/>
+				<monpoint id="rlm_55907" format="395463" date="2026-10-05" time="15:24:47" curlength="653.47925" webspeed="434.46667"/>
+				<monpoint id="rlm_55908" format="395493" date="2026-10-05" time="15:24:50" curlength="653.47883" webspeed="434.40000"/>
+				<monpoint id="rlm_55909" format="395523" date="2026-10-05" time="15:24:53" curlength="653.51057" webspeed="434.06667"/>
+				<monpoint id="rlm_55910" format="395553" date="2026-10-05" time="15:24:55" curlength="653.55949" webspeed="434.73333"/>
+				<monpoint id="rlm_55911" format="395583" date="2026-10-05" time="15:24:58" curlength="653.44467" webspeed="434.80000"/>
+				<monpoint id="rlm_55912" format="395613" date="2026-10-05" time="15:25:01" curlength="653.50491" webspeed="433.56667"/>
+				<monpoint id="rlm_55913" format="395643" date="2026-10-05" time="15:25:04" curlength="653.50408" webspeed="434.06667"/>
+				<monpoint id="rlm_55914" format="395673" date="2026-10-05" time="15:25:06" curlength="653.57865" webspeed="434.50000"/>
+				<monpoint id="rlm_55915" format="395703" date="2026-10-05" time="15:25:09" curlength="653.59332" webspeed="433.36667"/>
+				<monpoint id="rlm_55916" format="395733" date="2026-10-05" time="15:25:12" curlength="653.41043" webspeed="433.26667"/>
+				<monpoint id="rlm_55917" format="395763" date="2026-10-05" time="15:25:14" curlength="653.52932" webspeed="433.46667"/>
+				<monpoint id="rlm_55918" format="395793" date="2026-10-05" time="15:25:17" curlength="653.54315" webspeed="434.16667"/>
+				<monpoint id="rlm_55919" format="395823" date="2026-10-05" time="15:25:20" curlength="653.52167" webspeed="433.70000"/>
+				<monpoint id="rlm_55920" format="395853" date="2026-10-05" time="15:25:22" curlength="653.54849" webspeed="435.00000"/>
+				<monpoint id="rlm_55921" format="395883" date="2026-10-05" time="15:25:25" curlength="653.49108" webspeed="434.76667"/>
+				<monpoint id="rlm_55922" format="395913" date="2026-10-05" time="15:25:28" curlength="653.67189" webspeed="434.13333"/>
+				<monpoint id="rlm_55923" format="395943" date="2026-10-05" time="15:25:31" curlength="653.60023" webspeed="434.43333"/>
+				<monpoint id="rlm_55924" format="395973" date="2026-10-05" time="15:25:33" curlength="653.63773" webspeed="434.23333"/>
+				<monpoint id="rlm_55925" format="396003" date="2026-10-05" time="15:25:36" curlength="653.66214" webspeed="435.23333"/>
+				<monpoint id="rlm_55926" format="396033" date="2026-10-05" time="15:25:39" curlength="653.62632" webspeed="434.16667"/>
+				<monpoint id="rlm_55927" format="396063" date="2026-10-05" time="15:25:41" curlength="653.54974" webspeed="433.43333"/>
+				<monpoint id="rlm_55928" format="396093" date="2026-10-05" time="15:25:44" curlength="653.72888" webspeed="434.80000"/>
+				<monpoint id="rlm_55929" format="396123" date="2026-10-05" time="15:25:47" curlength="653.68989" webspeed="434.03333"/>
+				<monpoint id="rlm_55930" format="396153" date="2026-10-05" time="15:25:50" curlength="653.64873" webspeed="434.60000"/>
+				<monpoint id="rlm_55931" format="396183" date="2026-10-05" time="15:25:52" curlength="653.70488" webspeed="434.40000"/>
+				<monpoint id="rlm_55932" format="396213" date="2026-10-05" time="15:25:55" curlength="653.65240" webspeed="433.36667"/>
+				<monpoint id="rlm_55933" format="396243" date="2026-10-05" time="15:25:58" curlength="653.67439" webspeed="434.06667"/>
+				<monpoint id="rlm_55934" format="396273" date="2026-10-05" time="15:26:00" curlength="653.54974" webspeed="434.10000"/>
+				<monpoint id="rlm_55935" format="396303" date="2026-10-05" time="15:26:03" curlength="653.64506" webspeed="433.10000"/>
+				<monpoint id="rlm_55936" format="396333" date="2026-10-05" time="15:26:06" curlength="653.58390" webspeed="433.76667"/>
+				<monpoint id="rlm_55937" format="396363" date="2026-10-05" time="15:26:08" curlength="653.48250" webspeed="433.40000"/>
+				<monpoint id="rlm_55938" format="396393" date="2026-10-05" time="15:26:11" curlength="653.41818" webspeed="432.53333"/>
+				<monpoint id="rlm_55939" format="396423" date="2026-10-05" time="15:26:14" curlength="653.46742" webspeed="433.73333"/>
+				<monpoint id="rlm_55940" format="396453" date="2026-10-05" time="15:26:17" curlength="653.56274" webspeed="433.40000"/>
+				<monpoint id="rlm_55941" format="396483" date="2026-10-05" time="15:26:19" curlength="653.59290" webspeed="433.00000"/>
+				<monpoint id="rlm_55942" format="396513" date="2026-10-05" time="15:26:22" curlength="653.46175" webspeed="434.96667"/>
+				<monpoint id="rlm_55943" format="396543" date="2026-10-05" time="15:26:25" curlength="653.44751" webspeed="434.00000"/>
+				<monpoint id="rlm_55944" format="396573" date="2026-10-05" time="15:26:27" curlength="653.54158" webspeed="433.53333"/>
+				<monpoint id="rlm_55945" format="396603" date="2026-10-05" time="15:26:30" curlength="653.40676" webspeed="434.13333"/>
+				<monpoint id="rlm_55946" format="396633" date="2026-10-05" time="15:26:33" curlength="653.41934" webspeed="433.93333"/>
+				<monpoint id="rlm_55947" format="396663" date="2026-10-05" time="15:26:36" curlength="653.33543" webspeed="433.83333"/>
+				<monpoint id="rlm_55948" format="396693" date="2026-10-05" time="15:26:38" curlength="653.40834" webspeed="434.03333"/>
+				<monpoint id="rlm_55949" format="396723" date="2026-10-05" time="15:26:41" curlength="653.30494" webspeed="433.36667"/>
+				<monpoint id="rlm_55950" format="396753" date="2026-10-05" time="15:26:44" curlength="653.21570" webspeed="433.36667"/>
+				<monpoint id="rlm_55951" format="396783" date="2026-10-05" time="15:26:46" curlength="653.35010" webspeed="433.63333"/>
+				<monpoint id="rlm_55952" format="396813" date="2026-10-05" time="15:26:49" curlength="653.27928" webspeed="433.76667"/>
+				<monpoint id="rlm_55953" format="396843" date="2026-10-05" time="15:26:52" curlength="653.31469" webspeed="433.36667"/>
+				<monpoint id="rlm_55954" format="396873" date="2026-10-05" time="15:26:54" curlength="653.20303" webspeed="434.70000"/>
+				<monpoint id="rlm_55955" format="396903" date="2026-10-05" time="15:26:57" curlength="653.37293" webspeed="434.70000"/>
+				<monpoint id="rlm_55956" format="396933" date="2026-10-05" time="15:27:00" curlength="653.22586" webspeed="433.06667"/>
+				<monpoint id="rlm_55957" format="396963" date="2026-10-05" time="15:27:03" curlength="653.28452" webspeed="433.43333"/>
+				<monpoint id="rlm_55958" format="396993" date="2026-10-05" time="15:27:05" curlength="653.28661" webspeed="433.63333"/>
+				<monpoint id="rlm_55959" format="397023" date="2026-10-05" time="15:27:08" curlength="653.37943" webspeed="433.20000"/>
+				<monpoint id="rlm_55960" format="397053" date="2026-10-05" time="15:27:11" curlength="653.21895" webspeed="433.46667"/>
+				<monpoint id="rlm_55961" format="397083" date="2026-10-05" time="15:27:13" curlength="653.34235" webspeed="435.13333"/>
+				<monpoint id="rlm_55962" format="397113" date="2026-10-05" time="15:27:16" curlength="653.35260" webspeed="434.03333"/>
+				<monpoint id="rlm_55963" format="397143" date="2026-10-05" time="15:27:19" curlength="653.34276" webspeed="433.86667"/>
+				<monpoint id="rlm_55964" format="397173" date="2026-10-05" time="15:27:21" curlength="653.27069" webspeed="434.43333"/>
+				<monpoint id="rlm_55965" format="397203" date="2026-10-05" time="15:27:24" curlength="653.40509" webspeed="433.16667"/>
+				<monpoint id="rlm_55966" format="397233" date="2026-10-05" time="15:27:27" curlength="653.39859" webspeed="433.00000"/>
+				<monpoint id="rlm_55967" format="397263" date="2026-10-05" time="15:27:30" curlength="653.45850" webspeed="434.46667"/>
+				<monpoint id="rlm_55968" format="397293" date="2026-10-05" time="15:27:32" curlength="653.40551" webspeed="432.93333"/>
+				<monpoint id="rlm_55969" format="397323" date="2026-10-05" time="15:27:35" curlength="653.47475" webspeed="433.76667"/>
+				<monpoint id="rlm_55970" format="397353" date="2026-10-05" time="15:27:38" curlength="653.52775" webspeed="434.00000"/>
+				<monpoint id="rlm_55971" format="397383" date="2026-10-05" time="15:27:40" curlength="653.60590" webspeed="434.03333"/>
+				<monpoint id="rlm_55972" format="397413" date="2026-10-05" time="15:27:43" curlength="653.60757" webspeed="434.03333"/>
+				<monpoint id="rlm_55973" format="397443" date="2026-10-05" time="15:27:46" curlength="653.66706" webspeed="434.60000"/>
+				<monpoint id="rlm_55974" format="397473" date="2026-10-05" time="15:27:49" curlength="653.64623" webspeed="434.10000"/>
+				<monpoint id="rlm_55975" format="397503" date="2026-10-05" time="15:27:51" curlength="653.55424" webspeed="434.06667"/>
+				<monpoint id="rlm_55976" format="397533" date="2026-10-05" time="15:27:54" curlength="653.65156" webspeed="434.93333"/>
+				<monpoint id="rlm_55977" format="397563" date="2026-10-05" time="15:27:57" curlength="653.70939" webspeed="433.76667"/>
+				<monpoint id="rlm_55978" format="397593" date="2026-10-05" time="15:27:59" curlength="653.53675" webspeed="434.33333"/>
+				<monpoint id="rlm_55979" format="397623" date="2026-10-05" time="15:28:02" curlength="653.67922" webspeed="434.16667"/>
+				<monpoint id="rlm_55980" format="397653" date="2026-10-05" time="15:28:05" curlength="653.64339" webspeed="434.46667"/>
+				<monpoint id="rlm_55981" format="397683" date="2026-10-05" time="15:28:08" curlength="653.75422" webspeed="433.40000"/>
+				<monpoint id="rlm_55982" format="397713" date="2026-10-05" time="15:28:10" curlength="653.66706" webspeed="433.96667"/>
+				<monpoint id="rlm_55983" format="397743" date="2026-10-05" time="15:28:13" curlength="653.77663" webspeed="434.13333"/>
+				<monpoint id="rlm_55984" format="397773" date="2026-10-05" time="15:28:16" curlength="653.66497" webspeed="433.70000"/>
+				<monpoint id="rlm_55985" format="397803" date="2026-10-05" time="15:28:18" curlength="653.81288" webspeed="434.36667"/>
+				<monpoint id="rlm_55986" format="397833" date="2026-10-05" time="15:28:21" curlength="653.78522" webspeed="434.70000"/>
+				<monpoint id="rlm_55987" format="397863" date="2026-10-05" time="15:28:24" curlength="653.78921" webspeed="434.53333"/>
+				<monpoint id="rlm_55988" format="397893" date="2026-10-05" time="15:28:26" curlength="653.71922" webspeed="433.66667"/>
+				<monpoint id="rlm_55989" format="397923" date="2026-10-05" time="15:28:29" curlength="653.71672" webspeed="434.23333"/>
+				<monpoint id="rlm_55990" format="397953" date="2026-10-05" time="15:28:32" curlength="653.69556" webspeed="433.20000"/>
+				<monpoint id="rlm_55991" format="397983" date="2026-10-05" time="15:28:35" curlength="653.75904" webspeed="434.93333"/>
+				<monpoint id="rlm_55992" format="398013" date="2026-10-05" time="15:28:37" curlength="653.67690" webspeed="433.60000"/>
+				<monpoint id="rlm_55993" format="398043" date="2026-10-05" time="15:28:40" curlength="653.89511" webspeed="434.83333"/>
+				<monpoint id="rlm_55994" format="398073" date="2026-10-05" time="15:28:43" curlength="653.67031" webspeed="433.83333"/>
+				<monpoint id="rlm_55995" format="398103" date="2026-10-05" time="15:28:45" curlength="653.71714" webspeed="433.26667"/>
+				<monpoint id="rlm_55996" format="398133" date="2026-10-05" time="15:28:48" curlength="653.71231" webspeed="433.40000"/>
+				<monpoint id="rlm_55997" format="398163" date="2026-10-05" time="15:28:51" curlength="653.66906" webspeed="433.00000"/>
+				<monpoint id="rlm_55998" format="398193" date="2026-10-05" time="15:28:53" curlength="653.61690" webspeed="433.66667"/>
+				<monpoint id="rlm_55999" format="398223" date="2026-10-05" time="15:28:56" curlength="653.63773" webspeed="434.30000"/>
+				<monpoint id="rlm_56000" format="398253" date="2026-10-05" time="15:28:59" curlength="653.61657" webspeed="433.23333"/>
+				<monpoint id="rlm_56001" format="398283" date="2026-10-05" time="15:29:02" curlength="653.64339" webspeed="433.93333"/>
+				<monpoint id="rlm_56002" format="398313" date="2026-10-05" time="15:29:04" curlength="653.54399" webspeed="434.20000"/>
+				<monpoint id="rlm_56003" format="398343" date="2026-10-05" time="15:29:07" curlength="653.60515" webspeed="433.10000"/>
+				<monpoint id="rlm_56004" format="398373" date="2026-10-05" time="15:29:10" curlength="653.72322" webspeed="433.96667"/>
+				<monpoint id="rlm_56005" format="398403" date="2026-10-05" time="15:29:12" curlength="653.67523" webspeed="433.13333"/>
+				<monpoint id="rlm_56006" format="398433" date="2026-10-05" time="15:29:15" curlength="653.71588" webspeed="433.23333"/>
+				<monpoint id="rlm_56007" format="398463" date="2026-10-05" time="15:29:18" curlength="653.65156" webspeed="434.10000"/>
+				<monpoint id="rlm_56008" format="398493" date="2026-10-05" time="15:29:21" curlength="653.64265" webspeed="434.00000"/>
+				<monpoint id="rlm_56009" format="398523" date="2026-10-05" time="15:29:23" curlength="653.61648" webspeed="434.20000"/>
+				<monpoint id="rlm_56010" format="398553" date="2026-10-05" time="15:29:26" curlength="653.71922" webspeed="434.00000"/>
+				<monpoint id="rlm_56011" format="398583" date="2026-10-05" time="15:29:29" curlength="653.68739" webspeed="433.26667"/>
+				<monpoint id="rlm_56012" format="398613" date="2026-10-05" time="15:29:31" curlength="653.75746" webspeed="434.03333"/>
+				<monpoint id="rlm_56013" format="398643" date="2026-10-05" time="15:29:34" curlength="653.75380" webspeed="435.13333"/>
+				<monpoint id="rlm_56014" format="398673" date="2026-10-05" time="15:29:37" curlength="653.73756" webspeed="433.86667"/>
+				<monpoint id="rlm_56015" format="398703" date="2026-10-05" time="15:29:39" curlength="653.83645" webspeed="434.66667"/>
+				<monpoint id="rlm_56016" format="398733" date="2026-10-05" time="15:29:42" curlength="653.78480" webspeed="433.83333"/>
+				<monpoint id="rlm_56017" format="398763" date="2026-10-05" time="15:29:45" curlength="653.67723" webspeed="434.56667"/>
+				<monpoint id="rlm_56018" format="398793" date="2026-10-05" time="15:29:48" curlength="653.63040" webspeed="434.70000"/>
+				<monpoint id="rlm_56019" format="398823" date="2026-10-05" time="15:29:50" curlength="653.61573" webspeed="434.00000"/>
+				<monpoint id="rlm_56020" format="398853" date="2026-10-05" time="15:29:53" curlength="653.64256" webspeed="434.96667"/>
+				<monpoint id="rlm_56021" format="398883" date="2026-10-05" time="15:29:56" curlength="653.55624" webspeed="434.46667"/>
+				<monpoint id="rlm_56022" format="398913" date="2026-10-05" time="15:29:58" curlength="653.64873" webspeed="434.06667"/>
+				<monpoint id="rlm_56023" format="398943" date="2026-10-05" time="15:30:01" curlength="653.56965" webspeed="434.93333"/>
+				<monpoint id="rlm_56024" format="398973" date="2026-10-05" time="15:30:04" curlength="653.54566" webspeed="433.76667"/>
+				<monpoint id="rlm_56025" format="399003" date="2026-10-05" time="15:30:07" curlength="653.50658" webspeed="433.60000"/>
+				<monpoint id="rlm_56026" format="399033" date="2026-10-05" time="15:30:09" curlength="653.52283" webspeed="433.33333"/>
+				<monpoint id="rlm_56027" format="399063" date="2026-10-05" time="15:30:12" curlength="653.66131" webspeed="432.80000"/>
+				<monpoint id="rlm_56028" format="399093" date="2026-10-05" time="15:30:15" curlength="653.44792" webspeed="434.00000"/>
+				<monpoint id="rlm_56029" format="399123" date="2026-10-05" time="15:30:17" curlength="653.65156" webspeed="433.76667"/>
+				<monpoint id="rlm_56030" format="399153" date="2026-10-05" time="15:30:20" curlength="653.57740" webspeed="433.23333"/>
+				<monpoint id="rlm_56031" format="399183" date="2026-10-05" time="15:30:23" curlength="653.64256" webspeed="434.00000"/>
+				<monpoint id="rlm_56032" format="399213" date="2026-10-05" time="15:30:25" curlength="653.53508" webspeed="433.90000"/>
+				<monpoint id="rlm_56033" format="399243" date="2026-10-05" time="15:30:28" curlength="653.63123" webspeed="433.83333"/>
+				<monpoint id="rlm_56034" format="399273" date="2026-10-05" time="15:30:31" curlength="653.63523" webspeed="434.40000"/>
+				<monpoint id="rlm_56035" format="399303" date="2026-10-05" time="15:30:34" curlength="653.54116" webspeed="432.70000"/>
+				<monpoint id="rlm_56036" format="399333" date="2026-10-05" time="15:30:36" curlength="653.51108" webspeed="434.23333"/>
+				<monpoint id="rlm_56037" format="399363" date="2026-10-05" time="15:30:39" curlength="653.48616" webspeed="433.26667"/>
+				<monpoint id="rlm_56038" format="399393" date="2026-10-05" time="15:30:42" curlength="653.42426" webspeed="433.86667"/>
+				<monpoint id="rlm_56039" format="399423" date="2026-10-05" time="15:30:44" curlength="653.38026" webspeed="434.30000"/>
+				<monpoint id="rlm_56040" format="399453" date="2026-10-05" time="15:30:47" curlength="653.30652" webspeed="434.43333"/>
+				<monpoint id="rlm_56041" format="399483" date="2026-10-05" time="15:30:50" curlength="653.34402" webspeed="433.56667"/>
+				<monpoint id="rlm_56042" format="399513" date="2026-10-05" time="15:30:53" curlength="653.36601" webspeed="433.70000"/>
+				<monpoint id="rlm_56043" format="399543" date="2026-10-05" time="15:30:55" curlength="653.45967" webspeed="434.53333"/>
+				<monpoint id="rlm_56044" format="399573" date="2026-10-05" time="15:30:58" curlength="653.33302" webspeed="432.90000"/>
+				<monpoint id="rlm_56045" format="399603" date="2026-10-05" time="15:31:01" curlength="653.49675" webspeed="433.03333"/>
+				<monpoint id="rlm_56046" format="399633" date="2026-10-05" time="15:31:03" curlength="653.46500" webspeed="433.03333"/>
+				<monpoint id="rlm_56047" format="399663" date="2026-10-05" time="15:31:06" curlength="653.43159" webspeed="432.93333"/>
+				<monpoint id="rlm_56048" format="399693" date="2026-10-05" time="15:31:09" curlength="653.35344" webspeed="432.93333"/>
+				<monpoint id="rlm_56049" format="399723" date="2026-10-05" time="15:31:11" curlength="653.50157" webspeed="434.43333"/>
+				<monpoint id="rlm_56050" format="399753" date="2026-10-05" time="15:31:14" curlength="653.38843" webspeed="433.90000"/>
+				<monpoint id="rlm_56051" format="399783" date="2026-10-05" time="15:31:17" curlength="653.30861" webspeed="434.60000"/>
+				<monpoint id="rlm_56052" format="399813" date="2026-10-05" time="15:31:20" curlength="653.46092" webspeed="434.16667"/>
+				<monpoint id="rlm_56053" format="399843" date="2026-10-05" time="15:31:22" curlength="653.51791" webspeed="433.60000"/>
+				<monpoint id="rlm_56054" format="399873" date="2026-10-05" time="15:31:25" curlength="653.43892" webspeed="433.86667"/>
+				<monpoint id="rlm_56055" format="399903" date="2026-10-05" time="15:31:28" curlength="653.48375" webspeed="433.80000"/>
+				<monpoint id="rlm_56056" format="399933" date="2026-10-05" time="15:31:30" curlength="653.49758" webspeed="432.76667"/>
+				<monpoint id="rlm_56057" format="399963" date="2026-10-05" time="15:31:33" curlength="653.46825" webspeed="433.40000"/>
+				<monpoint id="rlm_56058" format="399993" date="2026-10-05" time="15:31:36" curlength="653.39493" webspeed="433.66667"/>
+				<monpoint id="rlm_56059" format="400023" date="2026-10-05" time="15:31:39" curlength="653.46742" webspeed="433.23333"/>
+				<monpoint id="rlm_56060" format="400053" date="2026-10-05" time="15:31:41" curlength="653.41609" webspeed="433.30000"/>
+				<monpoint id="rlm_56061" format="400083" date="2026-10-05" time="15:31:44" curlength="653.43409" webspeed="434.66667"/>
+				<monpoint id="rlm_56062" format="400113" date="2026-10-05" time="15:31:47" curlength="653.55457" webspeed="434.13333"/>
+				<monpoint id="rlm_56063" format="400143" date="2026-10-05" time="15:31:49" curlength="653.61740" webspeed="433.96667"/>
+				<monpoint id="rlm_56064" format="400173" date="2026-10-05" time="15:31:52" curlength="653.64739" webspeed="435.06667"/>
+				<monpoint id="rlm_56065" format="400203" date="2026-10-05" time="15:31:55" curlength="653.55341" webspeed="432.96667"/>
+				<monpoint id="rlm_56066" format="400233" date="2026-10-05" time="15:31:57" curlength="653.55341" webspeed="433.93333"/>
+				<monpoint id="rlm_56067" format="400263" date="2026-10-05" time="15:32:00" curlength="653.52607" webspeed="434.26667"/>
+				<monpoint id="rlm_56068" format="400293" date="2026-10-05" time="15:32:03" curlength="653.46050" webspeed="433.10000"/>
+				<monpoint id="rlm_56069" format="400323" date="2026-10-05" time="15:32:06" curlength="653.55100" webspeed="434.10000"/>
+				<monpoint id="rlm_56070" format="400353" date="2026-10-05" time="15:32:08" curlength="653.46825" webspeed="433.76667"/>
+				<monpoint id="rlm_56071" format="400383" date="2026-10-05" time="15:32:11" curlength="653.46175" webspeed="433.00000"/>
+				<monpoint id="rlm_56072" format="400413" date="2026-10-05" time="15:32:14" curlength="653.48858" webspeed="433.63333"/>
+				<monpoint id="rlm_56073" format="400443" date="2026-10-05" time="15:32:16" curlength="653.63606" webspeed="433.46667"/>
+				<monpoint id="rlm_56074" format="400473" date="2026-10-05" time="15:32:19" curlength="653.57332" webspeed="433.36667"/>
+				<monpoint id="rlm_56075" format="400503" date="2026-10-05" time="15:32:22" curlength="653.48175" webspeed="433.83333"/>
+				<monpoint id="rlm_56076" format="400533" date="2026-10-05" time="15:32:25" curlength="653.58640" webspeed="434.50000"/>
+				<monpoint id="rlm_56077" format="400563" date="2026-10-05" time="15:32:27" curlength="653.56315" webspeed="434.00000"/>
+				<monpoint id="rlm_56078" format="400593" date="2026-10-05" time="15:32:30" curlength="653.65722" webspeed="433.83333"/>
+				<monpoint id="rlm_56079" format="400623" date="2026-10-05" time="15:32:33" curlength="653.61490" webspeed="433.50000"/>
+				<monpoint id="rlm_56080" format="400653" date="2026-10-05" time="15:32:35" curlength="653.66381" webspeed="434.06667"/>
+				<monpoint id="rlm_56081" format="400683" date="2026-10-05" time="15:32:38" curlength="653.64831" webspeed="434.83333"/>
+				<monpoint id="rlm_56082" format="400713" date="2026-10-05" time="15:32:41" curlength="653.72322" webspeed="434.13333"/>
+				<monpoint id="rlm_56083" format="400743" date="2026-10-05" time="15:32:43" curlength="653.64339" webspeed="434.20000"/>
+				<monpoint id="rlm_56084" format="400773" date="2026-10-05" time="15:32:46" curlength="653.68256" webspeed="434.00000"/>
+				<monpoint id="rlm_56085" format="400803" date="2026-10-05" time="15:32:49" curlength="653.58473" webspeed="435.00000"/>
+				<monpoint id="rlm_56086" format="400833" date="2026-10-05" time="15:32:52" curlength="653.73264" webspeed="434.76667"/>
+				<monpoint id="rlm_56087" format="400863" date="2026-10-05" time="15:32:54" curlength="653.67398" webspeed="433.56667"/>
+				<monpoint id="rlm_56088" format="400893" date="2026-10-05" time="15:32:57" curlength="653.71022" webspeed="433.66667"/>
+				<monpoint id="rlm_56089" format="400923" date="2026-10-05" time="15:33:00" curlength="653.65648" webspeed="434.90000"/>
+				<monpoint id="rlm_56090" format="400953" date="2026-10-05" time="15:33:02" curlength="653.71180" webspeed="434.10000"/>
+				<monpoint id="rlm_56091" format="400983" date="2026-10-05" time="15:33:05" curlength="653.72730" webspeed="434.30000"/>
+				<monpoint id="rlm_56092" format="401013" date="2026-10-05" time="15:33:08" curlength="653.81696" webspeed="433.30000"/>
+				<monpoint id="rlm_56093" format="401043" date="2026-10-05" time="15:33:11" curlength="653.71147" webspeed="433.43333"/>
+				<monpoint id="rlm_56094" format="401073" date="2026-10-05" time="15:33:13" curlength="653.56483" webspeed="433.90000"/>
+				<monpoint id="rlm_56095" format="401103" date="2026-10-05" time="15:33:16" curlength="653.63848" webspeed="434.23333"/>
+				<monpoint id="rlm_56096" format="401133" date="2026-10-05" time="15:33:19" curlength="653.69922" webspeed="434.43333"/>
+				<monpoint id="rlm_56097" format="401163" date="2026-10-05" time="15:33:21" curlength="653.66581" webspeed="433.40000"/>
+				<monpoint id="rlm_56098" format="401193" date="2026-10-05" time="15:33:24" curlength="653.66098" webspeed="433.43333"/>
+				<monpoint id="rlm_56099" format="401223" date="2026-10-05" time="15:33:27" curlength="653.69514" webspeed="433.90000"/>
+				<monpoint id="rlm_56100" format="401253" date="2026-10-05" time="15:33:29" curlength="653.65681" webspeed="432.86667"/>
+				<monpoint id="rlm_56101" format="401283" date="2026-10-05" time="15:33:32" curlength="653.71472" webspeed="434.10000"/>
+				<monpoint id="rlm_56102" format="401313" date="2026-10-05" time="15:33:35" curlength="653.79496" webspeed="433.66667"/>
+				<monpoint id="rlm_56103" format="401343" date="2026-10-05" time="15:33:38" curlength="653.76972" webspeed="434.30000"/>
+				<monpoint id="rlm_56104" format="401373" date="2026-10-05" time="15:33:40" curlength="653.69881" webspeed="434.43333"/>
+				<monpoint id="rlm_56105" format="401403" date="2026-10-05" time="15:33:43" curlength="653.85845" webspeed="433.46667"/>
+				<monpoint id="rlm_56106" format="401433" date="2026-10-05" time="15:33:46" curlength="653.70089" webspeed="433.43333"/>
+				<monpoint id="rlm_56107" format="401463" date="2026-10-05" time="15:33:48" curlength="653.83854" webspeed="434.13333"/>
+				<monpoint id="rlm_56108" format="401493" date="2026-10-05" time="15:33:51" curlength="653.81937" webspeed="433.40000"/>
+				<monpoint id="rlm_56109" format="401523" date="2026-10-05" time="15:33:54" curlength="653.84304" webspeed="433.66667"/>
+				<monpoint id="rlm_56110" format="401553" date="2026-10-05" time="15:33:57" curlength="653.74122" webspeed="433.66667"/>
+				<monpoint id="rlm_56111" format="401583" date="2026-10-05" time="15:33:59" curlength="653.78921" webspeed="433.93333"/>
+				<monpoint id="rlm_56112" format="401613" date="2026-10-05" time="15:34:02" curlength="653.90170" webspeed="433.86667"/>
+				<monpoint id="rlm_56113" format="401643" date="2026-10-05" time="15:34:05" curlength="653.74196" webspeed="433.06667"/>
+				<monpoint id="rlm_56114" format="401673" date="2026-10-05" time="15:34:07" curlength="653.83079" webspeed="433.33333"/>
+				<monpoint id="rlm_56115" format="401703" date="2026-10-05" time="15:34:10" curlength="653.83812" webspeed="434.13333"/>
+				<monpoint id="rlm_56116" format="401733" date="2026-10-05" time="15:34:13" curlength="653.82513" webspeed="433.90000"/>
+				<monpoint id="rlm_56117" format="401763" date="2026-10-05" time="15:34:15" curlength="653.95219" webspeed="433.70000"/>
+				<monpoint id="rlm_56118" format="401793" date="2026-10-05" time="15:34:18" curlength="653.77213" webspeed="433.83333"/>
+				<monpoint id="rlm_56119" format="401823" date="2026-10-05" time="15:34:21" curlength="653.78846" webspeed="434.63333"/>
+				<monpoint id="rlm_56120" format="401853" date="2026-10-05" time="15:34:24" curlength="653.75296" webspeed="433.63333"/>
+				<monpoint id="rlm_56121" format="401883" date="2026-10-05" time="15:34:26" curlength="653.94119" webspeed="434.33333"/>
+				<monpoint id="rlm_56122" format="401913" date="2026-10-05" time="15:34:29" curlength="653.99860" webspeed="433.86667"/>
+				<monpoint id="rlm_56123" format="401943" date="2026-10-05" time="15:34:32" curlength="654.10534" webspeed="433.96667"/>
+				<monpoint id="rlm_56124" format="401973" date="2026-10-05" time="15:34:34" curlength="654.23774" webspeed="434.46667"/>
+				<monpoint id="rlm_56125" format="402003" date="2026-10-05" time="15:34:37" curlength="654.01461" webspeed="434.70000"/>
+				<monpoint id="rlm_56126" format="402033" date="2026-10-05" time="15:34:40" curlength="653.84703" webspeed="434.86667"/>
+				<monpoint id="rlm_56127" format="402063" date="2026-10-05" time="15:34:42" curlength="653.79905" webspeed="433.93333"/>
+				<monpoint id="rlm_56128" format="402093" date="2026-10-05" time="15:34:45" curlength="653.81538" webspeed="434.30000"/>
+				<monpoint id="rlm_56129" format="402123" date="2026-10-05" time="15:34:48" curlength="653.70939" webspeed="434.46667"/>
+				<monpoint id="rlm_56130" format="402153" date="2026-10-05" time="15:34:51" curlength="653.69881" webspeed="434.43333"/>
+				<monpoint id="rlm_56131" format="402183" date="2026-10-05" time="15:34:53" curlength="653.77213" webspeed="434.53333"/>
+				<monpoint id="rlm_56132" format="402213" date="2026-10-05" time="15:34:56" curlength="653.72897" webspeed="434.30000"/>
+				<monpoint id="rlm_56133" format="402243" date="2026-10-05" time="15:34:59" curlength="653.72897" webspeed="434.66667"/>
+				<monpoint id="rlm_56134" format="402273" date="2026-10-05" time="15:35:01" curlength="653.64989" webspeed="433.80000"/>
+				<monpoint id="rlm_56135" format="402303" date="2026-10-05" time="15:35:04" curlength="653.57258" webspeed="433.83333"/>
+				<monpoint id="rlm_56136" format="402333" date="2026-10-05" time="15:35:07" curlength="653.68006" webspeed="433.90000"/>
+				<monpoint id="rlm_56137" format="402363" date="2026-10-05" time="15:35:10" curlength="653.64098" webspeed="433.80000"/>
+				<monpoint id="rlm_56138" format="402393" date="2026-10-05" time="15:35:12" curlength="653.48867" webspeed="434.06667"/>
+				<monpoint id="rlm_56139" format="402423" date="2026-10-05" time="15:35:15" curlength="653.60590" webspeed="433.73333"/>
+				<monpoint id="rlm_56140" format="402453" date="2026-10-05" time="15:35:18" curlength="653.65639" webspeed="432.96667"/>
+				<monpoint id="rlm_56141" format="402483" date="2026-10-05" time="15:35:20" curlength="653.61007" webspeed="433.83333"/>
+				<monpoint id="rlm_56142" format="402513" date="2026-10-05" time="15:35:23" curlength="653.60107" webspeed="432.73333"/>
+				<monpoint id="rlm_56143" format="402543" date="2026-10-05" time="15:35:26" curlength="653.56190" webspeed="433.40000"/>
+				<monpoint id="rlm_56144" format="402573" date="2026-10-05" time="15:35:28" curlength="653.59982" webspeed="434.70000"/>
+				<monpoint id="rlm_56145" format="402603" date="2026-10-05" time="15:35:31" curlength="653.72530" webspeed="433.26667"/>
+				<monpoint id="rlm_56146" format="402633" date="2026-10-05" time="15:35:34" curlength="653.63857" webspeed="433.46667"/>
+				<monpoint id="rlm_56147" format="402663" date="2026-10-05" time="15:35:37" curlength="653.54158" webspeed="433.43333"/>
+				<monpoint id="rlm_56148" format="402693" date="2026-10-05" time="15:35:39" curlength="653.57657" webspeed="433.26667"/>
+				<monpoint id="rlm_56149" format="402723" date="2026-10-05" time="15:35:42" curlength="653.56357" webspeed="433.56667"/>
+				<monpoint id="rlm_56150" format="402753" date="2026-10-05" time="15:35:45" curlength="653.61007" webspeed="434.66667"/>
+				<monpoint id="rlm_56151" format="402783" date="2026-10-05" time="15:35:47" curlength="653.60506" webspeed="434.26667"/>
+				<monpoint id="rlm_56152" format="402813" date="2026-10-05" time="15:35:50" curlength="653.63773" webspeed="434.36667"/>
+				<monpoint id="rlm_56153" format="402843" date="2026-10-05" time="15:35:53" curlength="653.67439" webspeed="434.46667"/>
+				<monpoint id="rlm_56154" format="402873" date="2026-10-05" time="15:35:56" curlength="653.65722" webspeed="433.76667"/>
+				<monpoint id="rlm_56155" format="402903" date="2026-10-05" time="15:35:58" curlength="653.72530" webspeed="434.60000"/>
+				<monpoint id="rlm_56156" format="402933" date="2026-10-05" time="15:36:01" curlength="653.76930" webspeed="433.53333"/>
+				<monpoint id="rlm_56157" format="402963" date="2026-10-05" time="15:36:04" curlength="653.67231" webspeed="434.13333"/>
+				<monpoint id="rlm_56158" format="402993" date="2026-10-05" time="15:36:06" curlength="653.68214" webspeed="434.66667"/>
+				<monpoint id="rlm_56159" format="403023" date="2026-10-05" time="15:36:09" curlength="653.56315" webspeed="434.13333"/>
+				<monpoint id="rlm_56160" format="403053" date="2026-10-05" time="15:36:12" curlength="653.65114" webspeed="434.96667"/>
+				<monpoint id="rlm_56161" format="403083" date="2026-10-05" time="15:36:14" curlength="653.56524" webspeed="434.06667"/>
+				<monpoint id="rlm_56162" format="403113" date="2026-10-05" time="15:36:17" curlength="653.59773" webspeed="433.73333"/>
+				<monpoint id="rlm_56163" format="403143" date="2026-10-05" time="15:36:20" curlength="653.71598" webspeed="434.13333"/>
+				<monpoint id="rlm_56164" format="403173" date="2026-10-05" time="15:36:23" curlength="653.68247" webspeed="433.83333"/>
+				<monpoint id="rlm_56165" format="403203" date="2026-10-05" time="15:36:25" curlength="653.73797" webspeed="435.13333"/>
+				<monpoint id="rlm_56166" format="403233" date="2026-10-05" time="15:36:28" curlength="653.84545" webspeed="433.80000"/>
+				<monpoint id="rlm_56167" format="403263" date="2026-10-05" time="15:36:31" curlength="653.81854" webspeed="432.73333"/>
+				<monpoint id="rlm_56168" format="403293" date="2026-10-05" time="15:36:33" curlength="653.81371" webspeed="434.46667"/>
+				<monpoint id="rlm_56169" format="403323" date="2026-10-05" time="15:36:36" curlength="653.78271" webspeed="433.50000"/>
+				<monpoint id="rlm_56170" format="403353" date="2026-10-05" time="15:36:39" curlength="653.83571" webspeed="434.53333"/>
+				<monpoint id="rlm_56171" format="403383" date="2026-10-05" time="15:36:42" curlength="653.83487" webspeed="434.10000"/>
+				<monpoint id="rlm_56172" format="403413" date="2026-10-05" time="15:36:44" curlength="653.73222" webspeed="433.86667"/>
+				<monpoint id="rlm_56173" format="403443" date="2026-10-05" time="15:36:47" curlength="653.88537" webspeed="433.40000"/>
+				<monpoint id="rlm_56174" format="403473" date="2026-10-05" time="15:36:50" curlength="653.86587" webspeed="433.70000"/>
+				<monpoint id="rlm_56175" format="403503" date="2026-10-05" time="15:36:52" curlength="653.86170" webspeed="434.66667"/>
+				<monpoint id="rlm_56176" format="403533" date="2026-10-05" time="15:36:55" curlength="653.85121" webspeed="434.76667"/>
+				<monpoint id="rlm_56177" format="403563" date="2026-10-05" time="15:36:58" curlength="653.73138" webspeed="433.40000"/>
+				<monpoint id="rlm_56178" format="403593" date="2026-10-05" time="15:37:00" curlength="653.72656" webspeed="434.06667"/>
+				<monpoint id="rlm_56179" format="403623" date="2026-10-05" time="15:37:03" curlength="653.66623" webspeed="432.86667"/>
+				<monpoint id="rlm_56180" format="403653" date="2026-10-05" time="15:37:06" curlength="653.77129" webspeed="433.70000"/>
+				<monpoint id="rlm_56181" format="403683" date="2026-10-05" time="15:37:09" curlength="653.75914" webspeed="433.93333"/>
+				<monpoint id="rlm_56182" format="403713" date="2026-10-05" time="15:37:11" curlength="653.78188" webspeed="433.80000"/>
+				<monpoint id="rlm_56183" format="403743" date="2026-10-05" time="15:37:14" curlength="653.75589" webspeed="434.00000"/>
+				<monpoint id="rlm_56184" format="403773" date="2026-10-05" time="15:37:17" curlength="653.89836" webspeed="433.06667"/>
+				<monpoint id="rlm_56185" format="403803" date="2026-10-05" time="15:37:19" curlength="653.92370" webspeed="434.33333"/>
+				<monpoint id="rlm_56186" format="403833" date="2026-10-05" time="15:37:22" curlength="653.87887" webspeed="433.86667"/>
+				<monpoint id="rlm_56187" format="403863" date="2026-10-05" time="15:37:25" curlength="653.83246" webspeed="434.13333"/>
+				<monpoint id="rlm_56188" format="403893" date="2026-10-05" time="15:37:28" curlength="653.77296" webspeed="434.43333"/>
+				<monpoint id="rlm_56189" format="403923" date="2026-10-05" time="15:37:30" curlength="653.79612" webspeed="434.23333"/>
+				<monpoint id="rlm_56190" format="403953" date="2026-10-05" time="15:37:33" curlength="653.84954" webspeed="434.86667"/>
+				<monpoint id="rlm_56191" format="403983" date="2026-10-05" time="15:37:36" curlength="653.71881" webspeed="433.43333"/>
+				<monpoint id="rlm_56192" format="404013" date="2026-10-05" time="15:37:38" curlength="653.82429" webspeed="433.86667"/>
+				<monpoint id="rlm_56193" format="404043" date="2026-10-05" time="15:37:41" curlength="653.88861" webspeed="434.26667"/>
+				<monpoint id="rlm_56194" format="404073" date="2026-10-05" time="15:37:44" curlength="653.83487" webspeed="433.56667"/>
+				<monpoint id="rlm_56195" format="404103" date="2026-10-05" time="15:37:46" curlength="653.88620" webspeed="434.63333"/>
+				<monpoint id="rlm_56196" format="404133" date="2026-10-05" time="15:37:49" curlength="653.81738" webspeed="434.46667"/>
+				<monpoint id="rlm_56197" format="404163" date="2026-10-05" time="15:37:52" curlength="653.84063" webspeed="434.73333"/>
+				<monpoint id="rlm_56198" format="404193" date="2026-10-05" time="15:37:55" curlength="653.88569" webspeed="434.60000"/>
+				<monpoint id="rlm_56199" format="404223" date="2026-10-05" time="15:37:57" curlength="653.72247" webspeed="433.90000"/>
+				<monpoint id="rlm_56200" format="404253" date="2026-10-05" time="15:38:00" curlength="653.80721" webspeed="434.50000"/>
+				<monpoint id="rlm_56201" format="404283" date="2026-10-05" time="15:38:03" curlength="653.84870" webspeed="433.90000"/>
+				<monpoint id="rlm_56202" format="404313" date="2026-10-05" time="15:38:05" curlength="653.84870" webspeed="435.20000"/>
+				<monpoint id="rlm_56203" format="404343" date="2026-10-05" time="15:38:08" curlength="653.68822" webspeed="434.00000"/>
+				<monpoint id="rlm_56204" format="404373" date="2026-10-05" time="15:38:11" curlength="653.77055" webspeed="433.93333"/>
+				<monpoint id="rlm_56205" format="404403" date="2026-10-05" time="15:38:14" curlength="653.80513" webspeed="434.60000"/>
+				<monpoint id="rlm_56206" format="404433" date="2026-10-05" time="15:38:16" curlength="653.91261" webspeed="434.56667"/>
+				<monpoint id="rlm_56207" format="404463" date="2026-10-05" time="15:38:19" curlength="653.87404" webspeed="435.03333"/>
+				<monpoint id="rlm_56208" format="404493" date="2026-10-05" time="15:38:22" curlength="653.75422" webspeed="434.16667"/>
+				<monpoint id="rlm_56209" format="404523" date="2026-10-05" time="15:38:24" curlength="653.82021" webspeed="433.96667"/>
+				<monpoint id="rlm_56210" format="404553" date="2026-10-05" time="15:38:27" curlength="653.85687" webspeed="434.96667"/>
+				<monpoint id="rlm_56211" format="404583" date="2026-10-05" time="15:38:30" curlength="653.68173" webspeed="433.80000"/>
+				<monpoint id="rlm_56212" format="404613" date="2026-10-05" time="15:38:32" curlength="653.70331" webspeed="434.06667"/>
+				<monpoint id="rlm_56213" format="404643" date="2026-10-05" time="15:38:35" curlength="653.62265" webspeed="434.10000"/>
+				<monpoint id="rlm_56214" format="404673" date="2026-10-05" time="15:38:38" curlength="653.68822" webspeed="434.56667"/>
+				<monpoint id="rlm_56215" format="404703" date="2026-10-05" time="15:38:41" curlength="653.62506" webspeed="434.36667"/>
+				<monpoint id="rlm_56216" format="404733" date="2026-10-05" time="15:38:43" curlength="653.72772" webspeed="434.16667"/>
+				<monpoint id="rlm_56217" format="404763" date="2026-10-05" time="15:38:46" curlength="653.70823" webspeed="434.23333"/>
+				<monpoint id="rlm_56218" format="404793" date="2026-10-05" time="15:38:49" curlength="653.65523" webspeed="434.26667"/>
+				<monpoint id="rlm_56219" format="404823" date="2026-10-05" time="15:38:51" curlength="653.61406" webspeed="433.96667"/>
+				<monpoint id="rlm_56220" format="404853" date="2026-10-05" time="15:38:54" curlength="653.70122" webspeed="434.20000"/>
+				<monpoint id="rlm_56221" format="404883" date="2026-10-05" time="15:38:57" curlength="653.50658" webspeed="433.13333"/>
+				<monpoint id="rlm_56222" format="404913" date="2026-10-05" time="15:39:00" curlength="653.50491" webspeed="433.10000"/>
+				<monpoint id="rlm_56223" format="404943" date="2026-10-05" time="15:39:02" curlength="653.37502" webspeed="433.50000"/>
+				<monpoint id="rlm_56224" format="404973" date="2026-10-05" time="15:39:05" curlength="653.53865" webspeed="433.56667"/>
+				<monpoint id="rlm_56225" format="405003" date="2026-10-05" time="15:39:08" curlength="653.50491" webspeed="433.20000"/>
+				<monpoint id="rlm_56226" format="405033" date="2026-10-05" time="15:39:10" curlength="653.54158" webspeed="434.36667"/>
+				<monpoint id="rlm_56227" format="405063" date="2026-10-05" time="15:39:13" curlength="653.51308" webspeed="433.76667"/>
+				<monpoint id="rlm_56228" format="405093" date="2026-10-05" time="15:39:16" curlength="653.48125" webspeed="433.33333"/>
+				<monpoint id="rlm_56229" format="405123" date="2026-10-05" time="15:39:18" curlength="653.45117" webspeed="434.30000"/>
+				<monpoint id="rlm_56230" format="405153" date="2026-10-05" time="15:39:21" curlength="653.46417" webspeed="433.90000"/>
+				<monpoint id="rlm_56231" format="405183" date="2026-10-05" time="15:39:24" curlength="653.45809" webspeed="435.30000"/>
+				<monpoint id="rlm_56232" format="405213" date="2026-10-05" time="15:39:27" curlength="653.34894" webspeed="434.93333"/>
+				<monpoint id="rlm_56233" format="405243" date="2026-10-05" time="15:39:29" curlength="653.56515" webspeed="433.40000"/>
+				<monpoint id="rlm_56234" format="405273" date="2026-10-05" time="15:39:32" curlength="653.48700" webspeed="434.16667"/>
+				<monpoint id="rlm_56235" format="405303" date="2026-10-05" time="15:39:35" curlength="653.47558" webspeed="433.70000"/>
+				<monpoint id="rlm_56236" format="405333" date="2026-10-05" time="15:39:37" curlength="653.48858" webspeed="433.26667"/>
+				<monpoint id="rlm_56237" format="405363" date="2026-10-05" time="15:39:40" curlength="653.46426" webspeed="433.73333"/>
+				<monpoint id="rlm_56238" format="405393" date="2026-10-05" time="15:39:43" curlength="653.59898" webspeed="433.46667"/>
+				<monpoint id="rlm_56239" format="405423" date="2026-10-05" time="15:39:46" curlength="653.61281" webspeed="433.10000"/>
+				<monpoint id="rlm_56240" format="405453" date="2026-10-05" time="15:39:48" curlength="653.54325" webspeed="433.40000"/>
+				<monpoint id="rlm_56241" format="405483" date="2026-10-05" time="15:39:51" curlength="653.60757" webspeed="434.36667"/>
+				<monpoint id="rlm_56242" format="405513" date="2026-10-05" time="15:39:54" curlength="653.57007" webspeed="434.03333"/>
+				<monpoint id="rlm_56243" format="405543" date="2026-10-05" time="15:39:56" curlength="653.54891" webspeed="433.76667"/>
+				<monpoint id="rlm_56244" format="405573" date="2026-10-05" time="15:39:59" curlength="653.64423" webspeed="433.43333"/>
+				<monpoint id="rlm_56245" format="405603" date="2026-10-05" time="15:40:02" curlength="653.81937" webspeed="434.06667"/>
+				<monpoint id="rlm_56246" format="405633" date="2026-10-05" time="15:40:04" curlength="653.68989" webspeed="435.26667"/>
+				<monpoint id="rlm_56247" format="405663" date="2026-10-05" time="15:40:07" curlength="653.76071" webspeed="434.20000"/>
+				<monpoint id="rlm_56248" format="405693" date="2026-10-05" time="15:40:10" curlength="653.79171" webspeed="434.40000"/>
+				<monpoint id="rlm_56249" format="405723" date="2026-10-05" time="15:40:13" curlength="653.70488" webspeed="434.36667"/>
+				<monpoint id="rlm_56250" format="405753" date="2026-10-05" time="15:40:15" curlength="653.85195" webspeed="434.20000"/>
+				<monpoint id="rlm_56251" format="405783" date="2026-10-05" time="15:40:18" curlength="653.82063" webspeed="434.70000"/>
+				<monpoint id="rlm_56252" format="405813" date="2026-10-05" time="15:40:21" curlength="653.73022" webspeed="434.00000"/>
+				<monpoint id="rlm_56253" format="405843" date="2026-10-05" time="15:40:23" curlength="653.70507" webspeed="434.83333"/>
+				<monpoint id="rlm_56254" format="405873" date="2026-10-05" time="15:40:26" curlength="653.94310" webspeed="434.83333"/>
+				<monpoint id="rlm_56255" format="405903" date="2026-10-05" time="15:40:29" curlength="653.94876" webspeed="434.23333"/>
+				<monpoint id="rlm_56256" format="405933" date="2026-10-05" time="15:40:32" curlength="653.78248" webspeed="433.96667"/>
+				<monpoint id="rlm_56257" format="405963" date="2026-10-05" time="15:40:34" curlength="653.92978" webspeed="434.16667"/>
+				<monpoint id="rlm_56258" format="405993" date="2026-10-05" time="15:40:37" curlength="653.85687" webspeed="434.43333"/>
+				<monpoint id="rlm_56259" format="406023" date="2026-10-05" time="15:40:40" curlength="653.95628" webspeed="433.36667"/>
+				<monpoint id="rlm_56260" format="406053" date="2026-10-05" time="15:40:42" curlength="653.91469" webspeed="434.13333"/>
+				<monpoint id="rlm_56261" format="406083" date="2026-10-05" time="15:40:45" curlength="653.98561" webspeed="434.00000"/>
+				<monpoint id="rlm_56262" format="406113" date="2026-10-05" time="15:40:48" curlength="654.01127" webspeed="433.60000"/>
+				<monpoint id="rlm_56263" format="406143" date="2026-10-05" time="15:40:50" curlength="654.00394" webspeed="433.90000"/>
+				<monpoint id="rlm_56264" format="406173" date="2026-10-05" time="15:40:53" curlength="653.98802" webspeed="433.40000"/>
+				<monpoint id="rlm_56265" format="406203" date="2026-10-05" time="15:40:56" curlength="653.90578" webspeed="434.26667"/>
+				<monpoint id="rlm_56266" format="406233" date="2026-10-05" time="15:40:59" curlength="653.95461" webspeed="432.43333"/>
+				<monpoint id="rlm_56267" format="406263" date="2026-10-05" time="15:41:01" curlength="653.81288" webspeed="434.10000"/>
+				<monpoint id="rlm_56268" format="406293" date="2026-10-05" time="15:41:04" curlength="653.82838" webspeed="433.33333"/>
+				<monpoint id="rlm_56269" format="406323" date="2026-10-05" time="15:41:07" curlength="653.73055" webspeed="433.76667"/>
+				<monpoint id="rlm_56270" format="406353" date="2026-10-05" time="15:41:09" curlength="653.81538" webspeed="434.00000"/>
+				<monpoint id="rlm_56271" format="406383" date="2026-10-05" time="15:41:12" curlength="653.86662" webspeed="433.63333"/>
+				<monpoint id="rlm_56272" format="406413" date="2026-10-05" time="15:41:15" curlength="653.76480" webspeed="434.40000"/>
+				<monpoint id="rlm_56273" format="406443" date="2026-10-05" time="15:41:17" curlength="653.82021" webspeed="433.70000"/>
+				<monpoint id="rlm_56274" format="406473" date="2026-10-05" time="15:41:20" curlength="653.81204" webspeed="433.03333"/>
+				<monpoint id="rlm_56275" format="406503" date="2026-10-05" time="15:41:23" curlength="653.80638" webspeed="434.03333"/>
+				<monpoint id="rlm_56276" format="406533" date="2026-10-05" time="15:41:26" curlength="653.68498" webspeed="433.83333"/>
+			</monitorings>
+
+		</rlmmodule>
+	</sampleinspection>
+</reel>

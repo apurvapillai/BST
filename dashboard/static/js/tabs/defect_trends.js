@@ -4768,12 +4768,12 @@ const DefectTrendsTab = (() => {
   }
 
   function buildMaskSvgHtml(masks, detail) {
-    const polygons = collectMaskPolygons(masks);
+    const formatWidth = Number(detail && detail.formatWidth);
+    const formatLength = Number(detail && detail.formatLength);
+    const polygons = collectMaskPolygons(masks, formatLength);
     if (!polygons.length) {
       return "<div class='drivers-empty placeholder'>No masks</div>";
     }
-    const formatWidth = Number(detail && detail.formatWidth);
-    const formatLength = Number(detail && detail.formatLength);
     const width = Number.isFinite(formatWidth) && formatWidth > 0 ? formatWidth : inferMaskDimension(polygons, "x");
     const length = Number.isFinite(formatLength) && formatLength > 0 ? formatLength : inferMaskDimension(polygons, "y");
     const halfWidth = Math.max(width / 2, 1);
@@ -4793,12 +4793,37 @@ const DefectTrendsTab = (() => {
     `;
   }
 
-  function collectMaskPolygons(masks) {
+  // Rectangular masks are wrapped into the repeat length (wrapMaskY lives in MaskHeatmap),
+  // so masks that cross or sit outside the image frame are drawn where they land.
+  function collectMaskPolygons(masks, formatLength) {
+    const helpers = typeof MaskHeatmap === "object" && MaskHeatmap ? MaskHeatmap : null;
+    const canWrap =
+      Number.isFinite(formatLength) &&
+      formatLength > 0 &&
+      helpers &&
+      typeof helpers.wrapMaskY === "function" &&
+      typeof helpers.isAxisAlignedRect === "function";
     const polygons = [];
     (Array.isArray(masks) ? masks : []).forEach((mask) => {
       parseMaskCoords(mask && mask.coords).forEach((polygon) => {
         const normalized = polygon.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
-        if (normalized.length >= 3) polygons.push(normalized);
+        if (normalized.length < 3) return;
+        if (canWrap && helpers.isAxisAlignedRect(normalized)) {
+          const xs = normalized.map((point) => point.x);
+          const ys = normalized.map((point) => point.y);
+          const x0 = Math.min(...xs);
+          const x1 = Math.max(...xs);
+          helpers.wrapMaskY(Math.min(...ys), Math.max(...ys), formatLength).forEach(([y0, y1]) => {
+            polygons.push([
+              { x: x0, y: y0 },
+              { x: x1, y: y0 },
+              { x: x1, y: y1 },
+              { x: x0, y: y1 },
+            ]);
+          });
+        } else {
+          polygons.push(normalized);
+        }
       });
     });
     return polygons;

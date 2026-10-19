@@ -62,7 +62,7 @@
       <div class="filters-header">
         <div>
           <p class="kpi-section__title">Global Filters</p>
-          <small>Pick a machine, date window, and optional job/order context. These filters drive every tab in the BST module.</small>
+          <small>Pick a machine, date window, then an Order No., a Job No. and a reel. These filters drive every tab in the BST module.</small>
         </div>
         <button type="button" id="filtersClearButton" class="filters-clear-btn">Clear Filters</button>
       </div>
@@ -92,15 +92,16 @@
         </div>
 
         <div class="filter-card filter-card--select">
-          <label for="filterJob">Job</label>
-          <select id="filterJob">
+          <label for="filterOrder">Order No.</label>
+          <select id="filterOrder">
             <option value="">All</option>
           </select>
         </div>
 
+        <!-- Job No. (item / job name): lists the jobs in the selected Order No. -->
         <div class="filter-card filter-card--select">
-          <label for="filterOrder">Order</label>
-          <select id="filterOrder">
+          <label for="filterJob">Job No.</label>
+          <select id="filterJob">
             <option value="">All</option>
           </select>
         </div>
@@ -298,6 +299,14 @@
           <button type="button" id="coverageMinLengthClear" aria-label="Clear min reel feet filter">&times;</button>
         </div>
         <div class="job-insights-grid">
+        <div class="job-insight-card" id="jobDefectSummaryCard">
+          <div class="job-insight-card__header">
+            <div>
+              <p>Defects</p>
+            </div>
+          </div>
+          <div class="job-insight-card__body placeholder">Loading insights...</div>
+        </div>
         <div class="job-insight-card" id="jobBstCoverageCard">
           <div class="job-insight-card__header">
             <div>

@@ -2935,6 +2935,60 @@ body.drivers-reference-viewer-open {
   border: 1px solid #cbd5e1;
 }
 
+.mask-snapshot-gallery {
+  display: flex;
+  gap: 12px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 2px 2px 10px;
+}
+
+.mask-snapshot-card {
+  flex: 0 0 min(380px, 90%);
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #dbe4f3;
+  border-radius: 8px;
+  background: var(--surface-alt);
+}
+
+.mask-snapshot-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.mask-snapshot-footprint {
+  width: 100%;
+  min-width: 0;        /* .heatmap-wrapper forces 400px, which pushed the picture out of the card */
+  max-width: none;
+  min-height: 0;
+  aspect-ratio: auto;  /* the canvas now sizes itself to the picture */
+  box-sizing: border-box;
+}
+
+.mask-snapshot-card__mask-list {
+  display: grid;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #dbe4f3;
+}
+
+.mask-snapshot-card__mask {
+  display: grid;
+  gap: 2px;
+  font-size: 11px;
+}
+
+.mask-snapshot-card__mask span {
+  color: var(--text-secondary);
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;
@@ -4340,6 +4394,10 @@ body.drivers-reference-viewer-open {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin-top: 10px;
+}
+
+.job-insight-breakdown--total {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .job-insight-breakdown div {

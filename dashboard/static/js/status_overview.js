@@ -295,6 +295,7 @@
                     <span class="status-card-meta-label">Feet</span>
                     <span class="status-card-meta-value">${escapeHtml(card.metrics?.lastReelFeet || "--")}</span>
                   </div>
+                  ${renderReelExplorerLink(card.reelContext, "Open in Reel Explorer")}
                 </div>
                 <div class="status-substatus-row">
                   ${renderBox(card.bstBox)}
@@ -311,7 +312,7 @@
       const alertId = Number(node.getAttribute("data-alert-id"));
       if (!alertId) return;
       node.addEventListener("click", (event) => {
-        if (event.target?.closest(".status-card-reel-history")) return;
+        if (event.target?.closest(".status-card-reel-history, .status-reel-explorer-link")) return;
         event.preventDefault();
         event.stopPropagation();
         openAlertModal(alertId, { returnTarget: null });
@@ -356,10 +357,13 @@
     const metricLine = label === "BST"
       ? `BST - ${escapeHtml(row.bstPct || "--")}`
       : `RLM - ${escapeHtml(row.rlmPoints || "--")}`;
+    const href = reelExplorerHref(row.reelContext);
+    const tag = href ? "a" : "span";
+    const attrs = href ? ` href="${escapeAttr(href)}" aria-label="Open reel ${escapeAttr(row.reelNumber || "--")} in Reel Explorer"` : ` tabindex="0"`;
     return `
-      <span
+      <${tag}
         class="status-card-reel-chip ${escapeAttr(stateClass)}"
-        tabindex="0"
+        ${attrs}
       >
         ${escapeHtml(row.reelNumber || "--")}
         <span class="status-card-reel-tooltip" role="tooltip">
@@ -368,9 +372,32 @@
           <small>Job - ${escapeHtml(row.jobNumber || "--")}</small>
           <small>Feet - ${escapeHtml(row.feet || "--")}</small>
           <small>${metricLine}</small>
+          ${href ? `<small class="status-card-reel-tooltip__action">Click to open in Reel Explorer</small>` : ""}
         </span>
-      </span>
+      </${tag}>
     `;
+  }
+
+  function reelExplorerHref(context) {
+    if (!context?.reelId || !context?.machineId) return "";
+    const params = new URLSearchParams({
+      open_reel_explorer: "1",
+      machine_id: String(context.machineId),
+      reel_id: String(context.reelId),
+    });
+    if (context.orderNumber) params.set("order", context.orderNumber);
+    if (context.jobName) params.set("job", context.jobName);
+    const startDate = String(context.timeStart || context.timeEnd || "").split("T")[0];
+    const endDate = String(context.timeEnd || context.timeStart || "").split("T")[0];
+    if (startDate) params.set("start", startDate);
+    if (endDate) params.set("end", endDate);
+    return `/dashboard/?${params.toString()}#job-explorer`;
+  }
+
+  function renderReelExplorerLink(context, label) {
+    const href = reelExplorerHref(context);
+    if (!href) return "";
+    return `<a class="status-reel-explorer-link" href="${escapeAttr(href)}">${escapeHtml(label)}</a>`;
   }
 
   function renderAlertSection(target, alerts, emptyMessage) {

@@ -762,6 +762,10 @@
   border-color: rgba(21, 128, 61, 0.3);
 }
 
+a.status-card-reel-chip {
+  text-decoration: none;
+}
+
 .status-card-reel-chip.alert {
   background: linear-gradient(135deg, #dc2626, #991b1b);
   border-color: rgba(153, 27, 27, 0.34);
@@ -823,7 +827,28 @@
 .status-card-reel-chip:hover .status-card-reel-tooltip,
 .status-card-reel-chip:focus-visible .status-card-reel-tooltip {
   opacity: 1;
+  pointer-events: auto;
   transform: translateX(-50%) translateY(0) scale(1);
+}
+
+.status-reel-explorer-link {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 4px;
+  color: #bfdbfe;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.status-card-info-panel > .status-reel-explorer-link {
+  color: var(--accent, #2563eb);
+}
+
+.status-reel-explorer-link:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
 
 .status-card-reel-tooltip strong {
@@ -841,6 +866,12 @@
   line-height: 1.15;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+.status-card-reel-tooltip .status-card-reel-tooltip__action {
+  color: #bfdbfe;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .status-alert-sections {

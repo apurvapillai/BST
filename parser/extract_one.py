@@ -201,6 +201,45 @@ def build_intervals(
     return intervals
 
 
+def mask_removal_event(mask_node: ET.Element, reel_id: int) -> Optional[Mask]:
+    props = dict(mask_node.attrib)
+    properties_node = mask_node.find(".//properties")
+    if properties_node is not None:
+        props.update(properties_node.attrib)
+    if (
+        props.get("sensitivitysetid") != "sId_mmx_noinsp"
+        or props.get("noinspection", "false").lower() != "true"
+    ):
+        return None
+
+    end_node = mask_node.find("end")
+    if end_node is None:
+        return None
+
+    end_ts = None
+    end_date = end_node.attrib.get("date")
+    end_time = end_node.attrib.get("time")
+    if end_date and end_time:
+        try:
+            end_ts = parse_datetime(end_date, end_time)
+        except ValueError:
+            pass
+
+    end_format = attr_as_float(end_node, "format")
+    if end_ts is None and end_format is None:
+        return None
+
+    return Mask(
+        reel_id=reel_id,
+        xml_id=props.get("id") or mask_node.attrib.get("id"),
+        sensitivitysetid=props.get("sensitivitysetid"),
+        noinspection=False,
+        coords=props.get("coords") or "",
+        timestamp=end_ts,
+        format_value=end_format,
+    )
+
+
 def extract_one(
     zip_path: str,
     machine_name: str,
@@ -303,8 +342,32 @@ def extract_one(
                 time_end=time_end,
             ).first()
             if exists:
+                added_removals = 0
+                for mask_node in root.findall(".//masks//mask"):
+                    removal = mask_removal_event(mask_node, exists.reel_id)
+                    if removal is None:
+                        continue
+                    existing_removal = (
+                        session.query(Mask.mask_id)
+                        .filter_by(
+                            reel_id=removal.reel_id,
+                            xml_id=removal.xml_id,
+                            sensitivitysetid=removal.sensitivitysetid,
+                            noinspection=False,
+                            coords=removal.coords,
+                            timestamp=removal.timestamp,
+                            format_value=removal.format_value,
+                        )
+                        .first()
+                    )
+                    if existing_removal is None:
+                        session.add(removal)
+                        added_removals += 1
+                if added_removals:
+                    session.commit()
                 print(
-                    f"⚠️ Reel already exists (machine={machine_name}, order={order_number}, job={job_name}). Skipping insert."
+                    f"⚠️ Reel already exists (machine={machine_name}, order={order_number}, job={job_name}). "
+                    f"Added {added_removals} mask removal event(s); skipped duplicate import."
                 )
                 return
 
@@ -584,6 +647,10 @@ def extract_one(
                         format_value=fmt_val,
                     )
                 )
+
+                removal = mask_removal_event(m, reel.reel_id)
+                if removal is not None:
+                    mask_rows.append(removal)
             if mask_rows:
                 session.bulk_save_objects(mask_rows)
 
