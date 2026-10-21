@@ -1,5 +1,9 @@
 (function () {
   const BOARD_REFRESH_MS = 30000;
+  const BOARD_CACHE_KEY = "status-overview-board-v2";
+  const BOARD_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
+  const changeViews = new Map();
+  const changeDetailViews = new Map();
 
   const state = {
     board: null,
@@ -35,9 +39,39 @@
     alertFooter: document.getElementById("statusAlertFooter"),
     alertComment: document.getElementById("statusAlertComment"),
     makeReadyBtn: document.getElementById("statusAlertMakeReadyBtn"),
+    changeModal: document.getElementById("overviewChangeModal"),
+    changeModalTitle: document.getElementById("overviewChangeModalTitle"),
+    changeModalSubtitle: document.getElementById("overviewChangeModalSubtitle"),
+    changeModalBody: document.getElementById("overviewChangeModalBody"),
+    changeModalClose: document.getElementById("overviewChangeModalClose"),
   };
 
-  async function loadBoard() {
+  function restoreCachedBoard() {
+    try {
+      const cached = JSON.parse(window.localStorage.getItem(BOARD_CACHE_KEY) || "null");
+      if (!cached?.savedAt || !cached?.board) return false;
+      if (Date.now() - Number(cached.savedAt) > BOARD_CACHE_MAX_AGE_MS) return false;
+      state.board = cached.board;
+      state.boardVersion += 1;
+      render();
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function cacheBoard(board) {
+    try {
+      const serialized = JSON.stringify({ savedAt: Date.now(), board });
+      if (serialized.length <= 2_000_000) {
+        window.localStorage.setItem(BOARD_CACHE_KEY, serialized);
+      }
+    } catch (error) {
+      // Storage can be unavailable or full; live loading still works.
+    }
+  }
+
+  async function loadBoard({ syncAlerts = true } = {}) {
     const requestSeq = state.boardRequestSeq + 1;
     state.boardRequestSeq = requestSeq;
     if (state.boardAbortController) {
@@ -46,10 +80,10 @@
     const controller = new AbortController();
     state.boardAbortController = controller;
     try {
-      let res = await fetch("/statusOverview/api/overview/refresh", {
-        method: "POST",
-        signal: controller.signal,
-      });
+      let res = await fetch(
+        syncAlerts ? "/statusOverview/api/overview/refresh" : "/statusOverview/api/overview",
+        syncAlerts ? { method: "POST", signal: controller.signal } : { signal: controller.signal }
+      );
       if (!res.ok && !state.board) {
         res = await fetch("/statusOverview/api/overview", { signal: controller.signal });
       }
@@ -58,6 +92,7 @@
       if (requestSeq !== state.boardRequestSeq) return;
       state.board = board;
       state.boardVersion += 1;
+      cacheBoard(board);
       render();
     } catch (err) {
       if (err?.name === "AbortError") return;
@@ -263,56 +298,44 @@
 
   function renderCards(cards) {
     if (!refs.cardGrid) return;
+    changeViews.clear();
+    changeDetailViews.clear();
     if (!cards.length) {
       refs.cardGrid.innerHTML = `<div class="empty-state">No machines found.</div>`;
       return;
     }
     refs.cardGrid.innerHTML = cards
       .map(
-        (card) => `
+        (card) => {
+          const orderNumber = card.orderNumber || orderNumberFromDisplay(card.jobNumber) || "--";
+          return `
           <article id="machine-card-${slugify(card.machineKey)}" class="status-card ${escapeAttr(card.state)}" data-alert-id="${card.alertId || ""}">
-            <div class="status-card-content">
-              <div class="status-card-header">
-                <div class="status-card-title-group">
-                  <h3>${escapeHtml(card.machineName || "")}</h3>
-                </div>
-                <span class="status-card-header-time">Last Reel - ${escapeHtml(formatTime(card.lastUpdated))}</span>
+            <header class="status-card-header">
+              <div class="status-card-title-group">
+                <h3>${escapeHtml(card.machineName || "Press")}</h3>
+                <span class="status-card-header-reel">${escapeHtml(card.reelNumber || "--")}</span>
               </div>
-              <div class="status-card-status-band">
-                <div class="status-card-status">${escapeHtml(card.statusText || "")}</div>
+              <span class="status-card-header-time">${escapeHtml(formatLastReelTime(card.lastUpdated))}</span>
+            </header>
+            <div class="status-card-body">
+              <div class="status-card-job-row">
+                <span class="status-card-job" title="${escapeAttr(orderNumber)}">Order ${escapeHtml(orderNumber)}</span>
+                <span class="status-card-feet">${escapeHtml(card.metrics?.lastReelFeet || "--")}</span>
               </div>
               <div class="status-card-secondary">
-                <div class="status-card-info-panel">
-                  <div class="status-card-meta-row">
-                    <span class="status-card-meta-label">Job</span>
-                    <span class="status-card-meta-value">${escapeHtml(card.jobNumber || "No job")}</span>
-                  </div>
-                  <div class="status-card-meta-row">
-                    <span class="status-card-meta-label">Reel</span>
-                    <span class="status-card-meta-value">${escapeHtml(card.reelNumber || "No reel")}</span>
-                  </div>
-                  <div class="status-card-meta-row">
-                    <span class="status-card-meta-label">Feet</span>
-                    <span class="status-card-meta-value">${escapeHtml(card.metrics?.lastReelFeet || "--")}</span>
-                  </div>
-                  ${renderReelExplorerLink(card.reelContext, "Open in Reel Explorer")}
-                </div>
-                <div class="status-substatus-row">
-                  ${renderBox(card.bstBox)}
-                  ${renderBox(card.rlmBox)}
-                </div>
                 ${renderCardReelHistory(card.reelHistory || [])}
               </div>
             </div>
           </article>
-        `
+        `;
+        }
       )
       .join("");
     refs.cardGrid.querySelectorAll(".status-card[data-alert-id]").forEach((node) => {
       const alertId = Number(node.getAttribute("data-alert-id"));
       if (!alertId) return;
       node.addEventListener("click", (event) => {
-        if (event.target?.closest(".status-card-reel-history, .status-reel-explorer-link")) return;
+        if (event.target?.closest(".status-card-reel-history")) return;
         event.preventDefault();
         event.stopPropagation();
         openAlertModal(alertId, { returnTarget: null });
@@ -320,84 +343,274 @@
     });
   }
 
-  function renderBox(box) {
-    return `
-      <div class="status-substatus ${escapeAttr(box.state || "neutral")}">
-        <span class="status-substatus-label">${escapeHtml(box.label || "")}</span>
-        <strong>${escapeHtml(box.detail || "")}</strong>
-        ${box.subdetail ? `<small>${escapeHtml(box.subdetail)}</small>` : ""}
-      </div>
-    `;
+  function orderNumberFromDisplay(value) {
+    const display = String(value || "").trim();
+    if (!display) return "";
+    const separator = display.indexOf(" - ");
+    return separator >= 0 ? display.slice(0, separator).trim() : display;
   }
 
   function renderCardReelHistory(history) {
     if (!history.length) return "";
+    const reels = history.slice(0, 7);
     return `
       <div class="status-card-reel-history">
-        ${renderReelHistoryGroup("BST", "bstState", history)}
-        ${renderReelHistoryGroup("RLM", "rlmState", history)}
-      </div>
-    `;
-  }
-
-  function renderReelHistoryGroup(label, stateKey, history) {
-    const groupClass = `status-card-reel-group--${label.toLowerCase()}`;
-    return `
-      <div class="status-card-reel-group ${escapeAttr(groupClass)}">
-        <span class="status-card-reel-label">${escapeHtml(label)}</span>
-        <div class="status-card-reel-strip">
-          ${history.map((row) => renderReelHistoryChip(row, label, stateKey)).join("")}
+        <div class="status-card-reel-matrix">
+          ${renderReelMatrixRow("BST", reels.map((row) => renderReelMatrixChip(row, "BST", "bstState")))}
+          ${renderReelMatrixRow("RLM", reels.map((row) => renderReelMatrixChip(row, "RLM", "rlmState")))}
         </div>
       </div>
     `;
   }
 
-  function renderReelHistoryChip(row, label, stateKey) {
-    const stateClass = row[stateKey] || row.state || "healthy";
-    const metricLine = label === "BST"
-      ? `BST - ${escapeHtml(row.bstPct || "--")}`
-      : `RLM - ${escapeHtml(row.rlmPoints || "--")}`;
-    const href = reelExplorerHref(row.reelContext);
-    const tag = href ? "a" : "span";
-    const attrs = href ? ` href="${escapeAttr(href)}" aria-label="Open reel ${escapeAttr(row.reelNumber || "--")} in Reel Explorer"` : ` tabindex="0"`;
+  function renderReelMatrixRow(label, cells) {
     return `
-      <${tag}
-        class="status-card-reel-chip ${escapeAttr(stateClass)}"
-        ${attrs}
-      >
-        ${escapeHtml(row.reelNumber || "--")}
-        <span class="status-card-reel-tooltip" role="tooltip">
-          <strong>${escapeHtml(label)} - Reel ${escapeHtml(row.reelNumber || "--")}</strong>
-          <small>${escapeHtml(formatTime(row.timeEnd))}</small>
-          <small>Job - ${escapeHtml(row.jobNumber || "--")}</small>
-          <small>Feet - ${escapeHtml(row.feet || "--")}</small>
-          <small>${metricLine}</small>
-          ${href ? `<small class="status-card-reel-tooltip__action">Click to open in Reel Explorer</small>` : ""}
-        </span>
-      </${tag}>
+      <div class="status-card-reel-matrix-row status-card-reel-matrix-row--${escapeAttr(label.toLowerCase())}">
+        <span class="status-card-reel-matrix-label">${escapeHtml(label)}</span>
+        ${cells.join("")}
+      </div>
     `;
   }
 
-  function reelExplorerHref(context) {
-    if (!context?.reelId || !context?.machineId) return "";
-    const params = new URLSearchParams({
-      open_reel_explorer: "1",
-      machine_id: String(context.machineId),
-      reel_id: String(context.reelId),
-    });
-    if (context.orderNumber) params.set("order", context.orderNumber);
-    if (context.jobName) params.set("job", context.jobName);
-    const startDate = String(context.timeStart || context.timeEnd || "").split("T")[0];
-    const endDate = String(context.timeEnd || context.timeStart || "").split("T")[0];
-    if (startDate) params.set("start", startDate);
-    if (endDate) params.set("end", endDate);
-    return `/dashboard/?${params.toString()}#job-explorer`;
+  function reelDefectsPer1000Ft(row) {
+    if (!row || row.defectCount === null || row.defectCount === undefined) return null;
+    const defects = Number(row.defectCount);
+    const feet = Number(row.feetValue);
+    if (!Number.isFinite(defects) || !Number.isFinite(feet) || feet <= 0) return null;
+    return (defects / feet) * 1000;
   }
 
-  function renderReelExplorerLink(context, label) {
-    const href = reelExplorerHref(context);
-    if (!href) return "";
-    return `<a class="status-reel-explorer-link" href="${escapeAttr(href)}">${escapeHtml(label)}</a>`;
+  function renderDefectRateTrend(row, previousRow) {
+    const isMakeReady = Boolean(
+      row?.isMakeReady
+      || row?.state === "make-ready"
+      || row?.bstState === "make-ready"
+      || row?.rlmState === "make-ready"
+    );
+    if (isMakeReady) {
+      return `<span class="status-reel-defect-cell is-empty" aria-label="Make-ready reel; defect trend not calculated"></span>`;
+    }
+    const currentRate = reelDefectsPer1000Ft(row);
+    const previousRate = reelDefectsPer1000Ft(previousRow);
+    if (currentRate === null || previousRate === null) {
+      return `<span class="status-reel-defect-cell is-empty" aria-label="No prior defect-rate comparison">•</span>`;
+    }
+    const delta = currentRate - previousRate;
+    if (Math.abs(delta) < 0.005) {
+      return `<span class="status-reel-defect-cell flat" title="No change from prior reel" aria-label="No change in defects per 1,000 ft">—</span>`;
+    }
+    const direction = delta > 0 ? "up" : "down";
+    const arrow = delta > 0 ? "↑" : "↓";
+    const description = delta > 0 ? "higher" : "lower";
+    return `
+      <span class="status-reel-defect-cell ${direction}" aria-label="${escapeAttr(currentRate.toFixed(2))} defects per 1,000 ft, ${description} than prior reel">
+        ${arrow}
+        <span class="status-reel-defect-tooltip" role="tooltip">
+          <strong>${escapeHtml(currentRate.toFixed(2))}</strong>
+          <small>defects / 1,000 ft</small>
+        </span>
+      </span>
+    `;
+  }
+
+  function renderReelMatrixChip(row, label, stateKey) {
+    const reelState = row[stateKey] || row.state || "neutral";
+    const changeDetails = Array.isArray(row.changeDetails) ? row.changeDetails : [];
+    const rlmChangeDetails = Array.isArray(row.rlmChangeDetails) ? row.rlmChangeDetails : [];
+    const showBstChangeWarning = label === "BST" && !row.isMakeReady && changeDetails.length > 0;
+    const showRlmChangeWarning = label === "RLM" && !row.isMakeReady && rlmChangeDetails.length > 0;
+    const showChangeWarning = showBstChangeWarning || showRlmChangeWarning;
+    const changeTypeText = showRlmChangeWarning
+      ? (row.rlmChangeSummary || `${rlmChangeDetails.length} RLM tolerance change${rlmChangeDetails.length === 1 ? "" : "s"}`)
+      : describeChangeTypes(changeDetails);
+    const changeId = showBstChangeWarning ? `overview-change-${changeViews.size + 1}` : "";
+    if (showBstChangeWarning) {
+      changeViews.set(changeId, {
+        reelNumber: row.reelNumber || "--",
+        summary: row.changeSummary || "Reference image or mask changes detected",
+        details: changeDetails,
+      });
+    }
+    const tag = showBstChangeWarning ? "button" : "span";
+    const attrs = showBstChangeWarning
+      ? ` type="button" data-overview-change="${escapeAttr(changeId)}" aria-label="View reference image or mask changes for reel ${escapeAttr(row.reelNumber || "--")}"`
+      : ` tabindex="0"`;
+    const defectRate = reelDefectsPer1000Ft(row);
+    const defectRateLine = defectRate !== null
+      ? `<small>Defects / 1,000 ft - ${escapeHtml(defectRate.toFixed(2))}</small>`
+      : "";
+    return `
+      <span class="status-card-reel-matrix-cell status-card-reel-item${showChangeWarning ? " has-change-warning" : ""}">
+        <${tag}
+          class="status-card-reel-chip ${escapeAttr(reelState)}"
+          ${attrs}
+        >
+          ${escapeHtml(row.reelNumber || "--")}
+          <span class="status-card-reel-tooltip" role="tooltip">
+            <strong>Reel ${escapeHtml(row.reelNumber || "--")}</strong>
+            <small>${escapeHtml(formatTime(row.timeEnd))}</small>
+            <small>Job - ${escapeHtml(row.jobNumber || "--")}</small>
+            <small>Feet - ${escapeHtml(row.feet || "--")}</small>
+            <small>BST - ${escapeHtml(row.bstPct || "--")}</small>
+            <small>RLM - ${escapeHtml(row.rlmPoints || "--")}</small>
+            ${defectRateLine}
+            ${showBstChangeWarning ? `<small class="status-card-reel-tooltip__warning">${escapeHtml(changeTypeText)} - Click to view changes</small>` : ""}
+            ${showRlmChangeWarning ? `<small class="status-card-reel-tooltip__warning">${escapeHtml(changeTypeText)}</small>` : ""}
+          </span>
+        </${tag}>
+        ${showChangeWarning ? `<span class="status-reel-change-warning" aria-hidden="true">!</span>` : ""}
+      </span>
+    `;
+  }
+
+  function openChangeModal(changeId) {
+    const view = changeViews.get(changeId);
+    if (!view || !refs.changeModal || !refs.changeModalBody) return;
+    if (refs.changeModalTitle) refs.changeModalTitle.textContent = `BST changes - Reel ${view.reelNumber}`;
+    if (refs.changeModalSubtitle) refs.changeModalSubtitle.textContent = view.summary;
+    refs.changeModalBody.innerHTML = `
+      <div class="overview-change-options">
+        ${buildOverviewChangeOptions(view, changeId).join("")}
+      </div>
+    `;
+    refs.changeModal.showModal();
+  }
+
+  function describeChangeTypes(details) {
+    const hasReference = details.some((detail) => Array.isArray(detail.images) && detail.images.some((image) => image && image.imageSrc));
+    const hasMask = details.some((detail) => Boolean(detail && detail.maskComparison));
+    if (hasReference && hasMask) return "Reference image change and mask applied";
+    if (hasReference) return "Reference image change";
+    if (hasMask) return "Mask applied";
+    return "BST setup change";
+  }
+
+  function buildOverviewChangeOptions(view, changeId) {
+    const options = [];
+    view.details.forEach((detail, index) => {
+      const images = Array.isArray(detail.images) ? detail.images.filter((image) => image && image.imageSrc) : [];
+      if (images.length) {
+        const detailId = `${changeId}-reference-${index}`;
+        changeDetailViews.set(detailId, { type: "reference", view, detail, images });
+        options.push(renderOverviewChangeOption("Show reference image change", detail.summary || "Reference images changed", "View images", detailId));
+      }
+      if (detail.maskComparison) {
+        const detailId = `${changeId}-mask-${index}`;
+        changeDetailViews.set(detailId, { type: "mask", view, detail, comparison: detail.maskComparison });
+        options.push(renderOverviewChangeOption("Show mask application", detail.summary || "Mask applied", "View mask", detailId));
+      }
+    });
+    return options;
+  }
+
+  function renderOverviewChangeOption(title, summary, buttonLabel, detailId) {
+    return `
+      <section class="overview-change-option">
+        <div class="overview-change-option__copy">
+          <strong>${escapeHtml(title)}</strong>
+          <small>${escapeHtml(summary)}</small>
+        </div>
+        <button type="button" class="change-ref-link overview-change-option__button" data-overview-change-detail="${escapeAttr(detailId)}">${escapeHtml(buttonLabel)}</button>
+      </section>
+    `;
+  }
+
+  function openOverviewChangeDetail(detailId) {
+    const item = changeDetailViews.get(detailId);
+    if (!item || !refs.changeModalBody) return;
+    if (refs.changeModalTitle) {
+      refs.changeModalTitle.textContent = item.type === "reference"
+        ? `Reference image change - Reel ${item.view.reelNumber}`
+        : `Mask applied - Reel ${item.view.reelNumber}`;
+    }
+    if (refs.changeModalSubtitle) refs.changeModalSubtitle.textContent = item.detail.summary || "";
+    refs.changeModalBody.innerHTML = item.type === "reference"
+      ? item.images.map((image, index) => renderOverviewReferenceImage(image, index)).join("")
+      : renderOverviewMaskComparison(item.comparison);
+    if (item.type === "mask") {
+      window.requestAnimationFrame(() => attachOverviewMaskHeatmaps(item.comparison));
+    }
+  }
+
+  function renderOverviewReferenceImage(image, index) {
+    return `
+      <figure class="change-ref-image">
+        <img src="${escapeAttr(urlForStatic(image.imageSrc))}" alt="${escapeAttr(image.filename || image.label || `Reference ${index + 1}`)}" loading="lazy" decoding="async">
+        <figcaption>
+          <strong>${escapeHtml(image.label || `Reference ${index + 1}`)}</strong>
+          <span>${escapeHtml(image.filename || "")}</span>
+          ${image.format ? `<small>Format ${escapeHtml(image.format)}</small>` : ""}
+        </figcaption>
+      </figure>
+    `;
+  }
+
+  function renderOverviewMaskComparison(comparison) {
+    const states = overviewMaskStates(comparison);
+    return `<div class="change-mask-sequence overview-mask-comparison">${states.map(({ label, payload }, index) => renderOverviewMaskHeatmapPanel(label, payload, index)).join("")}</div>`;
+  }
+
+  function overviewMaskStates(comparison) {
+    const before = comparison && comparison.before;
+    const after = comparison && comparison.after;
+    const states = [];
+    if (before && Array.isArray(before.masks) && before.masks.length > 0) {
+      states.push({ label: "Initial", payload: before });
+    }
+    if (after) states.push({ label: "Current", payload: after });
+    return states;
+  }
+
+  function renderOverviewMaskHeatmapPanel(title, payload, index) {
+    const masks = payload && Array.isArray(payload.masks) ? payload.masks : [];
+    return `
+      <figure class="change-mask-panel overview-mask-panel" data-overview-mask-panel="${index}">
+        <div class="overview-mask-heatmap heatmap-wrapper" id="mask-heatmap-overview-change-${index}">
+          <span class="badge">Loading mask footprint...</span>
+        </div>
+        <figcaption>
+          <strong>${escapeHtml(title)} - ${escapeHtml((payload && payload.reel) || "--")}</strong>
+          <span>${escapeHtml(payload && payload.image && payload.image.filename || "")}</span>
+          <small>${masks.length} active mask${masks.length === 1 ? "" : "s"}</small>
+        </figcaption>
+      </figure>
+    `;
+  }
+
+  function attachOverviewMaskHeatmaps(comparison) {
+    if (!window.MaskHeatmap || typeof window.MaskHeatmap.attach !== "function" || !refs.changeModalBody) return;
+    const states = overviewMaskStates(comparison);
+    states.forEach(({ payload }, index) => {
+      const panel = refs.changeModalBody.querySelector(`[data-overview-mask-panel="${index}"]`);
+      if (!panel) return;
+      const reel = {
+        reel_id: `overview-change-${index}`,
+        format_width: Number(payload.format_width),
+        format_length: Number(payload.format_length),
+      };
+      const masks = (payload.masks || []).map((mask) => ({
+        ...mask,
+        xml_id: mask.xml_id || mask.xmlId || mask.label || mask.key || "",
+        sensitivitysetid: mask.sensitivitysetid || mask.sensitivityId || "",
+        coords: mask.coords || "",
+        event: "applied",
+        noinspection: true,
+      }));
+      const imageSrc = payload.image && payload.image.imageSrc ? urlForStatic(payload.image.imageSrc) : null;
+      window.MaskHeatmap.attach(panel, {
+        reel,
+        masks,
+        referenceBackground: imageSrc,
+      });
+    });
+  }
+
+  function urlForStatic(path) {
+    const cleaned = String(path || "").replace(/\\/g, "/").replace(/^\/+/, "");
+    if (!cleaned) return "";
+    if (/^data:image\//i.test(cleaned)) return cleaned;
+    if (/^https?:\/\//i.test(cleaned) || cleaned.startsWith("static/")) return cleaned.startsWith("static/") ? `/${cleaned}` : cleaned;
+    return `/static/${cleaned}`;
   }
 
   function renderAlertSection(target, alerts, emptyMessage) {
@@ -632,7 +845,7 @@
   function scheduleRefresh() {
     if (state.refreshTimer) clearTimeout(state.refreshTimer);
     state.refreshTimer = window.setTimeout(() => {
-      loadBoard().catch((err) => console.error(err));
+      loadBoard({ syncAlerts: false }).catch((err) => console.error(err));
     }, BOARD_REFRESH_MS);
   }
 
@@ -651,6 +864,24 @@
     refs.alertModal?.addEventListener("close", handleAlertModalClosed);
     refs.alertModal?.addEventListener("cancel", () => {
       window.setTimeout(handleAlertModalClosed, 0);
+    });
+    refs.changeModalClose?.addEventListener("click", () => refs.changeModal?.close());
+    refs.changeModal?.addEventListener("click", (event) => {
+      if (event.target === refs.changeModal) refs.changeModal.close();
+    });
+    document.addEventListener("click", (event) => {
+      const detailButton = event.target.closest("[data-overview-change-detail]");
+      if (detailButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        openOverviewChangeDetail(detailButton.getAttribute("data-overview-change-detail"));
+        return;
+      }
+      const warning = event.target.closest("[data-overview-change]");
+      if (!warning) return;
+      event.preventDefault();
+      event.stopPropagation();
+      openChangeModal(warning.getAttribute("data-overview-change"));
     });
   }
 
@@ -675,6 +906,23 @@
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return value;
     return date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  }
+
+  function formatLastReelTime(value) {
+    if (!value) return "No recent update";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    const today = new Date();
+    const isToday =
+      date.getFullYear() === today.getFullYear() &&
+      date.getMonth() === today.getMonth() &&
+      date.getDate() === today.getDate();
+    return date.toLocaleString(
+      [],
+      isToday
+        ? { hour: "numeric", minute: "2-digit" }
+        : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
+    );
   }
 
   function formatAgo(value) {
@@ -715,6 +963,7 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     bindEvents();
-    loadBoard().catch((err) => console.error(err));
+    restoreCachedBoard();
+    loadBoard({ syncAlerts: true }).catch((err) => console.error(err));
   });
 })();

@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/rlm_delta_trends.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/defect_analysis.css', v='defect-analysis-20261019c') }}">
   <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
   <script src="{{ url_for('static', filename='js/filter_state.js') }}"></script>
 </head>
@@ -123,6 +124,7 @@
     <div class="tabs tabs-muted" id="tabNav" aria-label="Defects sections">
       <button type="button" class="tab tab-active" data-tab="overview">Press Overview</button>
       <button type="button" class="tab" data-tab="job">Reel Explorer</button>
+      <button type="button" class="tab" data-tab="defect-analysis">Defect Analysis</button>
       <button type="button" class="tab" data-tab="defect-trends">BST Trends</button>
       <button type="button" class="tab" data-tab="qc-review">View Defects</button>
       <button type="button" class="tab" data-tab="reference-check">Compare References</button>
@@ -385,6 +387,40 @@
           <div class="placeholder">
             Select a reel to view configuration, phases, and RLM details.
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Job Defect Analysis Tab -->
+    <section id="tab-defect-analysis" class="tab-content hidden">
+      <div class="defect-analysis-page">
+        <header class="defect-analysis-hero">
+          <div>
+            <p class="kpi-section__title">Job Defect Details</p>
+            <small>Uses the global machine, date, order, and job filters. Reels below 5,000 ft and all of their defects are excluded.</small>
+          </div>
+          <div id="defectAnalysisCriteria" class="defect-analysis-criteria"></div>
+        </header>
+        <div id="defectAnalysisState" class="defect-analysis-state">Select an order and job to begin.</div>
+        <div id="defectAnalysisContent" class="hidden">
+          <section id="defectAnalysisSummary" class="defect-analysis-summary"></section>
+          <section class="defect-analysis-grid">
+            <article class="defect-analysis-panel">
+              <div class="defect-analysis-panel__header"><h3>Defect mix</h3><small>Counts by class, size, and reel position.</small></div>
+              <div id="defectAnalysisMix"></div>
+            </article>
+            <article class="defect-analysis-panel">
+              <div class="defect-analysis-panel__header"><h3>Reels in this job</h3><small>Reels above the job average are highlighted. Defective length counts each affected repeat once.</small></div>
+              <div id="defectAnalysisReels" class="defect-analysis-table-wrap"></div>
+            </article>
+          </section>
+          <section class="defect-analysis-panel defect-analysis-sensitivity-panel">
+            <div class="defect-analysis-panel__header">
+              <h3>Sensitivity adjustment simulator</h3>
+              <small>Starts at each class's latest XML threshold. Defect magnitude above the selected threshold is included; equal or below is ignored. This does not change BST settings.</small>
+            </div>
+            <div id="defectAnalysisSensitivity" class="defect-analysis-sensitivity"></div>
+          </section>
         </div>
       </div>
     </section>
@@ -1188,8 +1224,8 @@
   <script src="{{ url_for('static', filename='js/dashboard_utils.js') }}"></script>
   <script src="{{ url_for('static', filename='js/defect_modals.js') }}"></script>
   <script src="{{ url_for('static', filename='js/dashboard_filters.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/dashboard_router.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/dashboard_router.js', v='defect-analysis-20261019c') }}"></script>
   <script src="{{ url_for('static', filename='js/tabs/machine_overview.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/dashboard.js', v='defect-analysis-20261019g') }}"></script>
 </body>
 </html>

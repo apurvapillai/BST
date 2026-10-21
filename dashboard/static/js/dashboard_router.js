@@ -123,9 +123,10 @@
     const tabs = {};
     let active = "overview";
     let pendingJobTab = "";
-    const jobRequiredTabs = new Set(["job", "qc-review"]);
+    const jobRequiredTabs = new Set(["job", "qc-review", "defect-analysis"]);
     const hashToRoute = {
       "job-explorer": "job",
+      "defect-analysis": "defect-analysis",
       "defect-trends": "defect-trends",
       "defect-drivers": "defect-drivers",
       "reference-check": "reference-check",
@@ -136,6 +137,7 @@
     };
     const routeToHash = {
       job: "job-explorer",
+      "defect-analysis": "defect-analysis",
       "defect-trends": "defect-trends",
       "defect-drivers": "defect-drivers",
       "reference-check": "reference-check",

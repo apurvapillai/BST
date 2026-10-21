@@ -6,11 +6,11 @@ from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import case, inspect, or_, text
+from sqlalchemy import case, func, inspect, or_, text
 from sqlalchemy.orm import selectinload
 
 from db.connection import SessionLocal, engine
-from db.models import Machine, Reel, StatusOverviewAlert
+from db.models import Defect, Machine, Reel, StatusOverviewAlert
 from db.rlm_connection import RLMSessionLocal
 from db.rlm_live_models import RLMLiveMachineThreshold
 from db.rlm_models import RLMMachine, RLMReel
@@ -194,6 +194,7 @@ class StatusOverviewService:
             machine_reels = reels_by_machine.get(machine.machine_id, [])
             for reel in machine_reels:
                 setattr(reel, "_status_overview_machine_name", machine.name)
+                setattr(reel, "_status_overview_machine_id", machine.machine_id)
             latest_reel = machine_reels[0] if machine_reels else None
             latest_activity = self._bst_local_time(latest_reel.time_end or latest_reel.time_start) if latest_reel else None
             latest_metrics = self._bst_reel_metrics(latest_reel) if latest_reel else None
@@ -481,6 +482,21 @@ class StatusOverviewService:
                 "machineName": machine_name,
                 "reelNumber": display_reel["reelNumber"] or "",
                 "jobNumber": display_reel["jobNumber"] or "",
+                "jobName": self._display_job_name_only(
+                    bst_reel,
+                    rlm_reel,
+                    last_activity,
+                    bst_activity,
+                    rlm_activity,
+                ) or "",
+                "orderNumber": self._display_order_number_only(
+                    bst_reel,
+                    rlm_reel,
+                    last_activity,
+                    bst_activity,
+                    rlm_activity,
+                ) or "",
+                "reelContext": self._reel_explorer_context(bst_reel if bst_is_current else None),
                 "lastUpdated": self._iso_local(last_activity),
                 "statusText": status_text,
                 "state": state,
@@ -1014,6 +1030,22 @@ class StatusOverviewService:
                 .all()
             )
 
+        defect_counts: Dict[int, int] = {}
+        if reel_ids:
+            defect_counts = {
+                int(reel_id): int(count or 0)
+                for reel_id, count in (
+                    session.query(Defect.reel_id, func.count(Defect.defect_id))
+                    .filter(Defect.reel_id.in_(reel_ids))
+                    .group_by(Defect.reel_id)
+                    .all()
+                )
+                if reel_id is not None
+            }
+        for bst in bst_data.values():
+            for reel in bst.get("recentReels") or []:
+                setattr(reel, "_status_overview_defect_count", defect_counts.get(int(reel.reel_id), 0))
+
         alerts_by_machine = defaultdict(list)
         for row in alert_rows:
             alerts_by_machine[(row.machine_name or "").strip().lower()].append(row)
@@ -1329,7 +1361,7 @@ class StatusOverviewService:
             self._central_time(rlm_reel.production_end_dt if rlm_reel else None),
         )
         reel_number = (bst_reel.reel_code if bst_reel and bst_reel.reel_code else None) or (rlm_reel.reel_id if rlm_reel else None)
-        job_number = (bst_reel.order_number or bst_reel.job_name if bst_reel else None) or (rlm_reel.job_name if rlm_reel else None)
+        job_number = (bst_reel.job_name if bst_reel else None) or (rlm_reel.job_name if rlm_reel else None)
         matching_alerts = self._matching_reel_alert_rows(alert_rows, machine_name, reel_number, bst_reel.reel_id if bst_reel else None)
         bst_state = self._reel_history_channel_state(
             matching_alerts,
@@ -1350,16 +1382,35 @@ class StatusOverviewService:
             "label": "Current" if index == 0 else f"Prior {index}",
             "reelNumber": reel_number,
             "bstReelId": bst_reel.reel_id if bst_reel else None,
+            "reelContext": self._reel_explorer_context(bst_reel),
             "jobNumber": job_number,
             "feet": self._format_feet(feet),
+            "feetValue": round(feet, 2) if feet is not None else None,
             "bstPct": f"{bst_pct:.1f}%" if bst_pct is not None else "--",
             "rlmPoints": f"{rlm_points} pts" if rlm_points is not None else "--",
             "rlmDensity": f"{rlm_density:.1f}/1k ft" if rlm_density is not None else "--",
+            "defectCount": (
+                int(getattr(bst_reel, "_status_overview_defect_count", 0))
+                if bst_reel
+                else None
+            ),
             "lastUpdated": self._iso_local(last_updated),
             "timeEnd": self._iso_local(time_end),
             "state": history_state,
             "bstState": bst_state,
             "rlmState": rlm_state,
+        }
+
+    def _reel_explorer_context(self, reel: Optional[Reel]) -> Optional[Dict[str, Any]]:
+        if not reel:
+            return None
+        return {
+            "reelId": reel.reel_id,
+            "machineId": getattr(reel, "_status_overview_machine_id", reel.machine_id),
+            "jobName": reel.job_name,
+            "orderNumber": reel.order_number,
+            "timeStart": reel.time_start.isoformat() if reel.time_start else None,
+            "timeEnd": reel.time_end.isoformat() if reel.time_end else None,
         }
 
     def _matching_reel_alert_rows(
@@ -1555,6 +1606,38 @@ class StatusOverviewService:
 
     def _display_job_name(self, bst_reel: Optional[Reel], rlm_reel: Optional[RLMReel]) -> Optional[str]:
         return (self._bst_reel_job_display(bst_reel) if bst_reel else None) or (self._rlm_reel_job_display(rlm_reel) if rlm_reel else None)
+
+    def _display_job_name_only(
+        self,
+        bst_reel: Optional[Reel],
+        rlm_reel: Optional[RLMReel],
+        last_activity: Optional[datetime],
+        bst_time: Optional[datetime],
+        rlm_time: Optional[datetime],
+    ) -> Optional[str]:
+        if last_activity and rlm_time and last_activity == rlm_time and rlm_reel:
+            return rlm_reel.job_name
+        if bst_reel:
+            return bst_reel.job_name
+        if rlm_reel:
+            return rlm_reel.job_name
+        return None
+
+    def _display_order_number_only(
+        self,
+        bst_reel: Optional[Reel],
+        rlm_reel: Optional[RLMReel],
+        last_activity: Optional[datetime],
+        bst_time: Optional[datetime],
+        rlm_time: Optional[datetime],
+    ) -> Optional[str]:
+        if last_activity and rlm_time and last_activity == rlm_time and rlm_reel:
+            return getattr(rlm_reel, "order_number", None)
+        if bst_reel:
+            return bst_reel.order_number
+        if rlm_reel:
+            return getattr(rlm_reel, "order_number", None)
+        return None
 
     def _bst_reel_job_display(self, reel: Optional[Reel]) -> Optional[str]:
         if not reel:

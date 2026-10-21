@@ -1,4 +1,4 @@
-  const DefectDriversTab = (() => {
+const DefectDriversTab = (() => {
     let initialized = false;
     let latestRequestToken = 0;
     let inflightPromise = null;
@@ -153,6 +153,18 @@
           `;
         })
         .join("");
+    }
+
+    // A reel is flagged red when it is long but BST was inspecting for too little of it.
+    const ALERT_MIN_LENGTH_FT = 5000;
+    const ALERT_MAX_ACTIVE_PCT = 60;
+
+    function isLowInspectionReel(row = {}) {
+      const length = Number(row.length_ft);
+      const activePct = Number(row.bst_active_pct);
+      if (row.length_ft === null || row.length_ft === undefined || !Number.isFinite(length)) return false;
+      if (row.bst_active_pct === null || row.bst_active_pct === undefined || !Number.isFinite(activePct)) return false;
+      return length > ALERT_MIN_LENGTH_FT && activePct < ALERT_MAX_ACTIVE_PCT;
     }
 
     function getFilteredTimelineRows(rows = []) {
@@ -347,8 +359,9 @@
             .filter(Boolean)
             .map((item) => `<span>${Utils.escapeHtml(item)}</span>`)
             .join("");
+          const lowInspection = isLowInspectionReel(row);
           return `
-            <article class="drivers-timeline-row">
+            <article class="drivers-timeline-row${lowInspection ? " drivers-timeline-row--alert" : ""}">
               <div class="drivers-timeline-row__meta">
                 <div class="drivers-timeline-row__stamp">${Utils.escapeHtml(formatTime(row.time))}</div>
                 <div class="drivers-timeline-row__title">${Utils.escapeHtml(row.reel_code || "Reel")}</div>
@@ -360,6 +373,7 @@
                 <span class="drivers-timeline-row__dot"></span>
               </div>
               <div class="drivers-timeline-row__body">
+                ${lowInspection ? `<div class="drivers-timeline-row__alert">Low inspection: ${Utils.escapeHtml(formatFeet(row.length_ft, 0))} reel, BST active only ${Utils.escapeHtml(formatPercent(row.bst_active_pct, 1))}</div>` : ""}
                 <div class="drivers-timeline-row__metrics">${metrics}</div>
                 <div class="drivers-timeline-row__events">${events || '<span class="drivers-empty-inline">No driver changes detected</span>'}</div>
               </div>

@@ -3,9 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BST Status</title>
+  <title>BST Overview</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/status_overview.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/status_overview.css', v='bst-overview-20261021aj') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/bst_change_flags.css', v='bst-overview-20261019i') }}">
 </head>
 <body>
   <div class="app-layout">
@@ -13,7 +14,7 @@
     <div class="app-main">
       <div class="app-shell">
         {% set header_eyebrow = 'ProcessGuard AI - Five Star Management' %}
-        {% set header_title = 'BST Status' %}
+        {% set header_title = 'BST Overview' %}
         {% include 'partials/app_header.html' %}
 
         <div id="statusOverviewShell" class="status-overview-shell is-loading">
@@ -30,6 +31,12 @@
           </section>
 
           <section class="status-board-section">
+            <div class="status-overview-legend" aria-label="Reel status legend">
+              <span><i class="status-overview-legend__dot healthy"></i>Running</span>
+              <span><i class="status-overview-legend__dot alert"></i>Off</span>
+              <span><i class="status-overview-legend__dot make-ready"></i>Make Ready / Splice / Sample</span>
+              <span><i class="status-overview-legend__warning">!</i>Reference image, mask, or RLM tolerance changed</span>
+            </div>
             <div id="statusCardGrid" class="status-card-grid"></div>
           </section>
 
@@ -91,12 +98,24 @@
             </div>
           </dialog>
 
+          <dialog class="change-ref-modal" id="overviewChangeModal">
+            <div class="change-ref-modal__header">
+              <div>
+                <h2 id="overviewChangeModalTitle">Reel changes</h2>
+                <p id="overviewChangeModalSubtitle"></p>
+              </div>
+              <button type="button" class="change-ref-modal__close" id="overviewChangeModalClose" aria-label="Close reel changes">&times;</button>
+            </div>
+            <div class="change-ref-modal__body" id="overviewChangeModalBody"></div>
+          </dialog>
+
         </div>
       </div>
     </div>
   </div>
 
-  <script src="{{ url_for('static', filename='js/nav.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/status_overview.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/nav.js', v='bst-overview-20261019i') }}"></script>
+  <script src="{{ url_for('static', filename='js/dashboard_utils.js', v='bst-overview-20261019i') }}"></script>
+  <script src="{{ url_for('static', filename='js/status_overview.js', v='bst-overview-20261021aj') }}"></script>
 </body>
 </html>

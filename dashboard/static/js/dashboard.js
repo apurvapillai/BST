@@ -1,9 +1,10 @@
 (function () {
   let pendingAutoJobTab = "";
   let autoJobSelectionPromise = null;
-  const guardedTabs = new Set(["job", "qc-review"]);
+  const guardedTabs = new Set(["job", "qc-review", "defect-analysis"]);
   const TAB_SCRIPT_CONFIG = {
     job: { path: "/static/js/tabs/job_explorer.js", exportName: "JobExplorerTab" },
+    "defect-analysis": { path: "/static/js/tabs/defect_analysis.js?v=defect-analysis-20261019g", exportName: "DefectAnalysisTab" },
     "defect-trends": { path: "/static/js/tabs/defect_trends.js", exportName: "DefectTrendsTab" },
     "defect-drivers": { path: "/static/js/tabs/defect_drivers.js", exportName: "DefectDriversTab" },
     "qc-review": { path: "/static/js/tabs/qc_review.js", exportName: "QcReviewTab" },
@@ -183,6 +184,7 @@
 
     Router.register("overview", OverviewTab);
     Router.register("job", createLazyTab("job"));
+    Router.register("defect-analysis", createLazyTab("defect-analysis"));
     Router.register("defect-trends", createLazyTab("defect-trends"));
     Router.register("defect-drivers", createLazyTab("defect-drivers"));
     Router.register("qc-review", createLazyTab("qc-review"));

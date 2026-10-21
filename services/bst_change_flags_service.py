@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import case
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import selectinload
 
 from db.connection import SessionLocal
@@ -21,6 +21,7 @@ from services.status_overview_service import (
 )
 
 CENTRAL_TZ = ZoneInfo("America/Chicago")
+CHANGE_FLAGS_DEFAULT_REEL_LIMIT = 40
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -52,9 +53,10 @@ def _machine_sort_key(name: Optional[str]) -> Tuple[int, str]:
 
 
 class BSTChangeFlagsService:
-    def get_payload(self) -> Dict[str, Any]:
-        bst_rows = self._load_bst_rows()
-        rlm_rows = self._load_rlm_rows()
+    def get_payload(self, reel_limit: int = CHANGE_FLAGS_DEFAULT_REEL_LIMIT) -> Dict[str, Any]:
+        reel_limit = max(int(reel_limit or CHANGE_FLAGS_DEFAULT_REEL_LIMIT), 2)
+        bst_rows = self._load_bst_rows(reel_limit)
+        rlm_rows = self._load_rlm_rows(reel_limit)
         machine_names = sorted(set(bst_rows) | set(rlm_rows), key=_machine_sort_key)
 
         rows: List[Dict[str, Any]] = []
@@ -65,6 +67,7 @@ class BSTChangeFlagsService:
             rows.append(
                 {
                     "machineName": machine_name,
+                    "machineId": (bst or rlm or {}).get("machineId"),
                     "displayReel": self._display_reel(bst, rlm),
                     "rlmTolerance": self._build_rlm_flag(rlm),
                     "bstSetup": self._build_bst_flag(bst),
@@ -82,7 +85,7 @@ class BSTChangeFlagsService:
             ],
         }
 
-    def _load_rlm_rows(self) -> Dict[str, Dict[str, Any]]:
+    def _load_rlm_rows(self, reel_limit: int) -> Dict[str, Dict[str, Any]]:
         with RLMSessionLocal() as session:
             machines = (
                 session.query(RLMMachine)
@@ -90,56 +93,91 @@ class BSTChangeFlagsService:
                 .order_by(RLMMachine.machine_name.asc())
                 .all()
             )
+            machine_ids = [machine.machine_id for machine in machines]
+            activity = case(
+                (RLMReel.production_end_dt.is_(None), RLMReel.production_start_dt),
+                else_=RLMReel.production_end_dt,
+            )
+            ranked = (
+                select(
+                    RLMReel.reel_db_id.label("reel_db_id"),
+                    func.row_number().over(
+                        partition_by=RLMReel.machine_id,
+                        order_by=(activity.desc(), RLMReel.reel_db_id.desc()),
+                    ).label("reel_rank"),
+                )
+                .where(RLMReel.machine_id.in_(machine_ids))
+                .subquery()
+            )
+            reel_ids_query = select(ranked.c.reel_db_id).where(ranked.c.reel_rank <= reel_limit)
+            all_reels = (
+                session.query(RLMReel)
+                .filter(RLMReel.reel_db_id.in_(reel_ids_query))
+                .order_by(RLMReel.machine_id.asc(), activity.desc(), RLMReel.reel_db_id.desc())
+                .all()
+            )
+            reels_by_machine: Dict[int, List[RLMReel]] = defaultdict(list)
+            for reel in all_reels:
+                reels_by_machine[int(reel.machine_id)].append(reel)
+            tolerance_ids = [reel.reel_db_id for reel in all_reels if reel.reel_db_id is not None]
+            tolerances_by_reel = self._rlm_tolerances_by_reel(session, tolerance_ids)
+
             out: Dict[str, Dict[str, Any]] = {}
             for machine in machines:
-                reels = (
-                    session.query(RLMReel)
-                    .filter(RLMReel.machine_id == machine.machine_id)
-                    .order_by(
-                        case(
-                            (RLMReel.production_end_dt.is_(None), RLMReel.production_start_dt),
-                            else_=RLMReel.production_end_dt,
-                        ).desc(),
-                        RLMReel.reel_db_id.desc(),
-                    )
-                    .limit(40)
-                    .all()
-                )
+                reels = reels_by_machine.get(int(machine.machine_id), [])
                 latest = reels[0] if reels else None
                 previous = self._previous_same_rlm_job(latest, reels[1:]) if latest else None
-                tolerance_ids = [reel.reel_db_id for reel in reels if reel is not None]
-                tolerances_by_reel = self._rlm_tolerances_by_reel(session, tolerance_ids)
+                machine_tolerances = {
+                    int(reel.reel_db_id): tolerances_by_reel.get(int(reel.reel_db_id), [])
+                    for reel in reels
+                    if reel.reel_db_id is not None
+                }
                 out[_norm(machine.machine_name)] = {
                     "machineName": machine.machine_name,
                     "machineId": machine.machine_id,
                     "latest": latest,
                     "previous": previous,
                     "recentReels": reels,
-                    "recentTolerancesByReel": tolerances_by_reel,
-                    "tolerancesByReel": tolerances_by_reel,
+                    "recentTolerancesByReel": machine_tolerances,
+                    "tolerancesByReel": machine_tolerances,
                 }
             return out
 
-    def _load_bst_rows(self) -> Dict[str, Dict[str, Any]]:
+    def _load_bst_rows(self, reel_limit: int) -> Dict[str, Dict[str, Any]]:
         with SessionLocal() as session:
             machines = session.query(Machine).order_by(Machine.name.asc()).all()
+            machine_ids = [machine.machine_id for machine in machines]
+            activity = case((Reel.time_end.is_(None), Reel.time_start), else_=Reel.time_end)
+            ranked = (
+                select(
+                    Reel.reel_id.label("reel_id"),
+                    func.row_number().over(
+                        partition_by=Reel.machine_id,
+                        order_by=(activity.desc(), Reel.reel_id.desc()),
+                    ).label("reel_rank"),
+                )
+                .where(Reel.machine_id.in_(machine_ids))
+                .subquery()
+            )
+            reel_ids_query = select(ranked.c.reel_id).where(ranked.c.reel_rank <= reel_limit)
+            all_reels = (
+                session.query(Reel)
+                .options(
+                    selectinload(Reel.sensitivity_sets),
+                    selectinload(Reel.masks),
+                    selectinload(Reel.reference_images),
+                )
+                .filter(Reel.reel_id.in_(reel_ids_query))
+                .order_by(Reel.machine_id.asc(), activity.desc(), Reel.reel_id.desc())
+                .all()
+            )
+            reels_by_machine: Dict[int, List[Reel]] = defaultdict(list)
+            for reel in all_reels:
+                reels_by_machine[int(reel.machine_id)].append(reel)
+
             out: Dict[str, Dict[str, Any]] = {}
             for machine in machines:
-                reels = (
-                    session.query(Reel)
-                    .options(
-                        selectinload(Reel.sensitivity_sets),
-                        selectinload(Reel.masks),
-                        selectinload(Reel.reference_images),
-                    )
-                    .filter(Reel.machine_id == machine.machine_id)
-                    .order_by(
-                        case((Reel.time_end.is_(None), Reel.time_start), else_=Reel.time_end).desc(),
-                        Reel.reel_id.desc(),
-                    )
-                    .limit(40)
-                    .all()
-                )
+                reels = reels_by_machine.get(int(machine.machine_id), [])
                 latest = reels[0] if reels else None
                 previous = self._previous_same_bst_job(latest, reels[1:]) if latest else None
                 out[_norm(machine.name)] = {
@@ -194,8 +232,21 @@ class BSTChangeFlagsService:
         return {
             "reelCode": reel_code,
             "jobNumber": job,
+            "reelContext": self._reel_explorer_context(bst_reel),
             "feet": self._format_feet(feet),
             "endedAt": ended.isoformat() if ended else None,
+        }
+
+    def _reel_explorer_context(self, reel: Optional[Reel]) -> Optional[Dict[str, Any]]:
+        if not reel:
+            return None
+        return {
+            "reelId": reel.reel_id,
+            "machineId": reel.machine_id,
+            "jobName": reel.job_name,
+            "orderNumber": reel.order_number,
+            "timeStart": reel.time_start.isoformat() if reel.time_start else None,
+            "timeEnd": reel.time_end.isoformat() if reel.time_end else None,
         }
 
     def _feet_from_bst_reel(self, reel: Optional[Reel], machine_name: Optional[str] = None) -> Optional[float]:
@@ -272,6 +323,7 @@ class BSTChangeFlagsService:
                     "label": "Current" if index == 0 else f"Prior {index}",
                     "reelNumber": (bst_reel.reel_code if bst_reel and bst_reel.reel_code else None) or (rlm_reel.reel_id if rlm_reel else None),
                     "jobNumber": (bst_reel.order_number or bst_reel.job_name if bst_reel else None) or (rlm_reel.job_name if rlm_reel else None),
+                    "reelContext": self._reel_explorer_context(bst_reel),
                     "feet": self._format_feet(feet),
                     "timeEnd": self._iso_local(
                         self._latest_activity(
@@ -529,30 +581,6 @@ class BSTChangeFlagsService:
         if not changed_keys:
             return []
 
-        initial_state = {key: previous_map.get(key) for key in changed_keys}
-        running_state = dict(initial_state)
-        sequence: List[Dict[str, Any]] = [
-            {
-                "label": "Initial",
-                "reel": previous.reel_code,
-                "image": self._serialize_reference_image(
-                    self._reference_for_mask(previous.reference_images, self._mask_format_for_key(previous_map, changed_keys[0]))
-                ),
-                "masks": [self._serialize_mask(previous_map.get(key), key) for key in changed_keys if previous_map.get(key)],
-            }
-        ]
-        for step_index, key in enumerate(changed_keys, start=1):
-            running_state[key] = current_map.get(key)
-            step_format = self._mask_format_for_key(current_map, key) or self._mask_format_for_key(previous_map, key)
-            sequence.append(
-                {
-                    "label": f"After change {step_index}",
-                    "reel": current.reel_code,
-                    "image": self._serialize_reference_image(self._reference_for_mask(current.reference_images, step_format)),
-                    "masks": [self._serialize_mask(running_state.get(changed_key), changed_key) for changed_key in changed_keys if running_state.get(changed_key)],
-                }
-            )
-
         latest_current_mask = max(
             current_map.values(),
             key=lambda mask: str(mask.get("timestamp") or ""),
@@ -565,41 +593,69 @@ class BSTChangeFlagsService:
         )
         before_image = self._reference_for_mask(previous.reference_images, mask_format)
         after_image = self._reference_for_mask(current.reference_images, mask_format)
+        before_payload = {
+            "label": "Initial",
+            "reel": previous.reel_code,
+            "image": self._serialize_reference_image(before_image),
+            "format_width": _to_float(getattr(previous, "format_width", None)),
+            "format_length": _to_float(getattr(previous, "format_length", None)),
+            "masks": [self._serialize_mask(mask, key) for key, mask in sorted(previous_map.items())],
+        }
+        after_payload = {
+            "label": "Current",
+            "reel": current.reel_code,
+            "image": self._serialize_reference_image(after_image),
+            "format_width": _to_float(getattr(current, "format_width", None)),
+            "format_length": _to_float(getattr(current, "format_length", None)),
+            "masks": [self._serialize_mask(mask, key) for key, mask in sorted(current_map.items())],
+        }
+        sequence = [before_payload, after_payload] if before_payload["masks"] else [after_payload]
         return [
             {
-                "label": "Mask coordinates",
-                "summary": f"Mask changed {self._count_label(len(changed_keys))}",
+                "label": "Mask applied",
+                "summary": f"Mask applied {self._count_label(len(changed_keys))}",
                 "maskComparison": {
-                    "before": {
-                        "reel": previous.reel_code,
-                        "image": self._serialize_reference_image(before_image),
-                        "format_width": _to_float(previous.format_width),
-                        "format_length": _to_float(previous.format_length),
-                        "masks": [self._serialize_mask(mask, key) for key, mask in sorted(previous_map.items())],
-                    },
-                    "after": {
-                        "reel": current.reel_code,
-                        "image": self._serialize_reference_image(after_image),
-                        "format_width": _to_float(current.format_width),
-                        "format_length": _to_float(current.format_length),
-                        "masks": [self._serialize_mask(mask, key) for key, mask in sorted(current_map.items())],
-                    },
+                    "before": before_payload,
+                    "after": after_payload,
                     "sequence": sequence,
                 },
             }
         ]
 
     def _mask_map(self, rows: Iterable[Mask]) -> Dict[str, Dict[str, Any]]:
+        ordered = sorted(
+            list(rows or []),
+            key=lambda row: (
+                str(getattr(row, "timestamp", None) or ""),
+                _to_float(getattr(row, "format_value", None)) or float("inf"),
+                getattr(row, "mask_id", None) or 0,
+            ),
+        )
+        latest_by_signature: Dict[Tuple[str, str, str], Tuple[bool, Mask]] = {}
+        for row in ordered:
+            signature = (
+                str(getattr(row, "xml_id", None) or "").strip(),
+                str(getattr(row, "sensitivitysetid", None) or "").strip(),
+                str(getattr(row, "coords", None) or "").strip(),
+            )
+            is_applied = not hasattr(row, "noinspection") or bool(getattr(row, "noinspection", False))
+            latest_by_signature[signature] = (is_applied, row)
+
         out = {}
-        for index, row in enumerate(rows or [], start=1):
-            key = str(row.xml_id or "").strip() or f"mask-{index}"
+        for index, (signature, (_, row)) in enumerate(
+            ((signature, event) for signature, event in latest_by_signature.items() if event[0]),
+            start=1,
+        ):
+            xml_id, sensitivity_id, coords = signature
+            key = "|".join(signature) or f"mask-{index}"
+            timestamp = getattr(row, "timestamp", None)
             out[key] = {
-                "id": row.mask_id,
-                "xmlId": row.xml_id,
-                "sensitivityId": row.sensitivitysetid,
-                "coords": str(row.coords or "").strip(),
-                "format": _rounded(row.format_value),
-                "timestamp": row.timestamp.isoformat() if row.timestamp else None,
+                "id": getattr(row, "mask_id", None),
+                "xmlId": xml_id,
+                "sensitivityId": sensitivity_id,
+                "coords": coords,
+                "format": _rounded(getattr(row, "format_value", None)),
+                "timestamp": timestamp.isoformat() if timestamp else None,
             }
         return out
 
@@ -693,6 +749,7 @@ class BSTChangeFlagsService:
             "label": changed_label if changed else unchanged_label,
             "currentReel": getattr(latest, "reel_code", None) or getattr(latest, "reel_id", None),
             "previousReel": getattr(previous, "reel_code", None) or getattr(previous, "reel_id", None),
+            "reelContext": self._reel_explorer_context(latest) if isinstance(latest, Reel) else None,
             "details": details,
         }
 

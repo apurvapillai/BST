@@ -82,12 +82,33 @@ class BSTChangeFlagsServiceTests(unittest.TestCase):
         changes = self.service._mask_changes(previous, current)
 
         self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0]["label"], "Mask applied")
         comparison = changes[0]["maskComparison"]
-        self.assertEqual(len(comparison["sequence"]), 3)
+        self.assertEqual(len(comparison["sequence"]), 2)
         self.assertEqual(comparison["sequence"][0]["label"], "Initial")
-        self.assertEqual(comparison["sequence"][1]["label"], "After change 1")
-        self.assertEqual(comparison["sequence"][2]["label"], "After change 2")
-        self.assertEqual(len(comparison["sequence"][2]["masks"]), 2)
+        self.assertEqual(comparison["sequence"][1]["label"], "Current")
+        self.assertEqual(len(comparison["sequence"][1]["masks"]), 2)
+
+    def test_mask_application_without_initial_mask_only_shows_current(self) -> None:
+        previous = SimpleNamespace(
+            reel_code="R-500",
+            reference_images=[],
+            masks=[],
+        )
+        current = SimpleNamespace(
+            reel_code="R-501",
+            reference_images=[],
+            masks=[
+                SimpleNamespace(mask_id=3, xml_id="C", sensitivitysetid="3", coords="5,5,25,25", format_value=3.0),
+            ],
+        )
+
+        changes = self.service._mask_changes(previous, current)
+
+        comparison = changes[0]["maskComparison"]
+        self.assertEqual(len(comparison["sequence"]), 1)
+        self.assertEqual(comparison["sequence"][0]["label"], "Current")
+        self.assertEqual(comparison["before"]["masks"], [])
 
 
 if __name__ == "__main__":

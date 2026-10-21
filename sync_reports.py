@@ -63,7 +63,7 @@ REVIEW_ARCHIVE_LIMIT = 2
 # sync after the press is added. The count lives in <press folder>/.review_quota.json,
 # so it does not depend on how many ZIPs are already archived. Delete that file to
 # start a new batch. Presses not listed use REVIEW_ARCHIVE_LIMIT as before.
-REVIEW_ARCHIVE_NEXT = {"Press 5": 5, "Press 9": 5, "Press 7":5, "Press 12": 5,  "Press 14": 5}
+REVIEW_ARCHIVE_NEXT = {"Press 6": 5, "Press 9": 5, "Press 7":5, "Press 12": 5,  "Press 14": 5}
 
 
 # --------------------------------------------------------------------------- #

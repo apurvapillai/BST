@@ -3,11 +3,13 @@ from __future__ import annotations
 from flask import Blueprint, jsonify, render_template, request
 
 from services.bst_change_flags_service import BSTChangeFlagsService
+from services.bst_overview_service import BSTOverviewService
 from services.status_overview_service import StatusOverviewService
 
 status_overview_bp = Blueprint("status_overview", __name__)
 service = StatusOverviewService()
 change_flags_service = BSTChangeFlagsService()
+overview_service = BSTOverviewService(service, change_flags_service)
 
 
 def _request_actor(payload: dict) -> str:
@@ -25,6 +27,11 @@ def status_overview_home():
     return render_template("status_overview.html")
 
 
+@status_overview_bp.route("/bst/overview")
+def bst_overview_home():
+    return render_template("status_overview.html")
+
+
 @status_overview_bp.route("/bst/change-flags")
 def bst_change_flags_home():
     return render_template("bst_change_flags.html")
@@ -32,7 +39,7 @@ def bst_change_flags_home():
 
 @status_overview_bp.route("/statusOverview/api/overview")
 def status_overview_api():
-    return jsonify(service.get_board_payload())
+    return jsonify(overview_service.get_payload())
 
 
 @status_overview_bp.route("/bst/change-flags/api")
@@ -42,7 +49,7 @@ def bst_change_flags_api():
 
 @status_overview_bp.route("/statusOverview/api/overview/refresh", methods=["POST"])
 def status_overview_refresh_api():
-    return jsonify(service.get_board_payload(sync_alerts=True))
+    return jsonify(overview_service.get_payload(sync_alerts=True))
 
 
 @status_overview_bp.route("/statusOverview/api/alerts/<int:alert_id>")

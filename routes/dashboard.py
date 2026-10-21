@@ -68,6 +68,9 @@ VALID_REEL_CLASSIFICATIONS = {
 }
 REFERENCE_CHECK_IMAGE_SIZE = (128, 128)
 REFERENCE_CHECK_CHANGE_THRESHOLD = 80.0
+DEFECT_SIZE_SMALL_MAX = 5.0
+DEFECT_SIZE_MEDIUM_MAX = 15.0
+DEFECT_ANALYSIS_MIN_REEL_FEET = 5000.0
 REFERENCE_CHECK_MINOR_THRESHOLD = 90.0
 REFERENCE_CHECK_STRONG_THRESHOLD = 95.0
 REFERENCE_CHECK_ALIGNMENT_MAX_SHIFT_RATIO = 0.18
@@ -1476,6 +1479,239 @@ def dashboard_rlm_assistant_chat():
     if not isinstance(payload, dict):
         return jsonify({"error": "Invalid JSON payload."}), 400
     return jsonify(build_assistant_chat_response(payload, service=rlm_assistant_service))
+
+
+def _defect_longest_side(coords: Any) -> Optional[float]:
+    xs: List[float] = []
+    ys: List[float] = []
+    for entry in coords if isinstance(coords, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        xs.extend(value for value in (_to_float(item) for item in (entry.get("x") or [])) if value is not None)
+        ys.extend(value for value in (_to_float(item) for item in (entry.get("y") or [])) if value is not None)
+    if not xs or not ys:
+        return None
+    return max(max(xs) - min(xs), max(ys) - min(ys))
+
+
+def _defect_size_bucket(value: Optional[float]) -> str:
+    if value is None:
+        return "Unknown"
+    if value < DEFECT_SIZE_SMALL_MAX:
+        return "Small"
+    if value <= DEFECT_SIZE_MEDIUM_MAX:
+        return "Medium"
+    return "Large"
+
+
+def _defect_position_bucket(position: Optional[float], reel: Reel) -> str:
+    start = _to_float(reel.reel_start)
+    end = _to_float(reel.reel_end)
+    if position is None or start is None or end is None or end <= start:
+        return "Unknown"
+    ratio = (position - start) / (end - start)
+    if ratio < (1.0 / 3.0):
+        return "Start"
+    if ratio < (2.0 / 3.0):
+        return "Middle"
+    return "End"
+
+
+def _defect_length_coverage(reel: Reel, defects: Iterable[Any]) -> Dict[str, Optional[float]]:
+    """Estimate longitudinal coverage using one repeat-length interval per defect position."""
+    reel_start = _to_float(reel.reel_start)
+    reel_end = _to_float(reel.reel_end)
+    format_length = _to_float(reel.format_length)
+    if reel_start is None or reel_end is None or reel_start == reel_end or not format_length:
+        return {"feet": None, "percent": None}
+
+    lower = min(reel_start, reel_end)
+    upper = max(reel_start, reel_end)
+    intervals: List[Tuple[float, float]] = []
+    defect_rows = list(defects or [])
+    for defect in defect_rows:
+        position = _to_float(getattr(defect, "format_position", None))
+        if position is None:
+            continue
+        start = max(position - 0.5, lower)
+        end = min(position + 0.5, upper)
+        if end > start:
+            intervals.append((start, end))
+
+    if not intervals:
+        if defect_rows:
+            return {"feet": None, "percent": None}
+        return {"feet": 0.0, "percent": 0.0}
+
+    intervals.sort()
+    merged: List[List[float]] = []
+    for start, end in intervals:
+        if not merged or start > merged[-1][1]:
+            merged.append([start, end])
+        else:
+            merged[-1][1] = max(merged[-1][1], end)
+
+    covered_units = sum(end - start for start, end in merged)
+    total_units = upper - lower
+    covered_feet = (covered_units * format_length) / MM_PER_FOOT
+    return {
+        "feet": round(covered_feet, 2),
+        "percent": round((covered_units / total_units) * 100.0, 3) if total_units else None,
+    }
+
+
+@dashboard_bp.route("/api/defect-details-summary")
+def api_defect_details_summary():
+    with SessionLocal() as session:
+        try:
+            filters = _validate_filters(session)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        filters["reel_ids"] = []
+        filters["reel_codes"] = []
+        filters["reel_code"] = None
+        all_reels = (
+            _apply_reel_filters(session.query(Reel), filters, include_reel_code=False)
+            .options(selectinload(Reel.sensitivity_sets))
+            .order_by(Reel.time_start.asc(), Reel.reel_id.asc())
+            .all()
+        )
+        reels = [
+            reel
+            for reel in all_reels
+            if _reel_length_feet(reel) >= DEFECT_ANALYSIS_MIN_REEL_FEET
+        ]
+        reel_ids = [reel.reel_id for reel in reels]
+        defects = (
+            session.query(
+                Defect.reel_id,
+                Defect.class_name,
+                Defect.magnitude_value,
+                Defect.severity_value,
+                Defect.format_position,
+                Defect.coords_json,
+            )
+            .filter(Defect.reel_id.in_(reel_ids))
+            .all()
+            if reel_ids
+            else []
+        )
+
+        reel_by_id = {reel.reel_id: reel for reel in reels}
+        defects_by_reel: Dict[int, List[Any]] = defaultdict(list)
+        class_counts: Counter = Counter()
+        size_counts: Counter = Counter()
+        position_counts: Counter = Counter()
+        size_by_class: Dict[str, List[float]] = defaultdict(list)
+        class_display_names: Dict[str, str] = {}
+        for defect in defects:
+            defects_by_reel[int(defect.reel_id)].append(defect)
+            class_name = str(defect.class_name or "Unclassified").strip() or "Unclassified"
+            class_key = _canonical_sensitivity_class(class_name) or _normalize_defect_label(class_name) or class_name.lower()
+            magnitude = _to_float(defect.magnitude_value)
+            footprint_size = _defect_longest_side(defect.coords_json)
+            defect_size = footprint_size if footprint_size is not None else magnitude
+            position = _to_float(defect.format_position)
+            class_counts[class_name] += 1
+            class_display_names.setdefault(class_key, class_name)
+            size_counts[_defect_size_bucket(footprint_size if footprint_size is not None else magnitude)] += 1
+            position_counts[_defect_position_bucket(position, reel_by_id[int(defect.reel_id)])] += 1
+            if defect_size is not None:
+                size_by_class[class_key].append(defect_size)
+
+        total_defects = len(defects)
+        reel_count = len(reels)
+        avg_defects = (total_defects / reel_count) if reel_count else 0.0
+        total_feet = sum(_reel_length_feet(reel) for reel in reels)
+        feet_per_defect = (total_feet / total_defects) if total_defects else None
+        reel_rows = []
+        for reel in reels:
+            reel_defects = defects_by_reel.get(int(reel.reel_id), [])
+            local_classes = Counter(str(row.class_name or "Unclassified") for row in reel_defects)
+            local_positions = Counter(_defect_position_bucket(_to_float(row.format_position), reel) for row in reel_defects)
+            feet = _reel_length_feet(reel)
+            defect_coverage = _defect_length_coverage(reel, reel_defects)
+            reel_rows.append({
+                "reelId": reel.reel_id,
+                "reelCode": reel.reel_code or str(reel.reel_id),
+                "jobName": reel.job_name,
+                "orderNumber": reel.order_number,
+                "feet": round(feet, 2),
+                "defectCount": len(reel_defects),
+                "defectsPer1000Ft": round((len(reel_defects) / feet) * 1000.0, 2) if feet else None,
+                "defectLengthFeet": defect_coverage["feet"],
+                "defectLengthPct": defect_coverage["percent"],
+                "commonClass": local_classes.most_common(1)[0][0] if local_classes else "--",
+                "commonPosition": local_positions.most_common(1)[0][0] if local_positions else "--",
+                "aboveAverage": len(reel_defects) > avg_defects,
+            })
+
+        latest_threshold_by_class: Dict[str, float] = {}
+        observed_thresholds_by_class: Dict[str, Set[float]] = defaultdict(set)
+        for reel in reversed(reels):
+            for setting in reel.sensitivity_sets or []:
+                if setting.set_name != "sId_mmx_stand":
+                    continue
+                class_key = (
+                    _canonical_sensitivity_class(setting.defect_class)
+                    or _normalize_defect_label(setting.defect_class)
+                    or str(setting.defect_class or "").strip().lower()
+                )
+                threshold = _to_float(setting.threshold_value)
+                if not class_key or threshold is None:
+                    continue
+                observed_thresholds_by_class[class_key].add(threshold)
+                latest_threshold_by_class.setdefault(class_key, threshold)
+
+        counts_by_key: Counter = Counter()
+        for class_name, count in class_counts.items():
+            class_key = _canonical_sensitivity_class(class_name) or _normalize_defect_label(class_name) or class_name.lower()
+            counts_by_key[class_key] += count
+
+        sensitivity = []
+        for class_key, count in counts_by_key.most_common():
+            values = size_by_class.get(class_key, [])
+            starting_threshold = latest_threshold_by_class.get(class_key)
+            range_high = max([starting_threshold or 0.0, *values], default=0.0)
+            sensitivity.append({
+                "className": class_display_names.get(class_key, class_key),
+                "total": count,
+                "startingThreshold": round(starting_threshold, 4) if starting_threshold is not None else None,
+                "sliderMin": 0.0,
+                "sliderMax": round(max(range_high * 1.25, 1.0), 4),
+                "sliderStep": 0.01,
+                "defectSizes": sorted(round(value, 4) for value in values),
+                "observedThresholds": sorted(round(value, 4) for value in observed_thresholds_by_class.get(class_key, set())),
+                "missingSize": count - len(values),
+            })
+
+        return jsonify({
+            "criteria": {
+                "smallMaxExclusive": DEFECT_SIZE_SMALL_MAX,
+                "mediumMaxInclusive": DEFECT_SIZE_MEDIUM_MAX,
+                "sizeBasis": "Longest footprint side; magnitude fallback when coordinates are unavailable",
+                "positionRule": "Reel range divided into equal thirds",
+                "minimumReelFeet": DEFECT_ANALYSIS_MIN_REEL_FEET,
+                "excludedShortReels": len(all_reels) - len(reels),
+            },
+            "summary": {
+                "reelCount": reel_count,
+                "totalDefects": total_defects,
+                "averageDefectsPerReel": round(avg_defects, 2),
+                "mostCommonClass": class_counts.most_common(1)[0][0] if class_counts else "--",
+                "reelsAboveAverage": sum(1 for row in reel_rows if row["aboveAverage"]),
+                "mostCommonSize": size_counts.most_common(1)[0][0] if size_counts else "--",
+                "averageFeetPerDefect": round(feet_per_defect, 2) if feet_per_defect is not None else None,
+                "mostCommonPosition": position_counts.most_common(1)[0][0] if position_counts else "--",
+                "totalFeet": round(total_feet, 2),
+            },
+            "sizeCounts": dict(size_counts),
+            "positionCounts": dict(position_counts),
+            "classCounts": dict(class_counts),
+            "reels": reel_rows,
+            "sensitivity": sensitivity,
+        })
 
 
 @dashboard_bp.route("/api/filters")
@@ -6966,8 +7202,14 @@ def api_job_explorer():
             .all()
         )
         total = base_query.count()
+        selected_reel_ids = filters.get("reel_ids") or []
+        page_reels_query = base_query.order_by(
+            case((Reel.reel_id.in_(selected_reel_ids), 0), else_=1),
+            Reel.time_start.desc(),
+            Reel.reel_id.desc(),
+        )
         page_reels = (
-            base_query.order_by(Reel.time_start.desc())
+            page_reels_query
             .offset((page - 1) * page_size)
             .limit(page_size)
             .all()
