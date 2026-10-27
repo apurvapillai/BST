@@ -33,7 +33,7 @@ Defect_CAPTURE = {
 MACHINES = [
     {"name": "Press 5", "host": "192.168.20.61", **DEFAULT_MACHINE_CAPTURE},
     {"name": "Press 6", "host": "192.168.20.64", **DEFAULT_MACHINE_CAPTURE},
-    {"name": "Press 7", "host": "192.168.20.62", **DEFAULT_MACHINE_CAPTURE},
+    {"name": "Press 7", "host": "192.168.20.62", **Defect_CAPTURE},
     {"name": "Press 8", "host": "192.168.20.63", **DEFAULT_MACHINE_CAPTURE},
     {"name": "Press 9", "host": "192.168.20.78", **DEFAULT_MACHINE_CAPTURE},
     {

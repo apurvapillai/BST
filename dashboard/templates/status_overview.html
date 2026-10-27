@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BST Overview</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/status_overview.css', v='bst-overview-20261021aj') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/status_overview.css', v='bst-overview-20261023q') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/bst_change_flags.css', v='bst-overview-20261019i') }}">
 </head>
 <body>
@@ -23,21 +23,27 @@
             <span>Loading status board...</span>
           </div>
           <div id="statusLastRefresh" class="status-last-refresh" aria-live="polite">Last refresh --</div>
-          <section class="status-banner" aria-label="Active critical alerts">
-            <div class="status-banner-frame">
-              <div id="statusBannerTrack" class="status-banner-track"></div>
+          <section class="so-topbar" aria-label="Board status">
+            <div id="statusBoardCounts" class="so-counts" aria-live="polite"></div>
+            <div class="so-legend" aria-label="Legend">
+              <span><i class="so-lseg ok"></i>On, no changes</span>
+              <span><i class="so-lseg chg"></i>Changed</span>
+              <span><i class="so-lseg off"></i>BST or RLM off</span>
+              <span><i class="so-lseg mr"></i>Make ready</span>
+              <span><i class="so-lseg sp"></i>Splice / sample</span>
+              <i class="so-vsep" aria-hidden="true"></i>
+              <span><i class="so-badge static">M</i>Mask</span>
+              <span><i class="so-badge static">R</i>Ref image</span>
+              <span><i class="so-badge static">T</i>RLM tolerance</span>
             </div>
-            <button id="statusHistoryOpenBtn" type="button" class="status-history-btn" hidden>Alert History</button>
+            <button id="overviewSettingsOpenBtn" type="button" class="so-btn so-icon-btn" title="Overview settings" aria-label="Overview settings">
+              <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+            <button id="statusHistoryOpenBtn" type="button" class="so-btn" hidden>Alert History</button>
           </section>
 
-          <section class="status-board-section">
-            <div class="status-overview-legend" aria-label="Reel status legend">
-              <span><i class="status-overview-legend__dot healthy"></i>Running</span>
-              <span><i class="status-overview-legend__dot alert"></i>Off</span>
-              <span><i class="status-overview-legend__dot make-ready"></i>Make Ready / Splice / Sample</span>
-              <span><i class="status-overview-legend__warning">!</i>Reference image, mask, or RLM tolerance changed</span>
-            </div>
-            <div id="statusCardGrid" class="status-card-grid"></div>
+          <section class="so-board">
+            <div id="statusCardGrid" class="so-grid"></div>
           </section>
 
           <dialog id="statusAlertModal" class="modal status-alert-modal">
@@ -98,6 +104,58 @@
             </div>
           </dialog>
 
+          <dialog id="overviewSettingsModal" class="so-set-modal" aria-labelledby="overviewSettingsTitle">
+            <form id="overviewSettingsForm" class="so-set-form" novalidate>
+              <div class="so-set-head">
+                <div>
+                  <h3 id="overviewSettingsTitle">Overview settings</h3>
+                  <p>Applies to everyone using the BST Overview</p>
+                </div>
+                <button type="button" class="so-set-x" data-close="overviewSettingsModal" aria-label="Close settings">&times;</button>
+              </div>
+              <div class="so-set-body">
+                <div class="so-set-group">Reels</div>
+                <label class="so-set-field">
+                  <span class="so-set-copy">
+                    <strong>Make-ready reel length</strong>
+                    <em>Shorter reels are make ready / splice / sample: light blue, left out of the job numbers, no "off" alert. The first reel of a new job is always make ready.</em>
+                  </span>
+                  <span class="so-set-input"><span class="so-set-pre">under</span><input name="makeReadyFeet" type="number" min="0" step="500" inputmode="numeric" required> ft</span>
+                </label>
+                <div class="so-set-group">Change badges</div>
+                <label class="so-set-field">
+                  <span class="so-set-copy">
+                    <strong><i class="so-badge static">R</i>Reference image changes</strong>
+                    <em>Show R when the reel has at least this many reference image changes.</em>
+                  </span>
+                  <span class="so-set-input"><span class="so-set-pre">&ge;</span><input name="refChangesMin" type="number" min="1" step="1" inputmode="numeric" required> changes</span>
+                </label>
+                <label class="so-set-field">
+                  <span class="so-set-copy">
+                    <strong><i class="so-badge static">M</i>Mask changes</strong>
+                    <em>Show M when at least this many masks were applied or removed during the reel.</em>
+                  </span>
+                  <span class="so-set-input"><span class="so-set-pre">&ge;</span><input name="maskChangesMin" type="number" min="1" step="1" inputmode="numeric" required> masks</span>
+                </label>
+                <label class="so-set-field">
+                  <span class="so-set-copy">
+                    <strong><i class="so-badge static">T</i>RLM nominal length change</strong>
+                    <em>Show T only when the nominal length moved by more than this. 0 = any change.</em>
+                  </span>
+                  <span class="so-set-input"><span class="so-set-pre">&gt;</span><input name="rlmNominalDeltaMm" type="number" min="0" step="0.1" inputmode="decimal" required> mm</span>
+                </label>
+                <p id="overviewSettingsMessage" class="so-set-message" aria-live="polite"></p>
+              </div>
+              <div class="so-set-foot">
+                <button type="button" id="overviewSettingsResetBtn" class="so-btn">Reset to defaults</button>
+                <span>
+                  <button type="button" class="so-btn" data-close="overviewSettingsModal">Cancel</button>
+                  <button type="submit" id="overviewSettingsSaveBtn" class="so-btn so-btn-primary">Save</button>
+                </span>
+              </div>
+            </form>
+          </dialog>
+
           <dialog class="change-ref-modal" id="overviewChangeModal">
             <div class="change-ref-modal__header">
               <div>
@@ -116,6 +174,6 @@
 
   <script src="{{ url_for('static', filename='js/nav.js', v='bst-overview-20261019i') }}"></script>
   <script src="{{ url_for('static', filename='js/dashboard_utils.js', v='bst-overview-20261019i') }}"></script>
-  <script src="{{ url_for('static', filename='js/status_overview.js', v='bst-overview-20261021aj') }}"></script>
+  <script src="{{ url_for('static', filename='js/status_overview.js', v='bst-overview-20261026a') }}"></script>
 </body>
 </html>

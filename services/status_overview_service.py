@@ -1,19 +1,22 @@
 from __future__ import annotations
 
+import logging
+import threading
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import case, func, inspect, or_, text
+from sqlalchemy import Column, DateTime, MetaData, String, Table, case, func, inspect, or_, select, text
 from sqlalchemy.orm import selectinload
 
 from db.connection import SessionLocal, engine
 from db.models import Defect, Machine, Reel, StatusOverviewAlert
 from db.rlm_connection import RLMSessionLocal
 from db.rlm_live_models import RLMLiveMachineThreshold
-from db.rlm_models import RLMMachine, RLMReel
+from db.rlm_models import RLMMachine, RLMMonitoring, RLMReel
 from services.dashboard_live_service import DashboardLiveService
 from services.rlm_live_service import RLMLiveService
 from services.rlm_reel_footage import compute_feet_per_range_unit
@@ -23,10 +26,132 @@ RLM_LOOKBACK_DAYS = 7
 RECENT_REEL_LIMIT = 12
 DEFAULT_ACTOR = "unknown"
 CENTRAL_TZ = ZoneInfo("America/Chicago")
-MAKE_READY_FEET_LIMIT = 5000.0
-BST_OFF_ACTIVE_PCT = 0.0
+# Reels shorter than this are make ready / splice / sample, everywhere on the
+# overview (reel colours, card state, alerts and the Current job numbers).
+MAKE_READY_FEET_LIMIT = 4000.0
+BST_OFF_ACTIVE_PCT = 40.0  # BST inspection under this % counts as BST off
 RLM_OFF_MONITORING_POINTS = 0
 STALE_NO_REEL_MINUTES = 60
+
+# ---- Overview settings (gear button on the BST Overview page) ---------------
+# Stored in the BST database (table bst_overview_settings, created on first
+# use) so every user and every app worker sees the same values. Each worker
+# re-reads them at most every OVERVIEW_SETTINGS_RELOAD_SECONDS.
+OVERVIEW_SETTING_DEFAULTS: Dict[str, float] = {
+    "makeReadyFeet": MAKE_READY_FEET_LIMIT,  # reels shorter than this are make ready
+    "refChangesMin": 1,                      # R badge: at least this many reference changes
+    "maskChangesMin": 1,                     # M badge: at least this many masks applied/removed
+    "rlmNominalDeltaMm": 0.0,                # T badge: nominal moved by more than this (mm)
+}
+# (minimum, maximum, type) for each setting.
+OVERVIEW_SETTING_LIMITS: Dict[str, Tuple[float, float, type]] = {
+    "makeReadyFeet": (0.0, 100000.0, float),
+    "refChangesMin": (1, 1000, int),
+    "maskChangesMin": (1, 1000, int),
+    "rlmNominalDeltaMm": (0.0, 1000.0, float),
+}
+OVERVIEW_SETTING_LABELS = {
+    "makeReadyFeet": "Make-ready reel length",
+    "refChangesMin": "Reference image changes",
+    "maskChangesMin": "Mask changes",
+    "rlmNominalDeltaMm": "RLM nominal length change",
+}
+OVERVIEW_SETTINGS_RELOAD_SECONDS = 5
+_SETTINGS_TABLE = Table(
+    "bst_overview_settings",  # own name: an older status_overview_settings table already exists
+    MetaData(),
+    Column("setting_key", String(64), primary_key=True),
+    Column("setting_value", String(64), nullable=False),
+    Column("updated_by", String(128)),
+    Column("updated_at", DateTime),
+)
+_SETTINGS_LOCK = threading.Lock()
+_SETTINGS_STATE: Dict[str, Any] = {"values": dict(OVERVIEW_SETTING_DEFAULTS), "loadedAt": 0.0, "tableReady": False}
+_settings_logger = logging.getLogger(__name__)
+
+
+def _clean_setting(key: str, raw: Any) -> Any:
+    low, high, kind = OVERVIEW_SETTING_LIMITS[key]
+    value = kind(float(raw))
+    if value < low or value > high:
+        raise ValueError(f"{OVERVIEW_SETTING_LABELS.get(key, key)} must be between {low:g} and {high:g}")
+    return value
+
+
+def _ensure_settings_table() -> None:
+    if not _SETTINGS_STATE["tableReady"]:
+        _SETTINGS_TABLE.create(bind=engine, checkfirst=True)
+        _SETTINGS_STATE["tableReady"] = True
+
+
+def get_overview_settings(force: bool = False) -> Dict[str, Any]:
+    """Current overview settings (defaults for anything not saved yet)."""
+    now = time.monotonic()
+    if not force and now - _SETTINGS_STATE["loadedAt"] < OVERVIEW_SETTINGS_RELOAD_SECONDS:
+        return dict(_SETTINGS_STATE["values"])
+    with _SETTINGS_LOCK:
+        values = dict(OVERVIEW_SETTING_DEFAULTS)
+        try:
+            _ensure_settings_table()
+            with engine.connect() as connection:
+                for key, raw in connection.execute(
+                    select(_SETTINGS_TABLE.c.setting_key, _SETTINGS_TABLE.c.setting_value)
+                ):
+                    if key in OVERVIEW_SETTING_LIMITS:
+                        try:
+                            values[key] = _clean_setting(key, raw)
+                        except (TypeError, ValueError):
+                            pass
+            _SETTINGS_STATE["values"] = values
+        except Exception:
+            # Keep the last known values if the database is unavailable.
+            _settings_logger.exception("Could not load overview settings")
+        _SETTINGS_STATE["loadedAt"] = time.monotonic()
+        return dict(_SETTINGS_STATE["values"])
+
+
+def save_overview_settings(updates: Dict[str, Any], actor: str) -> Dict[str, Any]:
+    """Validate and store the given settings. Raises ValueError on bad input."""
+    clean = {}
+    for key, raw in (updates or {}).items():
+        if key not in OVERVIEW_SETTING_LIMITS:
+            continue
+        try:
+            clean[key] = _clean_setting(key, raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(str(exc) if "between" in str(exc) else f"{OVERVIEW_SETTING_LABELS.get(key, key)} must be a number") from exc
+    if not clean:
+        raise ValueError("No settings to save")
+    with _SETTINGS_LOCK:
+        _ensure_settings_table()
+        stamp = datetime.now()
+        with engine.begin() as connection:
+            existing = {
+                row[0]
+                for row in connection.execute(
+                    select(_SETTINGS_TABLE.c.setting_key).where(_SETTINGS_TABLE.c.setting_key.in_(list(clean)))
+                )
+            }
+            for key, value in clean.items():
+                fields = {"setting_value": str(value), "updated_by": (actor or DEFAULT_ACTOR)[:128], "updated_at": stamp}
+                if key in existing:
+                    connection.execute(
+                        _SETTINGS_TABLE.update().where(_SETTINGS_TABLE.c.setting_key == key).values(**fields)
+                    )
+                else:
+                    connection.execute(_SETTINGS_TABLE.insert().values(setting_key=key, **fields))
+        _SETTINGS_STATE["loadedAt"] = 0.0
+    return get_overview_settings(force=True)
+
+
+def overview_setting(key: str) -> Any:
+    return get_overview_settings().get(key, OVERVIEW_SETTING_DEFAULTS[key])
+
+
+def make_ready_feet() -> float:
+    """Reels shorter than this are make ready / splice / sample (setting)."""
+    return float(overview_setting("makeReadyFeet"))
+
 CLOSED_ALERT_STATES = ("ACKNOWLEDGED", "MAKE_READY", "RESOLVED")
 REOPEN_SUPPRESSING_ALERT_STATES = {"ACKNOWLEDGED", "MAKE_READY"}
 
@@ -229,17 +354,37 @@ class StatusOverviewService:
             machine_ids = [machine.machine_id for machine in machines]
             recent_reels = self.rlm_live_service._recent_reels_by_machine(session, machine_ids, lookback_start)
             threshold_map = self._build_rlm_thresholds(machines)
+            recent_rows_by_machine = {
+                machine_id: sorted(
+                    rows,
+                    key=lambda row: row.production_end_dt or row.production_start_dt or datetime.min.replace(tzinfo=timezone.utc),
+                    reverse=True,
+                )[:RECENT_REEL_LIMIT]
+                for machine_id, rows in recent_reels.items()
+            }
             reel_ids = [row.reel_db_id for rows in recent_reels.values() for row in rows]
             health_map = self.rlm_live_service._compute_reel_health_batch(session, reel_ids, threshold_map)
+            status_reel_ids = [
+                row.reel_db_id
+                for rows in recent_rows_by_machine.values()
+                for row in rows
+            ]
+            monitoring_activity_by_reel: Dict[int, Optional[datetime]] = {}
+            if status_reel_ids:
+                monitoring_rows = (
+                    session.query(
+                        RLMMonitoring.reel_db_id,
+                        func.max(RLMMonitoring.monitoring_ts),
+                    )
+                    .filter(RLMMonitoring.reel_db_id.in_(status_reel_ids))
+                    .group_by(RLMMonitoring.reel_db_id)
+                    .all()
+                )
+                monitoring_activity_by_reel = dict(monitoring_rows)
 
         out: Dict[str, Dict[str, Any]] = {}
         for machine in machines:
-            rows = recent_reels.get(machine.machine_id, [])
-            rows = sorted(
-                rows,
-                key=lambda row: row.production_end_dt or row.production_start_dt or datetime.min.replace(tzinfo=timezone.utc),
-                reverse=True,
-            )[:RECENT_REEL_LIMIT]
+            rows = recent_rows_by_machine.get(machine.machine_id, [])
             qualifying = []
             latest_health = None
             for index, row in enumerate(rows):
@@ -254,9 +399,14 @@ class StatusOverviewService:
                 if latest_reel and (latest_reel.production_end_dt or latest_reel.production_start_dt)
                 else None
             )
+            status_activity = self._rlm_status_activity(
+                [monitoring_activity_by_reel.get(row.reel_db_id) for row in rows],
+                latest_activity,
+            )
             out[(machine.machine_name or "").strip().lower()] = {
                 "machineName": machine.machine_name,
                 "latestActivity": latest_activity,
+                "statusActivity": status_activity,
                 "latestReel": latest_reel,
                 "latestHealth": latest_health,
                 "recentRows": rows,
@@ -347,9 +497,9 @@ class StatusOverviewService:
                 display_feet = rlm_feet
             else:
                 display_feet = bst_feet if bst_feet is not None else rlm_feet
-            meets_min_feet = bool(display_feet is not None and display_feet >= MAKE_READY_FEET_LIMIT)
-            auto_make_ready = bool(display_feet is not None and display_feet < MAKE_READY_FEET_LIMIT)
-            bst_display_off = bool(bst_is_current and bst_metrics and bst_metrics["activePct"] <= BST_OFF_ACTIVE_PCT)
+            meets_min_feet = bool(display_feet is not None and display_feet >= make_ready_feet())
+            auto_make_ready = bool(display_feet is not None and display_feet < make_ready_feet())
+            bst_display_off = bool(bst_is_current and bst_metrics and bst_metrics["activePct"] < BST_OFF_ACTIVE_PCT)
             bst_off = bool(bst_display_off and meets_min_feet)
 
             rlm_points = int(rlm_health.monitoring_points_total or 0) if rlm_health else 0
@@ -367,20 +517,23 @@ class StatusOverviewService:
             bst_streak = self._count_bst_off_streak(bst.get("reliableRows", []), machine_name)
             rlm_streak = self._count_rlm_off_streak(rlm.get("qualifyingRows", []))
 
-            minutes_since_activity = self._minutes_since(last_activity, now)
+            status_activity = display_context.get("statusActivity") or last_activity
+            minutes_since_status_activity = self._minutes_since(status_activity, now)
 
             title = ""
             source = ""
             state = "healthy"
             is_alertable = False
-            if auto_make_ready:
-                title = "Make Ready / Splice / Sample"
-                source = "SYSTEM"
-                state = "make-ready"
-            elif minutes_since_activity is None or minutes_since_activity >= STALE_NO_REEL_MINUTES:
+            # No new reel for a while = press stopped, even when its last reel
+            # was short (that used to show as make ready).
+            if minutes_since_status_activity is None or minutes_since_status_activity >= STALE_NO_REEL_MINUTES:
                 title = "Standby"
                 source = "SYSTEM"
                 state = "stale"
+            elif auto_make_ready:
+                title = "Make Ready / Splice / Sample"
+                source = "SYSTEM"
+                state = "make-ready"
             elif bst_off and rlm_off:
                 title = "BST AND RLM OFF"
                 source = "BOTH"
@@ -396,6 +549,16 @@ class StatusOverviewService:
                 source = "RLM"
                 state = "critical"
                 is_alertable = True
+
+            # The card follows the newest reel in the strip: if that reel is make
+            # ready (short, or marked Make Ready / Splice / Sample), so is the card.
+            if state not in {"make-ready", "stale"} and self._newest_history_is_make_ready(
+                history_by_machine.get(key, []), display_reel
+            ):
+                title = "Make Ready / Splice / Sample"
+                source = "SYSTEM"
+                state = "make-ready"
+                is_alertable = False
 
             alert_reel = self._alert_reel_info(source, bst_reel, rlm_reel, display_reel)
             current_reels[key] = {
@@ -498,6 +661,7 @@ class StatusOverviewService:
                 ) or "",
                 "reelContext": self._reel_explorer_context(bst_reel if bst_is_current else None),
                 "lastUpdated": self._iso_local(last_activity),
+                "statusSince": self._iso_local(status_activity),
                 "statusText": status_text,
                 "state": state,
                 "workflowBadge": workflow_badge,
@@ -529,6 +693,20 @@ class StatusOverviewService:
                     }
                 )
         return cards, candidates, current_reels
+
+    def _newest_history_is_make_ready(
+        self,
+        history: List[Dict[str, Any]],
+        display_reel: Dict[str, Optional[str]],
+    ) -> bool:
+        if not history:
+            return False
+        newest = history[0]
+        if "make-ready" not in {newest.get("state"), newest.get("bstState"), newest.get("rlmState")}:
+            return False
+        shown = self._normalize_reel_token(display_reel.get("reelNumber"))
+        newest_reel = self._normalize_reel_token(newest.get("reelNumber"))
+        return not shown or not newest_reel or shown == newest_reel
 
     def _build_bst_box(self, metrics: Optional[Dict[str, float]], is_off: bool) -> Dict[str, Any]:
         if not metrics:
@@ -586,7 +764,7 @@ class StatusOverviewService:
             "thresholds": {
                 "bst_off_active_pct": BST_OFF_ACTIVE_PCT,
                 "rlm_off_monitoring_points": RLM_OFF_MONITORING_POINTS,
-                "make_ready_feet_limit": MAKE_READY_FEET_LIMIT,
+                "make_ready_feet_limit": make_ready_feet(),
                 "stale_no_reel_minutes": STALE_NO_REEL_MINUTES,
             },
             "bst": {},
@@ -605,7 +783,7 @@ class StatusOverviewService:
                 "consecutiveOffReels": bst_streak,
             }
             if bst_off:
-                if bst_prev and bst_prev["metrics"]["activePct"] > BST_OFF_ACTIVE_PCT:
+                if bst_prev and bst_prev["metrics"]["activePct"] >= BST_OFF_ACTIVE_PCT:
                     lines.append("changed from previous reel good to current reel bad")
                 lines.append(f"BST OFF for {bst_streak} consecutive reels")
                 lines.append(f"current reel id {bst_reel.reel_id or 'Unknown'}")
@@ -1112,8 +1290,92 @@ class StatusOverviewService:
                         )
                     )
             rows = self._ensure_display_reel_history_first(rows, bst, rlm, display_reel, alert_rows_for_machine, machine_name)
+            self._mark_job_start_rows(rows)
+            self._mark_red_between_make_ready_rows(rows)
+            self._mark_splice_rows(rows)
             histories[key] = rows
         return histories
+
+    def _mark_red_between_make_ready_rows(self, rows: List[Dict[str, Any]]) -> None:
+        """A single red (BST or RLM off) reel with make-ready reels right before
+        and after it, in the same job, is part of the make ready: it becomes
+        make ready too. Rows are newest first."""
+        def is_mr(row: Dict[str, Any]) -> bool:
+            return "make-ready" in {row.get("state"), row.get("bstState"), row.get("rlmState")}
+
+        for index in range(1, len(rows) - 1):
+            row, newer, older = rows[index], rows[index - 1], rows[index + 1]
+            if row.get("state") != "alert" or is_mr(row):
+                continue
+            if not (is_mr(newer) and is_mr(older)):
+                continue
+            if newer.get("jobStart") or self._rows_differ_in_job(row, newer) or self._rows_differ_in_job(row, older):
+                continue
+            row["state"] = "make-ready"
+            row["bstState"] = "make-ready"
+            row["rlmState"] = "make-ready"
+            row["mrReason"] = "betweenMR"
+
+    def _mark_splice_rows(self, rows: List[Dict[str, Any]]) -> None:
+        """Make-ready reels (newest first) that sit between two good production
+        reels of the same job are splice / sample: row["isSplice"] = True.
+        A run of make-ready reels counts together. The newest reel and reels at
+        the old end of the list stay make ready (their neighbour is unknown)."""
+        def is_mr(row: Dict[str, Any]) -> bool:
+            return "make-ready" in {row.get("state"), row.get("bstState"), row.get("rlmState")}
+
+        def is_good(row: Dict[str, Any]) -> bool:
+            return not is_mr(row) and row.get("state") == "healthy"
+
+
+        index = 0
+        while index < len(rows):
+            if not is_mr(rows[index]):
+                index += 1
+                continue
+            end = index
+            while end + 1 < len(rows) and is_mr(rows[end + 1]):
+                end += 1
+            newer = rows[index - 1] if index > 0 else None
+            older = rows[end + 1] if end + 1 < len(rows) else None
+            run = rows[index : end + 1]
+            if (
+                newer is not None
+                and older is not None
+                and is_good(newer)
+                and is_good(older)
+                # Never the first reel of a job; everything in the same job.
+                and not any(row.get("jobStart") for row in run)
+                and not self._rows_differ_in_job(older, newer)
+                and not any(self._rows_differ_in_job(row, newer) for row in run)
+            ):
+                for pos in range(index, end + 1):
+                    rows[pos]["isSplice"] = True
+            index = end + 1
+
+    def _rows_differ_in_job(self, row: Dict[str, Any], other: Dict[str, Any]) -> bool:
+        """True when the two reels have a different order number or job name
+        (a new job can keep the same order number)."""
+        for field in ("orderNumber", "jobNumber"):
+            mine = self._normalize_reel_token(row.get(field))
+            theirs = self._normalize_reel_token(other.get(field))
+            if mine and theirs and mine != theirs:
+                return True
+        return False
+
+    def _mark_job_start_rows(self, rows: List[Dict[str, Any]]) -> None:
+        """First reel of a new job (order number or job name differs from the
+        reel before it) is always make ready, whatever its length or inspection,
+        and never splice / sample. Rows are newest first; the oldest row is left
+        alone because its previous reel is unknown."""
+        for index in range(len(rows) - 1):
+            row, older = rows[index], rows[index + 1]
+            if self._rows_differ_in_job(row, older):
+                row["jobStart"] = True
+                row["mrReason"] = "jobStart"
+                row["state"] = "make-ready"
+                row["bstState"] = "make-ready"
+                row["rlmState"] = "make-ready"
 
     def _ensure_display_reel_history_first(
         self,
@@ -1269,6 +1531,16 @@ class StatusOverviewService:
     ) -> Dict[str, Any]:
         synced = self._latest_synced_reel_context(bst, rlm)
         if synced:
+            latest_source_activity = self._latest_activity(
+                bst.get("latestActivity"),
+                rlm.get("latestActivity"),
+            )
+            if latest_source_activity:
+                synced["lastActivity"] = latest_source_activity
+            synced["statusActivity"] = self._latest_activity(
+                latest_source_activity,
+                rlm.get("statusActivity"),
+            )
             return synced
 
         rlm_latest = {"reel": rlm.get("latestReel"), "health": rlm.get("latestHealth")} if rlm.get("latestReel") else None
@@ -1302,8 +1574,20 @@ class StatusOverviewService:
             "rlmHealth": rlm_health,
             "rlmActivity": rlm_activity,
             "lastActivity": last_activity,
+            "statusActivity": self._latest_activity(
+                last_activity,
+                rlm.get("statusActivity"),
+            ),
             "displayReel": display_reel,
         }
+
+    def _rlm_status_activity(
+        self,
+        monitoring_timestamps: Iterable[Optional[datetime]],
+        fallback: Optional[datetime],
+    ) -> Optional[datetime]:
+        latest_monitoring = self._latest_dt(*monitoring_timestamps)
+        return self._latest_dt(latest_monitoring, fallback)
 
     def _latest_synced_reel_context(self, bst: Dict[str, Any], rlm: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         rlm_reels = rlm.get("recentRows") or []
@@ -1360,15 +1644,34 @@ class StatusOverviewService:
             self._bst_local_time(bst_reel.time_end if bst_reel else None),
             self._central_time(rlm_reel.production_end_dt if rlm_reel else None),
         )
+        # When the reel started (BST start, else RLM production start). Used for
+        # "off since" on the card alert.
+        time_start = (
+            self._bst_local_time(bst_reel.time_start)
+            if bst_reel is not None and bst_reel.time_start
+            else self._central_time(rlm_reel.production_start_dt if rlm_reel else None)
+        )
         reel_number = (bst_reel.reel_code if bst_reel and bst_reel.reel_code else None) or (rlm_reel.reel_id if rlm_reel else None)
         job_number = (bst_reel.job_name if bst_reel else None) or (rlm_reel.job_name if rlm_reel else None)
-        matching_alerts = self._matching_reel_alert_rows(alert_rows, machine_name, reel_number, bst_reel.reel_id if bst_reel else None)
+        order_number = (bst_reel.order_number if bst_reel else None) or (rlm_reel.order_number if rlm_reel else None)
+        matching_alerts = self._matching_reel_alert_rows(
+            alert_rows,
+            machine_name,
+            reel_number,
+            bst_reel.reel_id if bst_reel else None,
+            job_values=(
+                order_number,
+                job_number,
+                rlm_reel.order_number if rlm_reel else None,
+                rlm_reel.job_name if rlm_reel else None,
+            ),
+        )
         bst_state = self._reel_history_channel_state(
             matching_alerts,
             "BST",
             feet,
             has_data=bst_pct is not None,
-            is_off=bool(bst_pct is not None and bst_pct <= BST_OFF_ACTIVE_PCT),
+            is_off=bool(bst_pct is not None and bst_pct < BST_OFF_ACTIVE_PCT),
         )
         rlm_state = self._reel_history_channel_state(
             matching_alerts,
@@ -1378,12 +1681,24 @@ class StatusOverviewService:
             is_off=bool(rlm_points is not None and rlm_points <= RLM_OFF_MONITORING_POINTS),
         )
         history_state = self._combined_reel_history_state(bst_state, rlm_state)
+        # Why a reel is make ready, so the page can re-colour reels by itself right
+        # after the make-ready length changes: short / marked (Alert History).
+        if feet is not None and feet < make_ready_feet():
+            mr_reason = "short"
+        elif any(row.alert_state == "MAKE_READY" for row in matching_alerts):
+            mr_reason = "marked"
+        else:
+            mr_reason = None
         return {
+            "mrReason": mr_reason,
+            "bstOffRaw": bool(bst_pct is not None and bst_pct < BST_OFF_ACTIVE_PCT),
+            "rlmOffRaw": bool(rlm_points is not None and rlm_points <= RLM_OFF_MONITORING_POINTS),
             "label": "Current" if index == 0 else f"Prior {index}",
             "reelNumber": reel_number,
             "bstReelId": bst_reel.reel_id if bst_reel else None,
             "reelContext": self._reel_explorer_context(bst_reel),
             "jobNumber": job_number,
+            "orderNumber": str(order_number) if order_number is not None else None,
             "feet": self._format_feet(feet),
             "feetValue": round(feet, 2) if feet is not None else None,
             "bstPct": f"{bst_pct:.1f}%" if bst_pct is not None else "--",
@@ -1396,6 +1711,7 @@ class StatusOverviewService:
             ),
             "lastUpdated": self._iso_local(last_updated),
             "timeEnd": self._iso_local(time_end),
+            "timeStart": self._iso_local(time_start),
             "state": history_state,
             "bstState": bst_state,
             "rlmState": rlm_state,
@@ -1419,15 +1735,27 @@ class StatusOverviewService:
         machine_name: Optional[str],
         reel_number: Optional[Any],
         reel_id: Optional[int],
+        job_values: Tuple[Any, ...] = (),
     ) -> List[StatusOverviewAlert]:
+        """Alerts that belong to this exact reel. Reel numbers repeat in every
+        job (each job starts at r1), so:
+          - when both the alert and the reel have a reel id, the ids must match;
+          - otherwise the reel number must match AND the alert's job/order must
+            be this reel's job/order (when the alert has one)."""
         matching = []
         reel_key = self._alert_reel_key(machine_name, reel_number, None)
+        jobs = {self._normalize_reel_token(value) for value in job_values if value not in (None, "")}
         for row in alert_rows:
-            if reel_id is not None and row.reel_id is not None and int(row.reel_id) == int(reel_id):
-                matching.append(row)
+            if reel_id is not None and row.reel_id is not None:
+                if int(row.reel_id) == int(reel_id):
+                    matching.append(row)
                 continue
-            if reel_key and self._alert_reel_key_from_row(row) == reel_key:
-                matching.append(row)
+            if not reel_key or self._alert_reel_key_from_row(row) != reel_key:
+                continue
+            row_job = self._normalize_reel_token(row.job_number)
+            if row_job and jobs and row_job not in jobs:
+                continue
+            matching.append(row)
         return matching
 
     def _reel_history_channel_state(
@@ -1441,7 +1769,7 @@ class StatusOverviewService:
     ) -> str:
         if not has_data:
             return "neutral"
-        if feet is not None and feet < MAKE_READY_FEET_LIMIT:
+        if feet is not None and feet < make_ready_feet():
             return "make-ready"
         if any(row.alert_state == "MAKE_READY" for row in matching_alerts):
             return "make-ready"
@@ -1459,33 +1787,76 @@ class StatusOverviewService:
         return str(value or "").strip().lower()
 
     def _bst_reel_metrics(self, reel: Reel) -> Dict[str, float]:
-        phase_seconds = defaultdict(float)
-        self._accumulate_bst_phase_seconds(phase_seconds, reel.inspection_phases or [])
-        mix = self.dashboard_live_service._inspection_mix(phase_seconds)
+        # BST inspection % for one reel.
+        # Measured by footage (format counter), clipped to the reel's own
+        # range [reel_start, reel_end]. The XML status protocol often starts
+        # with a state that began before this reel (e.g. "inactive" from the
+        # previous reel or while the press was stopped); counting that by
+        # wall-clock time made the % far too low. Falls back to time, clipped
+        # to [time_start, time_end], when format values are missing.
+        phase_amount = defaultdict(float)
+        basis = "format"
+        self._accumulate_bst_phase_footage(phase_amount, reel)
+        if not phase_amount:
+            basis = "time"
+            self._accumulate_bst_phase_seconds(phase_amount, reel.inspection_phases or [], reel.time_start, reel.time_end)
+        mix = self.dashboard_live_service._inspection_mix(phase_amount)
         return {
             "activePct": mix["active_pct"],
             "inactivePct": mix["inactive_pct"],
             "learnPct": mix["learn_pct"],
-            "activeSeconds": phase_seconds.get("active", 0.0),
-            "inactiveSeconds": phase_seconds.get("inactive", 0.0),
-            "learnSeconds": phase_seconds.get("learn", 0.0),
-            "phaseSeconds": sum(phase_seconds.values()),
+            "activeSeconds": phase_amount.get("active", 0.0),
+            "inactiveSeconds": phase_amount.get("inactive", 0.0),
+            "learnSeconds": phase_amount.get("learn", 0.0),
+            # Kept under the old name: only checked for "> 0" (has data).
+            "phaseSeconds": sum(phase_amount.values()),
+            "basis": basis,
         }
 
-    def _accumulate_bst_phase_seconds(self, accumulator: Dict[str, float], phases: Iterable[Any]) -> None:
+    def _accumulate_bst_phase_footage(self, accumulator: Dict[str, float], reel: Reel) -> None:
+        reel_lo = self._to_float(reel.reel_start)
+        reel_hi = self._to_float(reel.reel_end)
+        if reel_lo is not None and reel_hi is not None and reel_hi < reel_lo:
+            reel_lo, reel_hi = reel_hi, reel_lo
+        for phase in reel.inspection_phases or []:
+            start = self._to_float(phase.start_format)
+            end = self._to_float(phase.end_format)
+            if start is None or end is None:
+                continue
+            lo, hi = min(start, end), max(start, end)
+            if reel_lo is not None:
+                lo = max(lo, reel_lo)
+            if reel_hi is not None:
+                hi = min(hi, reel_hi)
+            if hi <= lo:
+                continue
+            key = (phase.phase or "unknown").strip().lower()
+            accumulator[key] += hi - lo
+
+    def _accumulate_bst_phase_seconds(
+        self,
+        accumulator: Dict[str, float],
+        phases: Iterable[Any],
+        window_start: Optional[datetime] = None,
+        window_end: Optional[datetime] = None,
+    ) -> None:
         for phase in phases:
             if not phase.start_time or not phase.end_time or phase.end_time <= phase.start_time:
                 continue
+            start = max(phase.start_time, window_start) if window_start else phase.start_time
+            end = min(phase.end_time, window_end) if window_end else phase.end_time
+            if end <= start:
+                continue
             key = (phase.phase or "unknown").strip().lower()
-            accumulator[key] += max((phase.end_time - phase.start_time).total_seconds(), 0.0)
+            accumulator[key] += (end - start).total_seconds()
 
     def _count_bst_off_streak(self, rows: List[Dict[str, Any]], machine_name: Optional[str]) -> int:
         count = 0
         for row in rows:
             feet = self._feet_from_bst_reel(row.get("reel"), machine_name)
-            if feet is not None and feet < MAKE_READY_FEET_LIMIT:
+            if feet is not None and feet < make_ready_feet():
                 break
-            if row["metrics"]["activePct"] <= BST_OFF_ACTIVE_PCT:
+            if row["metrics"]["activePct"] < BST_OFF_ACTIVE_PCT:
                 count += 1
             else:
                 break
@@ -1496,7 +1867,7 @@ class StatusOverviewService:
         for row in rows:
             health = row["health"]
             feet = float(health.feet_total or 0.0)
-            if feet < MAKE_READY_FEET_LIMIT:
+            if feet < make_ready_feet():
                 break
             if int(health.monitoring_points_total or 0) <= RLM_OFF_MONITORING_POINTS:
                 count += 1
